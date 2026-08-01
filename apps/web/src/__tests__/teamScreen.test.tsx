@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TeamScreen } from "../features/team/TeamScreen";
 
@@ -27,7 +28,7 @@ describe("TeamScreen", () => {
   });
 
   it("lists users with roles, status, and ADO binding", async () => {
-    render(<TeamScreen />);
+    renderScreen(<TeamScreen />);
     expect(await screen.findByTestId("user-sahil")).toBeInTheDocument();
     expect(screen.getByTestId("user-ali.r")).toBeInTheDocument();
     expect(screen.getByText("bound")).toBeInTheDocument();
@@ -35,7 +36,7 @@ describe("TeamScreen", () => {
   });
 
   it("add teammate shows the one-time code", async () => {
-    render(<TeamScreen />);
+    renderScreen(<TeamScreen />);
     await screen.findByTestId("user-sahil");
     fireEvent.change(screen.getByPlaceholderText("username"), { target: { value: "new.dev" } });
     fireEvent.click(screen.getByRole("button", { name: "add" }));
@@ -48,7 +49,7 @@ describe("TeamScreen", () => {
   });
 
   it("regenerate shows a fresh code; deactivate reloads", async () => {
-    render(<TeamScreen />);
+    renderScreen(<TeamScreen />);
     const regenButtons = await screen.findAllByRole("button", { name: "new code" });
     fireEvent.click(regenButtons[1]);
     await waitFor(() => expect(post).toHaveBeenCalledWith("/team/users/2/regenerate-code", {}));
@@ -59,7 +60,7 @@ describe("TeamScreen", () => {
   });
 
   it("renders metadata-only stats", async () => {
-    render(<TeamScreen />);
+    renderScreen(<TeamScreen />);
     const row = await screen.findByTestId("team-stats");
     expect(row).toHaveTextContent("runs: 12");
     expect(row).toHaveTextContent("$3.50");
@@ -68,7 +69,7 @@ describe("TeamScreen", () => {
 
   it("shows an admin-only note when the server denies", async () => {
     get.mockRejectedValue(new Error("403 forbidden: admin only"));
-    render(<TeamScreen />);
+    renderScreen(<TeamScreen />);
     expect(await screen.findByTestId("team-denied")).toBeInTheDocument();
   });
 });

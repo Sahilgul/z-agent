@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReposScreen } from "../features/repos/ReposScreen";
 
@@ -25,7 +26,7 @@ describe("ReposScreen", () => {
   });
 
   it("lists repos with status and HEAD", async () => {
-    render(<ReposScreen />);
+    renderScreen(<ReposScreen />);
     expect(await screen.findByTestId("repo-ServerApp")).toBeInTheDocument();
     expect(screen.getByText("ready")).toBeInTheDocument();
     expect(screen.getByText("HEAD abc1234")).toBeInTheDocument();
@@ -33,7 +34,7 @@ describe("ReposScreen", () => {
   });
 
   it("fetches remote branches before registering — never free-typed", async () => {
-    render(<ReposScreen />);
+    renderScreen(<ReposScreen />);
     await screen.findByTestId("repo-ServerApp");
     fireEvent.click(screen.getByRole("button", { name: "+ add repo" }));
     fireEvent.change(screen.getByPlaceholderText("e.g. Billing-Engine"), {
@@ -59,7 +60,7 @@ describe("ReposScreen", () => {
         ? Promise.reject(new Error("repository not found or access denied"))
         : Promise.resolve(repos)
     );
-    render(<ReposScreen />);
+    renderScreen(<ReposScreen />);
     await screen.findByTestId("repo-ServerApp");
     fireEvent.click(screen.getByRole("button", { name: "+ add repo" }));
     fireEvent.change(screen.getByPlaceholderText("e.g. Billing-Engine"), {

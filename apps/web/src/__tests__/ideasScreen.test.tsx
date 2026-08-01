@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IdeasScreen } from "../features/ideas/IdeasScreen";
 
@@ -36,13 +37,13 @@ beforeEach(() => {
 
 describe("IdeasScreen", () => {
   it("lists threads with voice counts", async () => {
-    render(<IdeasScreen />);
+    renderScreen(<IdeasScreen />);
     expect(await screen.findByText("Ship the fleet graph to lanes?")).toBeInTheDocument();
     expect(screen.getByText(/2 voices · open/)).toBeInTheDocument();
   });
 
   it("thread view pins the Lead synthesis above raw voices", async () => {
-    render(<IdeasScreen />);
+    renderScreen(<IdeasScreen />);
     fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
     expect(await screen.findByText(/lead synthesis · all voices/)).toBeInTheDocument();
     expect(screen.getByText(/worth doing/)).toBeInTheDocument();
@@ -50,28 +51,28 @@ describe("IdeasScreen", () => {
   });
 
   it("Counsel's comment wears the 11th-member badge and voice", async () => {
-    render(<IdeasScreen />);
+    renderScreen(<IdeasScreen />);
     fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
     expect(await screen.findByText("counsel · 11th member")).toBeInTheDocument();
     expect(screen.getByText("wait for the flywheel")).toBeInTheDocument();
   });
 
   it("ask counsel posts to the endpoint", async () => {
-    render(<IdeasScreen />);
+    renderScreen(<IdeasScreen />);
     fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
     fireEvent.click(await screen.findByRole("button", { name: "ask counsel" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/ideas/5/ask-counsel", {}));
   });
 
   it("promote to plan posts and disables after promotion", async () => {
-    render(<IdeasScreen />);
+    renderScreen(<IdeasScreen />);
     fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
     fireEvent.click(await screen.findByRole("button", { name: "promote to plan" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/ideas/5/promote", {}));
   });
 
   it("comment composer refuses empty voices", async () => {
-    render(<IdeasScreen />);
+    renderScreen(<IdeasScreen />);
     fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
     const btn = await screen.findByRole("button", { name: "comment" });
     expect(btn).toBeDisabled();

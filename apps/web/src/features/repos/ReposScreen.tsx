@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHead } from "@/components/ui/page-head";
+import { StatusLamp } from "@/components/ui/status-lamp";
+import { Tag } from "@/components/ui/tag";
 import { api } from "../../lib/api";
+import { qk } from "../../lib/queryKeys";
 
 export interface Repo {
   id: number;
@@ -12,17 +19,16 @@ export interface Repo {
 
 const SETTLED = ["ready", "ready-no-map", "error"];
 
-function StatusTag({ status }: { status: string }) {
-  const cls =
-    status === "ready" ? "st-completed" :
-    status === "error" ? "st-failed" : "st-running";
-  return <span className={`tag mono ${cls}`}>{status}</span>;
+function repoTone(status: string): "ok" | "warn" | "danger" | "info" {
+  if (status === "ready" || status === "ready-no-map") return "ok";
+  if (status === "error") return "danger";
+  return "info";
 }
 
-/** The repo rack (plan §1b): registry as data, onboarding state machine on
- *  each card. Add-Repo fetches branches from the remote — never free-typed. */
+/** The repo rack: registry as data, onboarding state machine on each card.
+ *  Add-Repo fetches branches from the remote — never free-typed. */
 export function ReposScreen() {
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [branches, setBranches] = useState<string[] | null>(null);
@@ -31,27 +37,20 @@ export function ReposScreen() {
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<Repo[]>("/repos");
-      setRepos(data);
-      return data;
-    } catch {
-      return [] as Repo[];
-    }
-  }, []);
+  const { data: repos = [], refetch } = useQuery({
+    queryKey: qk.repos,
+    queryFn: () => api.get<Repo[]>("/repos").catch(() => [] as Repo[]),
+  });
 
+  // poll only while any repo is mid-onboarding
   useEffect(() => {
-    void load().then((data) => {
-      // poll only while any repo is mid-onboarding
-      if (data.some((r) => !SETTLED.includes(r.status))) {
-        timer.current = setInterval(() => void load(), 4000);
-      }
-    });
+    if (repos.some((r) => !SETTLED.includes(r.status))) {
+      timer.current = setInterval(() => void qc.invalidateQueries({ queryKey: qk.repos }), 4000);
+    }
     return () => {
       if (timer.current) clearInterval(timer.current);
     };
-  }, [load]);
+  }, [repos, qc]);
 
   async function fetchBranches() {
     setBusy(true);
@@ -78,7 +77,7 @@ export function ReposScreen() {
       setAdding(false);
       setName("");
       setBranches(null);
-      await load();
+      await refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : "add failed");
     } finally {
@@ -87,72 +86,100 @@ export function ReposScreen() {
   }
 
   return (
-    <section className="repos-screen">
-      <header className="screen-head">
-        <h1>repo rack</h1>
-        <p className="muted">{repos.length} repos registered — the fleet the agents can touch</p>
-        <button className="btn btn-mono" onClick={() => setAdding(!adding)}>
-          {adding ? "cancel" : "+ add repo"}
-        </button>
-      </header>
+    <div className="mx-auto h-full max-w-[860px] overflow-y-auto px-s8 py-s6">
+      <PageHead
+        title="repo rack"
+        sub={`${repos.length} repos registered — the fleet the agents can touch`}
+        actions={
+          <Button variant="secondary" size="sm" className="font-mono" onClick={() => setAdding(!adding)}>
+            {adding ? "cancel" : "+ add repo"}
+          </Button>
+        }
+      />
 
       {adding && (
-        <div className="card add-form" data-testid="add-repo-form">
-          <div className="field">
-            <label className="mono">ADO repo name</label>
-            <input
+        <div
+          data-testid="add-repo-form"
+          className="mb-s4 flex max-w-[480px] flex-col gap-s3 rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card animate-enter"
+        >
+          <div>
+            <label htmlFor="repo-name" className="mb-s1 block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              ADO repo name
+            </label>
+            <Input
+              id="repo-name"
               value={name}
-              onChange={(e) => { setName(e.target.value); setBranches(null); }}
+              onChange={(e) => {
+                setName(e.target.value);
+                setBranches(null);
+              }}
               placeholder="e.g. Billing-Engine"
             />
           </div>
-          <button
-            className="btn btn-mono btn-ghost"
-            disabled={!name.trim() || busy}
-            onClick={() => void fetchBranches()}
-          >
-            {busy && !branches ? "checking remote…" : "fetch branches"}
-          </button>
+          <div>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="font-mono"
+              disabled={!name.trim() || busy}
+              onClick={() => void fetchBranches()}
+            >
+              {busy && !branches ? "checking remote…" : "fetch branches"}
+            </Button>
+          </div>
           {branches && (
             <>
-              <div className="field">
-                <label className="mono">integration branch (from remote)</label>
-                <select value={branch} onChange={(e) => setBranch(e.target.value)}>
-                  {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+              <div>
+                <label htmlFor="repo-branch" className="mb-s1 block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                  integration branch (from remote)
+                </label>
+                <select
+                  id="repo-branch"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  className="h-8 w-full rounded-md border border-hairline bg-bg-raised px-s3 text-[13px] text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack"
+                >
+                  {branches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <button className="btn btn-primary" disabled={!branch || busy} onClick={() => void addRepo()}>
-                register &amp; onboard
-              </button>
+              <div>
+                <Button size="sm" className="font-mono" disabled={!branch || busy} onClick={() => void addRepo()}>
+                  register &amp; onboard
+                </Button>
+              </div>
             </>
           )}
-          {error && <p className="err">{error}</p>}
+          {error && <p className="text-[12.5px] text-danger-bright">{error}</p>}
         </div>
       )}
 
-      <div className="card-grid">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-s3">
         {repos.map((repo) => (
-          <article className="card" key={repo.id} data-testid={`repo-${repo.name}`}>
-            <header className="card-head">
-              <strong className="card-title mono">{repo.name}</strong>
-              <StatusTag status={repo.status} />
+          <article
+            key={repo.id}
+            data-testid={`repo-${repo.name}`}
+            className="rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card"
+          >
+            <header className="mb-s2 flex items-center justify-between gap-s2">
+              <strong className="font-mono text-[13px] font-semibold text-ink-primary">{repo.name}</strong>
+              <StatusLamp tone={repoTone(repo.status)} label={repo.status} />
             </header>
-            <div className="card-body">
-              <span className="chip mono">{repo.integration_branch}</span>
-              {repo.status_detail && <p className="muted">{repo.status_detail}</p>}
-              <p className="faint mono">
+            <div className="flex flex-col gap-s2">
+              <div>
+                <Tag>{repo.integration_branch}</Tag>
+              </div>
+              {repo.status_detail && <p className="text-[12px] leading-[1.5] text-ink-secondary">{repo.status_detail}</p>}
+              <p className="font-mono text-[10.5px] text-ink-faint">
                 {repo.last_fetch_head ? `HEAD ${repo.last_fetch_head.slice(0, 7)}` : "not fetched yet"}
               </p>
             </div>
           </article>
         ))}
       </div>
-      <style>{`
-        .repos-screen { max-width: 860px; margin: 0 auto; padding: 22px 18px; overflow-y: auto; height: 100%; }
-        .add-form { padding: 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; max-width: 480px; }
-        .field label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); margin-bottom: 5px; }
-        .field input, .field select { width: 100%; background: var(--jack); border: 1px solid var(--hairline); border-radius: var(--radius); color: var(--ink-primary); padding: 8px 10px; font-size: 13px; }
-      `}</style>
-    </section>
+    </div>
   );
 }

@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { agentWorking } from "../lib/runMachine";
 import type { RunStage } from "../types";
 
-/** Action card (§1a): the run's legal moves as buttons. Irreversible intents
- *  are two-tap (tap once -> confirm state, tap again -> fire). While the agent
+/** Action card: the run's legal moves as buttons. Irreversible intents are
+ *  two-tap (tap once -> confirm state, tap again -> fire). While the agent
  *  works, only Stop + the typed nudge box stay live. */
 const IRREVERSIBLE = new Set(["merge_pr", "abandon_run", "kill_replace"]);
 
@@ -46,21 +47,23 @@ export function ActionCard({
   };
 
   return (
-    <div className="action-card" data-testid="action-card">
+    <div data-testid="action-card" className="flex flex-wrap gap-s2 border-t border-hairline px-s4 py-2.5">
       {actions.map((a) => {
         const isStop = a === "stop_run";
         const hiddenWhileWorking = busy && !isStop;
         if (hiddenWhileWorking) return null;
         const danger = IRREVERSIBLE.has(a) || a === "abandon_run";
         return (
-          <button
+          <Button
             key={a}
-            className={`btn btn-mono ${danger ? "btn-danger" : isStop ? "btn-ghost" : "btn-primary"}`}
+            variant={danger ? "destructive" : isStop ? "outline" : "default"}
+            size="sm"
             onClick={() => fire(a)}
             data-intent={a}
+            className="font-mono"
           >
             {confirming === a ? `${LABELS[a] ?? a} — confirm?` : LABELS[a] ?? a}
-          </button>
+          </Button>
         );
       })}
     </div>

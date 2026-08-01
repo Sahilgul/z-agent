@@ -1,18 +1,26 @@
-import type { Lane } from "../types";
+import { cn } from "@/lib/utils";
+import type { Lane, LaneStatus } from "../types";
 
-/** Lane module (Patch Bay): LED status, persona, scope, step/cost jack meta.
- *  Click opens the lane's trace overlay — subagent tiles are buttons, not rows
- *  in a list. critical = on the swarm's critical path (brighter bezel). */
-const LED: Record<string, string> = {
+/** Lane river row (monitor signature): each lane is a streaming channel —
+ *  identity on the left, the river track in the middle with an activity
+ *  pulse flowing left→right while it works, step/cost readout on the right.
+ *  critical = on the swarm's critical path; stale = heartbeat lost. */
+const LED: Record<LaneStatus, string> = {
   running: "led",
-  queued: "led blue",
-  idle: "led blue",
-  completed: "led off",
-  interrupted: "led off",
-  stopped: "led red",
-  failed: "led red",
-  replaced: "led off",
-  pinned: "led blue",
+  queued: "led led--blue",
+  idle: "led led--blue",
+  completed: "led led--off",
+  interrupted: "led led--off",
+  stopped: "led led--red",
+  failed: "led led--red",
+  replaced: "led led--off",
+  pinned: "led led--blue",
+};
+
+const PULSE: Partial<Record<LaneStatus, string>> = {
+  running: "text-green-bright",
+  queued: "text-blue-bright",
+  idle: "text-blue-bright",
 };
 
 export function LaneTile({
@@ -26,39 +34,33 @@ export function LaneTile({
   stale?: boolean;
   onOpen: (laneId: string) => void;
 }) {
+  const pulse = PULSE[lane.status];
   return (
     <button
-      className={`lane-tile ${critical ? "critical" : ""} ${stale ? "stale" : ""}`}
+      type="button"
       onClick={() => onOpen(lane.id)}
       data-testid={`lane-tile-${lane.id}`}
+      title={`open ${lane.persona} trace`}
+      className={cn(
+        "grid w-full grid-cols-[minmax(120px,180px)_1fr_auto] items-center gap-s4 rounded-md border border-hairline bg-bg-module px-s4 py-2.5 text-left transition-colors duration-fast hover:border-blue-bright",
+        critical && "border-green shadow-[0_0_10px_color-mix(in_srgb,var(--color-green)_30%,transparent)]",
+        stale && "border-warn",
+      )}
     >
-      <div className="lt-top">
-        <span className="lt-name mono">{lane.persona}</span>
-        <span className={LED[lane.status] ?? "led off"} aria-label={lane.status} />
-      </div>
-      <div className="lt-scope">{lane.repo_scope ?? "read-only"}</div>
-      <div className="lt-jack mono">
+      <span className="flex min-w-0 items-center gap-s2">
+        <span className={LED[lane.status] ?? "led led--off"} aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="block truncate font-mono text-[12px] font-semibold text-ink-primary">{lane.persona}</span>
+          <span className="block truncate text-[11px] text-ink-faint">{lane.repo_scope ?? "read-only"}</span>
+        </span>
+      </span>
+      <span className="river-track" aria-hidden="true">
+        {pulse && <span className={cn("river-pulse", pulse)} />}
+      </span>
+      <span className="flex items-center gap-s3 font-mono text-[10.5px] tabular text-ink-faint">
         <span>{lane.steps} steps</span>
         <span>${lane.cost_usd.toFixed(2)}</span>
-      </div>
-      <style>{`
-        .lane-tile {
-          background: var(--bg-module); border: 1px solid var(--hairline);
-          border-radius: var(--radius); padding: 12px 14px; text-align: left;
-          color: var(--ink-primary); cursor: pointer; width: 100%;
-          transition: border-color .15s ease, transform .15s ease;
-        }
-        .lane-tile:hover { border-color: var(--blue-bright); transform: translateY(-1px); }
-        .lane-tile.critical { border-color: var(--green); box-shadow: 0 0 10px color-mix(in srgb, var(--green) 30%, transparent); }
-        .lane-tile.stale { border-color: var(--danger); }
-        .lt-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-        .lt-name { font-weight: 600; font-size: 12.5px; }
-        .lt-scope { font-size: 12px; color: var(--ink-secondary); min-height: 18px; margin-bottom: 10px; }
-        .lt-jack {
-          display: flex; justify-content: space-between; border-top: 1px dashed var(--hairline);
-          padding-top: 8px; font-size: 10px; color: var(--ink-faint);
-        }
-      `}</style>
+      </span>
     </button>
   );
 }

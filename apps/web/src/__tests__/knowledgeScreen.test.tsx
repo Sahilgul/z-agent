@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeScreen } from "../features/knowledge/KnowledgeScreen";
 
@@ -29,7 +30,7 @@ beforeEach(() => {
 
 describe("KnowledgeScreen", () => {
   it("renders the draft inbox with the PHI checkpoint marker", async () => {
-    render(<KnowledgeScreen />);
+    renderScreen(<KnowledgeScreen />);
     // the draft shows in BOTH the inbox and the corpus (own drafts are yours)
     expect((await screen.findAllByText("always branch from develop")).length).toBe(2);
     expect(screen.getByText(/PHI checkpoint/)).toBeInTheDocument();
@@ -37,13 +38,13 @@ describe("KnowledgeScreen", () => {
   });
 
   it("renders the shared corpus with scope and status", async () => {
-    render(<KnowledgeScreen />);
+    renderScreen(<KnowledgeScreen />);
     expect(await screen.findByText("audit log in same transaction")).toBeInTheDocument();
     expect(screen.getByText(/global · approved/)).toBeInTheDocument();
   });
 
   it("approve posts the chosen scope and reloads", async () => {
-    render(<KnowledgeScreen />);
+    renderScreen(<KnowledgeScreen />);
     const approveBtn = await screen.findByRole("button", { name: "approve" });
     fireEvent.click(approveBtn);
     await waitFor(() =>
@@ -51,7 +52,7 @@ describe("KnowledgeScreen", () => {
   });
 
   it("repo scope reveals the repo name input", async () => {
-    render(<KnowledgeScreen />);
+    renderScreen(<KnowledgeScreen />);
     await screen.findAllByText("always branch from develop");
     fireEvent.change(screen.getByDisplayValue("share: global"), { target: { value: "repo" } });
     expect(screen.getByPlaceholderText("repo name")).toBeInTheDocument();

@@ -1,10 +1,11 @@
+import { Button } from "@/components/ui/button";
 import { criticalLaneIds, isStaleLane } from "../../lib/runMachine";
 import { LaneTile } from "../../components/LaneTile";
 import type { Lane } from "../../types";
 
-/** Swarm view (§4 Phase 3): the Lead module plus one tile per lane, critical
- *  path bezel, and watchdog cards for stale-heartbeat lanes (nudge / let it
- *  run — the lane keeps working on dismissal). */
+/** Swarm bay (live archetype): the Lead module plus the lane river — one
+ *  streaming channel per worker — and watchdog cards for stale-heartbeat
+ *  lanes (nudge / let it run; the lane keeps working on dismissal). */
 export function SwarmView({
   lanes,
   now,
@@ -26,53 +27,40 @@ export function SwarmView({
   if (lanes.length === 0) return null;
 
   return (
-    <section className="swarm" aria-label="swarm lanes" data-testid="swarm-view">
+    <section
+      aria-label="swarm lanes"
+      data-testid="swarm-view"
+      className="m-s3 rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card"
+    >
       {lead && (
-        <div className="swarm-lead mono">
-          <span className="led blue" />
+        <div className="mb-s3 inline-flex items-center gap-s2 rounded-md border border-blue bg-bg-module px-s3 py-2 font-mono text-[11.5px] font-semibold text-ink-primary">
+          <span className="led led--blue" aria-hidden="true" />
           lead — orchestrates, never edits
         </div>
       )}
-      <div className="swarm-grid">
+      <div className="flex flex-col gap-s2">
         {workers.map((l) => (
-          <LaneTile
-            key={l.id}
-            lane={l}
-            critical={critical.has(l.id)}
-            stale={stale.includes(l)}
-            onOpen={onOpenLane}
-          />
+          <LaneTile key={l.id} lane={l} critical={critical.has(l.id)} stale={stale.includes(l)} onOpen={onOpenLane} />
         ))}
       </div>
       {stale.map((l) => (
-        <div key={`wd-${l.id}`} className="watchdog-card" data-testid={`watchdog-${l.id}`}>
-          <span className="led red" />
-          <span className="wd-text">
-            <b className="mono">{l.persona}</b> heartbeat stale — no signal in 3+ min
+        <div
+          key={`wd-${l.id}`}
+          data-testid={`watchdog-${l.id}`}
+          className="mt-s3 flex items-center gap-s3 rounded-md border border-danger px-s3 py-2"
+        >
+          <span className="led led--red" aria-hidden="true" />
+          <span className="flex-1 text-[12.5px] text-ink-secondary">
+            <b className="font-mono text-ink-primary">{l.persona}</b> heartbeat stale — no signal in 3+ min
           </span>
-          <button className="btn btn-mono btn-ghost" onClick={() => onNudge(l.id)}>
+          <Button variant="outline" size="sm" onClick={() => onNudge(l.id)}>
             nudge
-          </button>
-          <button className="btn btn-mono btn-ghost" onClick={() => onLetItRun(l.id)}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onLetItRun(l.id)}>
             let it run
-          </button>
+          </Button>
         </div>
       ))}
-      <style>{`
-        .swarm { border: 1px solid var(--hairline); border-radius: 8px; background: var(--bg-panel); padding: 14px 16px; margin: 10px 14px; }
-        .swarm-lead {
-          display: inline-flex; align-items: center; gap: 9px;
-          background: var(--bg-module); border: 1px solid var(--blue); border-radius: var(--radius);
-          padding: 8px 14px; font-size: 11.5px; font-weight: 600; margin-bottom: 12px;
-        }
-        .swarm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-        .watchdog-card {
-          display: flex; align-items: center; gap: 10px; margin-top: 12px;
-          border: 1px solid var(--danger); border-radius: var(--radius);
-          padding: 8px 12px; font-size: 12.5px;
-        }
-        .wd-text { flex: 1; color: var(--ink-secondary); }
-      `}</style>
     </section>
   );
 }

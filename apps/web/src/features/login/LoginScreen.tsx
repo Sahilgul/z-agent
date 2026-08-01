@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { useSession } from "../../stores/session";
 
-/** Internal-team gate (§7a): username + PIN, lockout handled server-side. */
+/** Internal-team gate: username + PIN, lockout handled server-side. */
 export function LoginScreen() {
   const login = useSession((s) => s.login);
   const [username, setUsername] = useState("");
@@ -23,102 +24,59 @@ export function LoginScreen() {
   };
 
   return (
-    <div className="login-wrap">
-      <div className="login-stage">
-        <div className="login-brandrow">
-          <span className="login-glyph">⌁</span>
-          <span className="login-word">zagent</span>
-          <span className="led login-led" />
-          <span className="login-knobs">
-            <span className="knob" />
-            <span className="knob" />
-          </span>
+    <div className="flex h-full items-center justify-center">
+      <div className="flex w-[420px] max-w-[calc(100vw-32px)] flex-col">
+        <div className="flex items-center gap-s3">
+          <span className="font-display text-[30px] font-semibold leading-none text-ok-bright">⌁</span>
+          <span className="font-display text-[28px] font-semibold tracking-[0.01em] text-ink-primary">zagent</span>
+          <span className="size-[9px] rounded-full bg-ok-bright shadow-led" aria-hidden="true" />
         </div>
-        <div className="login-tag">the rack runs the fleet</div>
+        <div className="mb-s6 ml-[2px] mt-s2 text-[14px] text-ink-secondary">the rack runs the fleet</div>
 
-        <form className="login-panel" onSubmit={submit}>
-          <div className="login-panel-label mono">sign in — internal team</div>
-          <label className="mono faint">username</label>
+        <form
+          onSubmit={submit}
+          className="flex flex-col gap-s3 rounded-lg border border-hairline bg-bg-panel px-s8 pb-s7 pt-s8 shadow-overlay"
+        >
+          <div className="mb-s2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
+            sign in — internal team
+          </div>
+          <label htmlFor="login-username" className="font-mono text-[10.5px] uppercase tracking-[0.09em] text-ink-faint">
+            username
+          </label>
           <input
+            id="login-username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
             autoFocus
+            className="h-11 rounded-md border border-hairline bg-jack px-s4 font-mono text-[15px] text-ink-primary shadow-[inset_0_2px_6px_rgba(0,0,0,0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack"
           />
-          <label className="mono faint">pin</label>
+          <label htmlFor="login-pin" className="font-mono text-[10.5px] uppercase tracking-[0.09em] text-ink-faint">
+            pin
+          </label>
           <input
+            id="login-pin"
             type="password"
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             autoComplete="current-password"
+            className="h-11 rounded-md border border-hairline bg-jack px-s4 font-mono text-[15px] text-ink-primary shadow-[inset_0_2px_6px_rgba(0,0,0,0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack"
           />
-          {error && <div className="login-error">{error}</div>}
-          <button className="btn btn-primary login-btn" disabled={busy || !username || !pin}>
-            <span className="login-btn-dot" />
+          {error && <div className="text-[13px] text-danger-bright">{error}</div>}
+          <Button type="submit" className="mt-s2 h-11 justify-center font-mono text-[14px]" disabled={busy || !username || !pin}>
+            <span className="size-2 rounded-full bg-current shadow-led" aria-hidden="true" />
             {busy ? "signing in…" : "sign in"}
-          </button>
+          </Button>
         </form>
 
-        <div className="login-hints mono">
+        <div className="mt-s5 flex justify-center gap-s2 font-mono text-[11px] tracking-[0.04em] text-ink-faint">
           <span>username + PIN</span>
-          <span className="login-hint-sep">·</span>
+          <span className="text-hairline">·</span>
           <span>codes shown once</span>
-          <span className="login-hint-sep">·</span>
+          <span className="text-hairline">·</span>
           <span>© Boston Health AI</span>
         </div>
       </div>
-      <style>{`
-        .login-wrap { height: 100%; display: flex; align-items: center; justify-content: center; }
-        .login-stage { width: 460px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; }
-        .login-brandrow { display: flex; align-items: center; gap: 12px; }
-        .login-glyph { font-family: var(--font-display); font-size: 34px; color: var(--green-bright); line-height: 1; }
-        .login-word { font-family: var(--font-display); font-size: 32px; font-weight: 600; letter-spacing: .01em; }
-        .login-led { background: var(--green-bright); color: var(--green-bright); width: 9px; height: 9px; }
-        .login-knobs { margin-left: auto; display: flex; gap: 10px; }
-        .knob {
-          width: 26px; height: 26px; border-radius: 50%;
-          background: radial-gradient(circle at 35% 30%, var(--bg-module), var(--jack) 75%);
-          border: 1px solid var(--hairline);
-          box-shadow: inset 0 2px 4px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.05);
-          position: relative;
-        }
-        .knob::after {
-          content: ""; position: absolute; left: 50%; top: 3px; width: 2px; height: 8px;
-          background: var(--ink-faint); border-radius: 1px; transform: translateX(-50%) rotate(24deg);
-          transform-origin: bottom center;
-        }
-        .login-tag { color: var(--ink-secondary); font-size: 14.5px; margin: 8px 0 26px 2px; }
-        .login-panel {
-          background: var(--bg-panel); border: 1px solid var(--hairline);
-          border-radius: 12px; padding: 34px 36px 30px;
-          display: flex; flex-direction: column; gap: 12px;
-          box-shadow: 0 18px 50px rgba(0,0,0,.35);
-        }
-        .login-panel-label {
-          font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
-          color: var(--ink-faint); margin-bottom: 10px;
-        }
-        .login-panel label { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; }
-        .login-panel input {
-          background: var(--jack); border: 1px solid var(--hairline); border-radius: var(--radius);
-          color: var(--ink-primary); padding: 14px 16px; font-family: var(--font-mono); font-size: 16px;
-          box-shadow: inset 0 3px 8px rgba(0,0,0,.5);
-        }
-        .login-error { color: var(--danger); font-size: 13.5px; }
-        .login-btn {
-          justify-content: center; margin-top: 10px; padding: 14px;
-          font-size: 15.5px; display: flex; align-items: center; gap: 9px;
-        }
-        .login-btn-dot {
-          width: 8px; height: 8px; border-radius: 50%;
-          background: currentColor; box-shadow: 0 0 6px 1px currentColor;
-        }
-        .login-hints {
-          display: flex; justify-content: center; gap: 10px; margin-top: 22px;
-          font-size: 11.5px; color: var(--ink-faint); letter-spacing: .04em;
-        }
-        .login-hint-sep { color: var(--hairline); }
-      `}</style>
     </div>
   );
 }

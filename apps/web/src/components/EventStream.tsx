@@ -1,32 +1,37 @@
 import { useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { foldStream, type StreamItem } from "../lib/runMachine";
 import type { StepEvent } from "../types";
 
-/** The glass box (§1): every agent step rendered the SAME way for lead and
+/** The glass box: every agent step rendered the SAME way for lead and
  *  subagents — kind-colored rail, one-line title, expandable payload. WS
  *  typing deltas fold into live bubbles beneath the stored events. */
-const KIND_TONE: Record<string, string> = {
-  thinking: "var(--ink-faint)",
-  command: "var(--blue-bright)",
-  file_read: "var(--blue)",
-  file_edit: "var(--green-bright)",
-  mcp_call: "var(--blue-bright)",
-  test_run: "var(--green)",
-  message: "var(--green-bright)",
-  notebook: "var(--green)",
-  status: "var(--ink-faint)",
+const KIND_RAIL: Record<string, string> = {
+  thinking: "bg-ink-faint",
+  command: "bg-blue-bright",
+  file_read: "bg-blue",
+  file_edit: "bg-green-bright",
+  mcp_call: "bg-blue-bright",
+  test_run: "bg-green",
+  message: "bg-green-bright",
+  notebook: "bg-green",
+  status: "bg-ink-faint",
 };
 
 function Item({ item }: { item: StreamItem }) {
   return (
-    <div className="es-item" data-kind={item.kind}>
-      <span className="es-rail" style={{ background: KIND_TONE[item.kind] ?? "var(--hairline)" }} />
-      <div className="es-body">
-        <div className="es-title mono">
+    <div className="mb-2.5 flex gap-2.5" data-kind={item.kind}>
+      <span className={cn("w-0.5 flex-none rounded-sm", KIND_RAIL[item.kind] ?? "bg-hairline")} aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <div className="font-mono text-[12px] text-ink-secondary">
           {item.title}
-          {item.ok === false && <span className="es-fail"> failed</span>}
+          {item.ok === false && <span className="text-danger-bright"> failed</span>}
         </div>
-        {item.text && <pre className="es-text">{item.text}</pre>}
+        {item.text && (
+          <pre className="mt-1 max-h-[220px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.5] text-ink-primary">
+            {item.text}
+          </pre>
+        )}
       </div>
     </div>
   );
@@ -51,28 +56,16 @@ export function EventStream({
   }, [items.length]);
 
   return (
-    <div className="event-stream" data-testid="event-stream">
+    <div className="h-full overflow-y-auto px-s4 py-s3 text-[13px]" data-testid="event-stream">
       {items.length === 0 && (
-        <div className="faint mono es-empty">no trace yet — the agent's first step lands here</div>
+        <div className="px-s2 py-s4 font-mono text-[12px] text-ink-faint">
+          no trace yet — the agent's first step lands here
+        </div>
       )}
       {items.map((i) => (
         <Item key={i.key} item={i} />
       ))}
       <div ref={endRef} />
-      <style>{`
-        .event-stream { padding: 12px 14px; overflow-y: auto; height: 100%; font-size: 13px; }
-        .es-empty { padding: 18px 6px; font-size: 12px; }
-        .es-item { display: flex; gap: 10px; margin-bottom: 10px; }
-        .es-rail { width: 2px; border-radius: 2px; flex-shrink: 0; }
-        .es-body { min-width: 0; flex: 1; }
-        .es-title { font-size: 12px; color: var(--ink-secondary); }
-        .es-fail { color: var(--danger); }
-        .es-text {
-          margin: 4px 0 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
-          color: var(--ink-primary); white-space: pre-wrap; word-break: break-word;
-          max-height: 220px; overflow-y: auto;
-        }
-      `}</style>
     </div>
   );
 }

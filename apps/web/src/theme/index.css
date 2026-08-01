@@ -1,0 +1,381 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ==========================================================================
+   zagent console theme — DESIGN.md contract as Tailwind v4 @theme tokens.
+   Locked brand palette; shadcn semantic colors rebound (no zinc defaults).
+   ========================================================================== */
+@theme {
+  /* surfaces + neutrals */
+  --color-bg-base: #202a35;
+  --color-bg-panel: #29343f;
+  --color-bg-module: #323f4b;
+  --color-jack: #0c1013;
+  --color-hairline: #3b4854;
+
+  /* ink */
+  --color-ink-primary: #eaf0ec;
+  --color-ink-secondary: #93a6ac;
+  --color-ink-faint: #7c8b92; /* AA-legal text tint */
+  --color-ink-ghost: #5d6c73; /* decorative only — never text */
+
+  /* accents — mono-green: blue tokens are aliased to the green family */
+  --color-blue: #5fa777;
+  --color-blue-bright: #7fcb9a;
+  --color-green: #5fa777;
+  --color-green-bright: #7fcb9a;
+  --color-danger: #b23a45; /* fills/borders only */
+  --color-danger-bright: #d96771; /* danger text/icons */
+  --color-warn: #d9b36c;
+  --color-ink-on-green: #0c1410;
+
+  /* semantic aliases + AA-legal soft fills for tinted badges/banners */
+  --color-ok: var(--color-green);
+  --color-ok-bright: var(--color-green-bright);
+  --color-warn-bright: #e6c88a;
+  --color-ok-soft: color-mix(in srgb, var(--color-green) 14%, transparent);
+  --color-blue-soft: color-mix(in srgb, var(--color-green) 16%, transparent);
+  --color-warn-soft: color-mix(in srgb, var(--color-warn) 14%, transparent);
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 16%, transparent);
+
+  /* shadcn semantic rebind */
+  --color-background: var(--color-bg-base);
+  --color-foreground: var(--color-ink-primary);
+  --color-card: var(--color-bg-panel);
+  --color-card-foreground: var(--color-ink-primary);
+  --color-popover: var(--color-bg-panel);
+  --color-popover-foreground: var(--color-ink-primary);
+  --color-primary: var(--color-green);
+  --color-primary-foreground: var(--color-ink-on-green);
+  --color-secondary: var(--color-bg-module);
+  --color-secondary-foreground: var(--color-ink-primary);
+  --color-muted: var(--color-bg-module);
+  --color-muted-foreground: var(--color-ink-secondary);
+  --color-accent: var(--color-bg-module);
+  --color-accent-foreground: var(--color-ink-primary);
+  /* destructive is used for text (text-destructive) → must be the AA-legal tint */
+  --color-destructive: var(--color-danger-bright);
+  --color-destructive-foreground: var(--color-ink-primary);
+  --color-border: var(--color-hairline);
+  --color-input: var(--color-hairline);
+  --color-ring: var(--color-blue-bright);
+
+  /* type */
+  --font-ui: "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+  --font-display: "Fraunces", serif;
+
+  /* spacing — 4pt scale + density (p-s4, gap-s2, h-row-md, w-rail…) */
+  --spacing-s1: 4px;
+  --spacing-s2: 8px;
+  --spacing-s3: 12px;
+  --spacing-s4: 16px;
+  --spacing-s5: 20px;
+  --spacing-s6: 24px;
+  --spacing-s8: 32px;
+  --spacing-s10: 40px;
+  --spacing-s12: 48px;
+  --spacing-row-sm: 30px;
+  --spacing-row-md: 36px;
+  --spacing-row-lg: 44px;
+  --spacing-rail: 224px;
+  --spacing-rail-compact: 56px;
+  --spacing-canvas: 1280px;
+
+  /* radius — locked scale replaces defaults */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* shadow */
+  --shadow-card: 0 1px 2px rgb(12 16 19 / 0.35);
+  --shadow-pop: 0 12px 32px rgb(12 16 19 / 0.45);
+  --shadow-overlay: 0 24px 60px rgb(12 16 19 / 0.6);
+
+  /* motion */
+  --ease-soft: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --animate-blink: blink 2.4s ease-in-out infinite;
+  --animate-glow: glow-pulse 2.2s ease-in-out infinite;
+  --animate-enter: enter-rise 220ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  --animate-skeleton: skeleton-sweep 1.4s ease infinite;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-bg-base);
+    color: var(--color-ink-primary);
+    font-family: var(--font-ui);
+    font-size: 13.5px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    /* dot-grid stage — patch-bay instrumentation, base layer only */
+    background-image: radial-gradient(
+      color-mix(in srgb, var(--color-hairline) 40%, transparent) 1px,
+      transparent 1px
+    );
+    background-size: 26px 26px;
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: var(--color-green);
+    color: var(--color-bg-base);
+  }
+
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-blue-bright);
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hairline) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-hairline);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* keyframes live here (always emitted); --animate-* tokens reference them */
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+  @keyframes glow-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 6px 1px currentColor;
+    }
+    50% {
+      box-shadow: 0 0 14px 3px currentColor;
+    }
+  }
+  @keyframes enter-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes skeleton-sweep {
+    0% {
+      background-position: -200px 0;
+    }
+    100% {
+      background-position: calc(100% + 200px) 0;
+    }
+  }
+  @keyframes river-flow {
+    from {
+      left: -8%;
+    }
+    to {
+      left: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* LED — instrumentation, always paired with a text state nearby */
+  .led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--color-green);
+    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--color-green) 70%, transparent);
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  .led--blue {
+    background: var(--color-blue-bright);
+    box-shadow: 0 0 6px 1px var(--color-blue-bright);
+  }
+  .led--warn {
+    background: var(--color-warn);
+    box-shadow: 0 0 6px 1px var(--color-warn);
+    animation: none;
+  }
+  .led--off {
+    background: var(--color-ink-ghost);
+    box-shadow: none;
+    animation: none;
+  }
+  .led--red {
+    background: var(--color-danger-bright);
+    box-shadow: 0 0 6px 1px var(--color-danger-bright);
+    animation: none;
+  }
+
+  /* lane river (monitor signature) — streaming channel per lane */
+  .river-track {
+    position: relative;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--color-hairline);
+  }
+  .river-pulse {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 26px;
+    height: 2px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, currentColor);
+    animation: river-flow 1.8s linear infinite;
+  }
+
+  /* markdown typography (react-markdown output — child selectors, so a
+     component rule is genuinely cleaner than utilities) */
+  .md {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--color-ink-primary);
+  }
+  .md h1,
+  .md h2,
+  .md h3 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    margin: 18px 0 8px;
+  }
+  .md h1 {
+    font-size: 22px;
+  }
+  .md h2 {
+    font-size: 18px;
+  }
+  .md h3 {
+    font-size: 15px;
+  }
+  .md p {
+    margin: 8px 0;
+  }
+  .md code {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--color-jack);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--color-blue-bright);
+  }
+  .md pre {
+    background: var(--color-jack);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    overflow-x: auto;
+  }
+  .md pre code {
+    background: none;
+    padding: 0;
+    color: var(--color-ink-primary);
+  }
+  .md ul,
+  .md ol {
+    padding-left: 22px;
+    margin: 8px 0;
+  }
+  .md li {
+    margin: 4px 0;
+  }
+  .md table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+  }
+  .md th,
+  .md td {
+    border: 1px solid var(--color-hairline);
+    padding: 6px 10px;
+    font-size: 13px;
+    text-align: left;
+  }
+  .md th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-secondary);
+    background: var(--color-bg-module);
+  }
+  .md a {
+    color: var(--color-blue-bright);
+  }
+  .md blockquote {
+    border-left: 2px solid var(--color-green);
+    margin: 10px 0;
+    padding: 2px 14px;
+    color: var(--color-ink-secondary);
+  }
+}
+
+/* named tokens without a v4 namespace */
+@utility duration-fast {
+  transition-duration: 120ms;
+}
+@utility duration-med {
+  transition-duration: 180ms;
+}
+@utility duration-enter {
+  transition-duration: 220ms;
+}
+@utility ease-soft {
+  transition-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+@utility z-sticky {
+  z-index: 10;
+}
+@utility z-rail {
+  z-index: 20;
+}
+@utility z-overlay {
+  z-index: 100;
+}
+@utility z-toast {
+  z-index: 200;
+}
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+@utility text-micro {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}

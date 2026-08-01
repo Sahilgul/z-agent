@@ -1,4 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { MenuIcon } from "lucide-react";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { SideRail } from "./components/SideRail";
 import { useSession } from "./stores/session";
 import { useUi } from "./stores/ui";
 import { LoginScreen } from "./features/login/LoginScreen";
@@ -12,91 +16,106 @@ import { DashboardScreen } from "./features/dashboard/DashboardScreen";
 import { ReposScreen } from "./features/repos/ReposScreen";
 import { TeamScreen } from "./features/team/TeamScreen";
 
-export default function App() {
-  const { me, booted, boot, logout } = useSession();
+const MOBILE_NAV = [
+  { screen: "inbox", label: "inbox" },
+  { screen: "monitor", label: "monitor" },
+  { screen: "approvals", label: "approvals" },
+  { screen: "knowledge", label: "knowledge" },
+  { screen: "ideas", label: "ideas" },
+  { screen: "proposals", label: "patrol" },
+  { screen: "dashboard", label: "costs" },
+  { screen: "repos", label: "repos" },
+  { screen: "team", label: "team", adminOnly: true },
+] as const;
+
+/** Top bar + overflow menu under 700px (Capacitor path); the rail owns
+ *  navigation at every wider viewport. */
+function MobileNav() {
   const { screen, setScreen } = useUi();
+  const me = useSession((s) => s.me);
+  const [open, setOpen] = useState(false);
+  const items = MOBILE_NAV.filter((i) => !("adminOnly" in i && i.adminOnly) || me?.role === "admin");
+
+  return (
+    <div className="hidden max-[700px]:flex max-[700px]:flex-col">
+      <div className="flex h-[52px] flex-none items-center justify-between border-b border-hairline bg-bg-panel px-s4">
+        <span className="flex items-center gap-s2 font-mono text-[13.5px] font-semibold tracking-[0.03em]">
+          <span className="led" aria-hidden="true" />
+          zagent
+        </span>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label="open navigation"
+          title="menu"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-md p-1.5 text-ink-secondary transition-colors duration-fast hover:bg-bg-module hover:text-ink-primary"
+        >
+          <MenuIcon className="size-5" aria-hidden="true" />
+        </button>
+      </div>
+      {open && (
+        <div className="border-b border-hairline bg-bg-panel p-s2 shadow-pop">
+          {items.map((i) => (
+            <button
+              key={i.screen}
+              type="button"
+              onClick={() => {
+                setScreen(i.screen);
+                setOpen(false);
+              }}
+              className={cn(
+                "block w-full rounded-md px-s3 py-2 text-left font-mono text-[12.5px] font-semibold",
+                screen === i.screen ? "bg-bg-module text-green-bright" : "text-ink-secondary",
+              )}
+            >
+              {i.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const { me, booted, boot } = useSession();
+  const screen = useUi((s) => s.screen);
 
   useEffect(() => {
     void boot();
   }, [boot]);
 
   if (!booted) {
-    return <div className="boot faint mono">warming the bay…</div>;
+    return (
+      <div className="flex h-full items-center justify-center font-mono text-[13px] text-ink-faint">
+        warming the bay…
+      </div>
+    );
   }
   if (!me) return <LoginScreen />;
 
   return (
-    <div className="shell">
-      <nav className="topbar">
-        <span className="wordmark mono">
-          <span className="led" />
-          zagent
-        </span>
-        <div className="topnav">
-          <button className={`tn mono ${screen === "inbox" ? "on" : ""}`} onClick={() => setScreen("inbox")}>
-            inbox
-          </button>
-          <button className={`tn mono ${screen === "monitor" ? "on" : ""}`} onClick={() => setScreen("monitor")}>
-            monitor
-          </button>
-          <button className={`tn mono ${screen === "approvals" ? "on" : ""}`} onClick={() => setScreen("approvals")}>
-            approvals
-          </button>
-          <button className={`tn mono ${screen === "knowledge" ? "on" : ""}`} onClick={() => setScreen("knowledge")}>
-            knowledge
-          </button>
-          <button className={`tn mono ${screen === "ideas" ? "on" : ""}`} onClick={() => setScreen("ideas")}>
-            ideas
-          </button>
-          <button className={`tn mono ${screen === "proposals" ? "on" : ""}`} onClick={() => setScreen("proposals")}>
-            patrol
-          </button>
-          <button className={`tn mono ${screen === "dashboard" ? "on" : ""}`} onClick={() => setScreen("dashboard")}>
-            costs
-          </button>
-          <button className={`tn mono ${screen === "repos" ? "on" : ""}`} onClick={() => setScreen("repos")}>
-            repos
-          </button>
-          {me.role === "admin" && (
-            <button className={`tn mono ${screen === "team" ? "on" : ""}`} onClick={() => setScreen("team")}>
-              team
-            </button>
-          )}
+    <TooltipProvider delay={350}>
+      <div className="flex h-full">
+        <SideRail />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <MobileNav />
+          <main className="min-h-0 flex-1">
+            <div key={screen} className="animate-enter h-full">
+              {screen === "inbox" && <InboxScreen />}
+              {screen === "monitor" && <MonitorScreen />}
+              {screen === "approvals" && <ApprovalsScreen />}
+              {screen === "knowledge" && <KnowledgeScreen />}
+              {screen === "ideas" && <IdeasScreen />}
+              {screen === "proposals" && <ProposalsScreen />}
+              {screen === "dashboard" && <DashboardScreen />}
+              {screen === "repos" && <ReposScreen />}
+              {screen === "team" && <TeamScreen />}
+            </div>
+          </main>
         </div>
-        <div className="topme">
-          <span className="mono faint">{me.display_name}</span>
-          <button className="btn btn-mono btn-ghost" onClick={() => void logout()}>
-            sign out
-          </button>
-        </div>
-      </nav>
-      <main className="shell-main">
-        {screen === "inbox" && <InboxScreen />}
-        {screen === "monitor" && <MonitorScreen />}
-        {screen === "approvals" && <ApprovalsScreen />}
-        {screen === "knowledge" && <KnowledgeScreen />}
-        {screen === "ideas" && <IdeasScreen />}
-        {screen === "proposals" && <ProposalsScreen />}
-        {screen === "dashboard" && <DashboardScreen />}
-        {screen === "repos" && <ReposScreen />}
-        {screen === "team" && <TeamScreen />}
-      </main>
-      <style>{`
-        .boot { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 13px; }
-        .shell { height: 100%; display: flex; flex-direction: column; }
-        .topbar {
-          display: flex; align-items: center; justify-content: space-between;
-          height: 52px; padding: 0 18px; border-bottom: 1px solid var(--hairline);
-          background: color-mix(in srgb, var(--bg-base) 92%, transparent);
-        }
-        .wordmark { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 13.5px; letter-spacing: .03em; }
-        .topnav { display: flex; gap: 4px; }
-        .tn { background: none; border: none; color: var(--ink-secondary); font-size: 12px; padding: 7px 13px; cursor: pointer; border-radius: var(--radius); }
-        .tn:hover { color: var(--ink-primary); }
-        .tn.on { color: var(--green-bright); background: var(--bg-module); }
-        .topme { display: flex; align-items: center; gap: 12px; font-size: 12px; }
-        .shell-main { flex: 1; min-height: 0; }
-      `}</style>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

@@ -11,6 +11,7 @@ interface Delta {
 
 interface RunState {
   runs: Run[];
+  runsLoaded: boolean;
   current: Run | null;
   lanes: Lane[];
   events: StepEvent[];
@@ -27,6 +28,7 @@ let socket: RunSocket | null = null;
 
 export const useRuns = create<RunState>((set, get) => ({
   runs: [],
+  runsLoaded: false,
   current: null,
   lanes: [],
   events: [],
@@ -34,8 +36,12 @@ export const useRuns = create<RunState>((set, get) => ({
   socketConnected: false,
 
   loadRuns: async () => {
-    const runs = await api.get<Run[]>("/runs");
-    set({ runs });
+    try {
+      const runs = await api.get<Run[]>("/runs");
+      set({ runs, runsLoaded: true });
+    } catch {
+      set({ runsLoaded: true });
+    }
   },
 
   openRun: async (runId) => {

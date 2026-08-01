@@ -1,43 +1,33 @@
 import type { ReactNode } from "react";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useUi } from "../stores/ui";
 
-/** 80% overlay shell (§1 monitor): the monitor keeps streaming underneath;
- *  close returns to a live screen, never a stale one. */
+/** 80% overlay shell on the Dialog primitive (focus trap + ESC built in):
+ *  the monitor keeps streaming underneath; close returns to a live screen,
+ *  never a stale one. Entrance is motion moment #1. */
 export function OverlayShell({ title, children }: { title: string; children: ReactNode }) {
   const popOverlay = useUi((s) => s.popOverlay);
   return (
-    <div className="overlay-backdrop" role="dialog" aria-label={title}>
-      <div className="overlay-panel">
-        <div className="overlay-head">
-          <span className="mono overlay-title">{title}</span>
-          <button className="btn btn-mono btn-ghost" onClick={popOverlay} aria-label="close overlay">
-            close ✕
-          </button>
-        </div>
-        <div className="overlay-body">{children}</div>
-      </div>
-      <style>{`
-        .overlay-backdrop {
-          position: fixed; inset: 0; z-index: 100;
-          background: color-mix(in srgb, var(--jack) 55%, transparent);
-          backdrop-filter: blur(3px);
-          display: flex; align-items: center; justify-content: center;
-        }
-        .overlay-panel {
-          width: 80%; height: 82%;
-          background: var(--bg-panel);
-          border: 1px solid var(--hairline);
-          border-radius: 10px;
-          display: flex; flex-direction: column;
-          box-shadow: 0 24px 60px color-mix(in srgb, var(--jack) 70%, transparent);
-        }
-        .overlay-head {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 12px 18px; border-bottom: 1px solid var(--hairline);
-        }
-        .overlay-title { font-size: 12.5px; font-weight: 600; letter-spacing: .03em; color: var(--ink-secondary); }
-        .overlay-body { flex: 1; overflow-y: auto; padding: 18px; }
-      `}</style>
-    </div>
+    <DialogPrimitive.Root open onOpenChange={(open) => !open && popOverlay()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-overlay bg-jack/55 backdrop-blur-[3px]" />
+        <DialogPrimitive.Popup className="animate-enter fixed left-1/2 top-1/2 z-overlay flex h-[82%] w-[80%] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-hairline bg-bg-panel shadow-overlay outline-none max-md:h-[calc(100%-2rem)] max-md:w-[calc(100%-2rem)]">
+          <div className="flex flex-none items-center justify-between border-b border-hairline px-s4 py-s3">
+            <DialogPrimitive.Title className="font-mono text-[12.5px] font-semibold tracking-[0.03em] text-ink-secondary">
+              {title}
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Close
+              render={<Button variant="ghost" size="sm" title="close overlay" aria-label="close overlay" className="font-mono" />}
+            >
+              <XIcon aria-hidden="true" />
+              close
+            </DialogPrimitive.Close>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-s4">{children}</div>
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

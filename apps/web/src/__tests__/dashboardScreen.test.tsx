@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardScreen } from "../features/dashboard/DashboardScreen";
 
@@ -33,7 +34,7 @@ describe("DashboardScreen", () => {
   });
 
   it("renders totals and bucket bars", async () => {
-    render(<DashboardScreen />);
+    renderScreen(<DashboardScreen />);
     expect(await screen.findByTestId("dash-total")).toHaveTextContent("$3.50");
     expect(await screen.findByTestId("bar-by mode-development")).toBeInTheDocument();
     expect(screen.getByTestId("bar-by repo-ServerApp")).toBeInTheDocument();
@@ -41,14 +42,14 @@ describe("DashboardScreen", () => {
   });
 
   it("renders campaign rollups with stages and PRs", async () => {
-    render(<DashboardScreen />);
+    renderScreen(<DashboardScreen />);
     expect(await screen.findByText("logging migration")).toBeInTheDocument();
     expect(screen.getByText("developing ×1")).toBeInTheDocument();
     expect(screen.getByText("ServerApp PR 42 · open")).toBeInTheDocument();
   });
 
   it("requests the 30-day cost window and deliveries", async () => {
-    render(<DashboardScreen />);
+    renderScreen(<DashboardScreen />);
     await screen.findByTestId("dash-total");
     expect(get).toHaveBeenCalledWith("/stats/cost?days=30");
     expect(get).toHaveBeenCalledWith("/deliveries");

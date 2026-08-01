@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { PageHead } from "@/components/ui/page-head";
 import { api } from "../../lib/api";
+import { qk } from "../../lib/queryKeys";
 
 interface TeamUser {
   id: number;
@@ -18,12 +24,17 @@ interface Stats {
   total_cost_usd: number;
 }
 
-/** Admin team settings (plan §1b): provisioning via one-time setup codes
- *  shown ONCE; deactivate never deletes; stats are metadata-only. The route
- *  itself is admin-gated server-side — this screen renders the 403 as text. */
+const STATUS_TONE: Record<string, string> = {
+  active: "border-transparent bg-ok-soft text-ok-bright",
+  pending: "border-transparent bg-blue-soft text-blue-bright",
+  deactivated: "border-transparent bg-danger-soft text-danger-bright",
+};
+
+/** Admin team settings: provisioning via one-time setup codes shown ONCE;
+ *  deactivate never deletes; stats are metadata-only. The route itself is
+ *  admin-gated server-side — this screen renders the 403 as text. */
 export function TeamScreen() {
-  const [users, setUsers] = useState<TeamUser[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const qc = useQueryClient();
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [adoEmail, setAdoEmail] = useState("");
@@ -32,123 +43,151 @@ export function TeamScreen() {
   const [error, setError] = useState("");
   const [denied, setDenied] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [u, s] = await Promise.all([
+  const { data } = useQuery({
+    queryKey: qk.team,
+    queryFn: async () => {
+      const [users, stats] = await Promise.all([
         api.get<TeamUser[]>("/team/users"),
         api.get<Stats>("/team/stats"),
       ]);
-      setUsers(u);
-      setStats(s);
-    } catch (e) {
-      if (e instanceof Error && /403|forbidden|admin/i.test(e.message)) setDenied(true);
-    }
-  }, []);
+      return { users, stats };
+    },
+    retry: false,
+  });
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    // The route is admin-gated; render the 403 as text, not a crash.
+    void api
+      .get<TeamUser[]>("/team/users")
+      .catch((e) => {
+        if (e instanceof Error && /403|forbidden|admin/i.test(e.message)) setDenied(true);
+      });
+  }, []);
+
+  const users = data?.users ?? [];
+  const stats = data?.stats ?? null;
 
   async function addUser() {
     setError("");
     try {
-      const data = await api.post<{ setup_code: string }>("/team/users", {
+      const res = await api.post<{ setup_code: string }>("/team/users", {
         username: username.trim(),
         display_name: displayName.trim(),
         ado_email: adoEmail.trim(),
       });
-      setOneTimeCode(data.setup_code);
+      setOneTimeCode(res.setup_code);
       setCopied(false);
       setUsername("");
       setDisplayName("");
       setAdoEmail("");
-      await load();
+      await qc.invalidateQueries({ queryKey: qk.team });
     } catch (e) {
       setError(e instanceof Error ? e.message : "add failed");
     }
   }
 
   async function regen(id: number) {
-    const data = await api.post<{ setup_code: string }>(`/team/users/${id}/regenerate-code`, {});
-    setOneTimeCode(data.setup_code);
+    const res = await api.post<{ setup_code: string }>(`/team/users/${id}/regenerate-code`, {});
+    setOneTimeCode(res.setup_code);
     setCopied(false);
   }
 
   async function deactivate(id: number) {
     await api.post(`/team/users/${id}/deactivate`, {});
-    await load();
+    await qc.invalidateQueries({ queryKey: qk.team });
   }
 
   if (denied) {
     return (
-      <section className="team-screen">
-        <p className="muted" data-testid="team-denied">admin only — ask an admin to open team settings</p>
-      </section>
+      <div className="mx-auto h-full max-w-[780px] overflow-y-auto px-s8 py-s6">
+        <p className="text-[13px] text-ink-secondary" data-testid="team-denied">
+          admin only — ask an admin to open team settings
+        </p>
+      </div>
     );
   }
 
   return (
-    <section className="team-screen">
-      <header className="screen-head">
-        <h1>team</h1>
-        <p className="muted">admin · metadata-only stats · codes shown once</p>
-      </header>
+    <div className="mx-auto h-full max-w-[780px] overflow-y-auto px-s8 py-s6">
+      <PageHead title="team" sub="admin · metadata-only stats · codes shown once" />
 
       {oneTimeCode && (
-        <div className="code-banner" data-testid="one-time-code">
-          <div className="code-label mono">one-time setup code — send via Slack, never shown again</div>
-          <div className="code-row">
-            <code className="mono">{oneTimeCode}</code>
-            <button
-              className="btn btn-mono"
+        <div
+          data-testid="one-time-code"
+          className="mb-s4 rounded-lg border border-ok bg-ok-soft p-s4 animate-enter"
+        >
+          <div className="mb-s2 font-mono text-[10px] uppercase tracking-[0.08em] text-ok-bright">
+            one-time setup code — send via Slack, never shown again
+          </div>
+          <div className="flex items-center gap-s3">
+            <code className="font-mono text-[15px] tracking-[0.1em] text-ink-primary">{oneTimeCode}</code>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="font-mono"
               onClick={() => void navigator.clipboard.writeText(oneTimeCode).then(() => setCopied(true))}
             >
               {copied ? "copied ✓" : "copy"}
-            </button>
-            <button className="btn btn-mono btn-ghost" onClick={() => setOneTimeCode(null)}>dismiss</button>
+            </Button>
+            <Button variant="ghost" size="sm" className="font-mono" onClick={() => setOneTimeCode(null)}>
+              dismiss
+            </Button>
           </div>
         </div>
       )}
 
-      <div className="card add-form">
-        <div className="code-label mono">add teammate</div>
-        <div className="add-grid">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="display name" />
-          <input value={adoEmail} onChange={(e) => setAdoEmail(e.target.value)} placeholder="ADO email (identity binding)" />
-          <button className="btn btn-primary" disabled={!username.trim()} onClick={() => void addUser()}>
+      <div className="mb-s5 rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card">
+        <div className="mb-s3 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">add teammate</div>
+        <div className="grid grid-cols-1 gap-s2 sm:grid-cols-[1fr_1fr_1.4fr_auto]">
+          <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" aria-label="username" />
+          <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="display name" aria-label="display name" />
+          <Input value={adoEmail} onChange={(e) => setAdoEmail(e.target.value)} placeholder="ADO email (identity binding)" aria-label="ADO email" />
+          <Button size="sm" className="h-8 font-mono" disabled={!username.trim()} onClick={() => void addUser()}>
             add
-          </button>
+          </Button>
         </div>
-        {error && <p className="err">{error}</p>}
+        {error && <p className="mt-s2 text-[12.5px] text-danger-bright">{error}</p>}
       </div>
 
-      <table className="team-table">
+      <table className="mb-s6 w-full border-collapse text-[13px]">
         <thead>
-          <tr className="mono">
-            <th>user</th><th>role</th><th>status</th><th>ADO</th><th />
+          <tr className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            <th className="border-b border-hairline py-s2 pl-0 pr-s2 text-left font-normal">user</th>
+            <th className="border-b border-hairline px-s2 py-s2 text-left font-normal">role</th>
+            <th className="border-b border-hairline px-s2 py-s2 text-left font-normal">status</th>
+            <th className="border-b border-hairline px-s2 py-s2 text-left font-normal">ADO</th>
+            <th className="border-b border-hairline px-s2 py-s2" />
           </tr>
         </thead>
         <tbody>
           {users.map((u) => (
             <tr key={u.id} data-testid={`user-${u.username}`}>
-              <td>
-                <div className="u-name">{u.display_name || u.username}</div>
-                <div className="faint mono">{u.username}</div>
+              <td className="border-b border-hairline py-s2 pl-0 pr-s2">
+                <div className="font-semibold text-ink-primary">{u.display_name || u.username}</div>
+                <div className="font-mono text-[10.5px] text-ink-faint">{u.username}</div>
               </td>
-              <td className="mono">{u.role}</td>
-              <td>
-                <span className={`tag mono ${u.status === "active" ? "st-completed" : u.status === "pending" ? "st-running" : "st-failed"}`}>
+              <td className="border-b border-hairline px-s2 py-s2 font-mono text-[11.5px] text-ink-secondary">{u.role}</td>
+              <td className="border-b border-hairline px-s2 py-s2">
+                <Badge
+                  variant="outline"
+                  className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] font-normal ${STATUS_TONE[u.status] ?? "border-hairline text-ink-faint"}`}
+                >
                   {u.status}
-                </span>
+                </Badge>
               </td>
-              <td className="mono">{u.ado_bound ? "bound" : u.ado_email ?? "—"}</td>
-              <td className="u-actions">
+              <td className="border-b border-hairline px-s2 py-s2 font-mono text-[11.5px] text-ink-secondary">
+                {u.ado_bound ? "bound" : u.ado_email ?? "—"}
+              </td>
+              <td className="border-b border-hairline px-s2 py-s2">
                 {u.status !== "deactivated" && (
-                  <>
-                    <button className="btn btn-mono btn-ghost" onClick={() => void regen(u.id)}>new code</button>
-                    <button className="btn btn-mono btn-danger" onClick={() => void deactivate(u.id)}>deactivate</button>
-                  </>
+                  <div className="flex justify-end gap-s2">
+                    <Button variant="ghost" size="sm" className="font-mono" onClick={() => void regen(u.id)}>
+                      new code
+                    </Button>
+                    <Button variant="destructive" size="sm" className="font-mono" onClick={() => void deactivate(u.id)}>
+                      deactivate
+                    </Button>
+                  </div>
                 )}
               </td>
             </tr>
@@ -157,29 +196,23 @@ export function TeamScreen() {
       </table>
 
       {stats && (
-        <div className="stats-row mono" data-testid="team-stats">
-          <span>runs: <b>{stats.total_runs}</b></span>
-          <span>cost: <b>${stats.total_cost_usd.toFixed(2)}</b></span>
-          <span>modes: <b>{Object.entries(stats.runs_by_mode).map(([k, v]) => `${k}×${v}`).join(" ") || "—"}</b></span>
+        <div className="flex gap-s6 font-mono text-[11.5px] text-ink-secondary" data-testid="team-stats">
+          <span>
+            runs: <b className="text-ink-primary">{stats.total_runs}</b>
+          </span>
+          <span>
+            cost: <b className="text-ink-primary">${stats.total_cost_usd.toFixed(2)}</b>
+          </span>
+          <span>
+            modes:{" "}
+            <b className="text-ink-primary">
+              {Object.entries(stats.runs_by_mode)
+                .map(([k, v]) => `${k}×${v}`)
+                .join(" ") || "—"}
+            </b>
+          </span>
         </div>
       )}
-      <style>{`
-        .team-screen { max-width: 780px; margin: 0 auto; padding: 22px 18px; overflow-y: auto; height: 100%; }
-        .code-banner { background: color-mix(in srgb, var(--green) 12%, var(--bg-module)); border: 1px solid var(--green); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
-        .code-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--green-bright); margin-bottom: 8px; }
-        .code-row { display: flex; gap: 10px; align-items: center; }
-        .code-row code { font-size: 16px; letter-spacing: .1em; }
-        .add-form { padding: 16px; margin-bottom: 18px; }
-        .add-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; }
-        .add-grid input { background: var(--jack); border: 1px solid var(--hairline); border-radius: var(--radius); color: var(--ink-primary); padding: 8px 10px; font-size: 13px; }
-        .team-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 22px; }
-        .team-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--hairline); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); }
-        .team-table td { padding: 9px 8px; border-bottom: 1px solid var(--hairline); }
-        .u-name { font-weight: 600; }
-        .u-actions { text-align: right; display: flex; gap: 6px; justify-content: flex-end; }
-        .stats-row { display: flex; gap: 26px; font-size: 12px; color: var(--ink-secondary); }
-        .stats-row b { color: var(--ink-primary); }
-      `}</style>
-    </section>
+    </div>
   );
 }

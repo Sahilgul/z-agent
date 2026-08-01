@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposalsScreen } from "../features/proposals/ProposalsScreen";
 
@@ -31,7 +32,7 @@ describe("ProposalsScreen", () => {
   });
 
   it("lists ranked proposals with source, levels, and evidence", async () => {
-    render(<ProposalsScreen />);
+    renderScreen(<ProposalsScreen />);
     expect(await screen.findByText("Dead code in billing")).toBeInTheDocument();
     expect(screen.getByText("janitor")).toBeInTheDocument();
     expect(screen.getByText("perfector")).toBeInTheDocument();
@@ -40,7 +41,7 @@ describe("ProposalsScreen", () => {
   });
 
   it("accept posts to the accept endpoint and reloads", async () => {
-    render(<ProposalsScreen />);
+    renderScreen(<ProposalsScreen />);
     const buttons = await screen.findAllByRole("button", { name: "accept" });
     fireEvent.click(buttons[0]);
     await waitFor(() => expect(post).toHaveBeenCalledWith("/proposals/1/accept", {}));
@@ -48,7 +49,7 @@ describe("ProposalsScreen", () => {
   });
 
   it("dismiss posts to the dismiss endpoint", async () => {
-    render(<ProposalsScreen />);
+    renderScreen(<ProposalsScreen />);
     const buttons = await screen.findAllByRole("button", { name: "dismiss" });
     fireEvent.click(buttons[1]);
     await waitFor(() => expect(post).toHaveBeenCalledWith("/proposals/2/dismiss", {}));
@@ -58,7 +59,7 @@ describe("ProposalsScreen", () => {
     get.mockResolvedValue({
       items: [{ ...items[0], status: "accepted", promoted_run_id: "abcdef123456" }],
     });
-    render(<ProposalsScreen />);
+    renderScreen(<ProposalsScreen />);
     fireEvent.click(screen.getByRole("checkbox"));
     await waitFor(() => expect(get).toHaveBeenCalledWith("/proposals?status="));
     expect(await screen.findByText("accepted")).toBeInTheDocument();

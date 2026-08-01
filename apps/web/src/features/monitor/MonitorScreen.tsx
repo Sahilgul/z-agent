@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { ArrowLeftIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { EventStream } from "../../components/EventStream";
 import { PipelineBar } from "../../components/PipelineBar";
 import { useRuns } from "../../stores/run";
@@ -10,8 +12,8 @@ import { LaneOverlay } from "./LaneOverlay";
 import { PlanOverlay } from "./PlanOverlay";
 import { PROverlay } from "./PROverlay";
 
-/** Monitor (§1): the run's glass box. Left = swarm bay + live event stream
- *  (every agent step, lead and subagent, rendered the same way). Right =
+/** Monitor (live archetype): the run's glass box, full-bleed console — no
+ *  page scroll. Left = swarm bay (lane river) + live event stream; right =
  *  chat with the Lead. 50/50 default, draggable. Overlays float at 80%. */
 export function MonitorScreen() {
   const { current, lanes, events, deltas, socketConnected, sendIntent } = useRuns();
@@ -29,36 +31,41 @@ export function MonitorScreen() {
   }
 
   return (
-    <div className="monitor">
-      <header className="monitor-head">
-        <button className="btn btn-mono btn-ghost" onClick={() => setScreen("inbox")}>
-          ← inbox
-        </button>
-        <div className="monitor-title">
-          <div className="mt-text">{current.title}</div>
+    <div className="flex h-full flex-col">
+      <header className="flex flex-none items-center gap-s4 border-b border-hairline bg-bg-panel px-s4 py-2">
+        <Button variant="outline" size="sm" onClick={() => setScreen("inbox")} className="font-mono">
+          <ArrowLeftIcon aria-hidden="true" />
+          inbox
+        </Button>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14.5px] font-semibold text-ink-primary">{current.title}</div>
           <PipelineBar stage={current.stage} />
         </div>
-        <div className="monitor-actions">
+        <div className="flex flex-none items-center gap-s2">
           {(current.available_actions.includes("approve_plan") ||
             current.available_actions.includes("review_plan")) && (
-            <button className="btn btn-mono btn-ghost" onClick={() => pushOverlay({ kind: "plan" })}>
+            <Button variant="outline" size="sm" onClick={() => pushOverlay({ kind: "plan" })} className="font-mono">
               plan
-            </button>
+            </Button>
           )}
           {current.available_actions.includes("merge_pr") && (
-            <button className="btn btn-mono btn-ghost" onClick={() => pushOverlay({ kind: "pr" })}>
+            <Button variant="outline" size="sm" onClick={() => pushOverlay({ kind: "pr" })} className="font-mono">
               pr
-            </button>
+            </Button>
           )}
-          <span className={`mono conn ${socketConnected ? "on" : "off"}`} title={socketConnected ? "live" : "reconnecting"}>
-            {socketConnected ? "● live" : "○ …"}
+          <span
+            title={socketConnected ? "live" : "reconnecting"}
+            className={`flex items-center gap-s2 font-mono text-[11px] ${socketConnected ? "text-green-bright" : "text-ink-faint"}`}
+          >
+            <span className={socketConnected ? "led" : "led led--off"} aria-hidden="true" />
+            {socketConnected ? "live" : "…"}
           </span>
         </div>
       </header>
 
-      <PanelGroup direction="horizontal" className="monitor-split">
+      <PanelGroup direction="horizontal" className="min-h-0 flex-1">
         <Panel defaultSize={50} minSize={30}>
-          <div className="pane left">
+          <div className="flex h-full flex-col overflow-y-auto">
             <SwarmView
               lanes={lanes}
               now={now}
@@ -66,12 +73,12 @@ export function MonitorScreen() {
               onNudge={(laneId) => void sendIntent("nudge", { laneId, text: "status check — report progress" })}
               onLetItRun={(laneId) => void sendIntent("let_it_run", { laneId })}
             />
-            <div className="stream-wrap">
+            <div className="min-h-0 flex-1">
               <EventStream events={events} deltas={deltas} />
             </div>
           </div>
         </Panel>
-        <PanelResizeHandle className="split-handle" />
+        <PanelResizeHandle className="w-[3px] bg-hairline transition-colors duration-fast hover:bg-blue-bright data-[resize-handle-state=drag]:bg-blue-bright" />
         <Panel defaultSize={50} minSize={30}>
           <ChatPane />
         </Panel>
@@ -86,25 +93,6 @@ export function MonitorScreen() {
           <PROverlay key={`pr-${i}`} />
         ),
       )}
-
-      <style>{`
-        .monitor { display: flex; flex-direction: column; height: 100%; }
-        .monitor-head {
-          display: flex; align-items: center; gap: 16px; padding: 8px 16px;
-          border-bottom: 1px solid var(--hairline); background: var(--bg-panel);
-        }
-        .monitor-title { flex: 1; min-width: 0; }
-        .mt-text { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .monitor-actions { display: flex; align-items: center; gap: 10px; }
-        .conn { font-size: 11px; }
-        .conn.on { color: var(--green-bright); }
-        .conn.off { color: var(--ink-faint); }
-        .monitor-split { flex: 1; }
-        .pane.left { display: flex; flex-direction: column; height: 100%; overflow-y: auto; }
-        .stream-wrap { flex: 1; min-height: 0; }
-        .split-handle { width: 3px; background: var(--hairline); cursor: col-resize; }
-        .split-handle:hover, .split-handle[data-resize-handle-state="drag"] { background: var(--blue-bright); }
-      `}</style>
     </div>
   );
 }

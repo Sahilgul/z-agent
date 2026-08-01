@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApprovalsScreen } from "../features/approvals/ApprovalsScreen";
 
@@ -31,7 +32,7 @@ describe("ApprovalsScreen", () => {
 
   it("renders cards and posts decisions", async () => {
     get.mockResolvedValue([card]);
-    render(<ApprovalsScreen />);
+    renderScreen(<ApprovalsScreen />);
     expect(await screen.findByText("Bash")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "allow once" }));
     await waitFor(() =>
@@ -41,13 +42,13 @@ describe("ApprovalsScreen", () => {
 
   it("asks for push opt-in only when a card is waiting", async () => {
     get.mockResolvedValue([card]);
-    render(<ApprovalsScreen />);
+    renderScreen(<ApprovalsScreen />);
     expect(await screen.findByTestId("push-ask")).toBeInTheDocument();
   });
 
   it("hides the opt-in when nothing is waiting", async () => {
     get.mockResolvedValue([]);
-    render(<ApprovalsScreen />);
+    renderScreen(<ApprovalsScreen />);
     expect(await screen.findByText("nothing waiting on you")).toBeInTheDocument();
     expect(screen.queryByTestId("push-ask")).not.toBeInTheDocument();
   });
@@ -55,14 +56,14 @@ describe("ApprovalsScreen", () => {
   it("hides the opt-in when already subscribed", async () => {
     hasSub.mockResolvedValue(true);
     get.mockResolvedValue([card]);
-    render(<ApprovalsScreen />);
+    renderScreen(<ApprovalsScreen />);
     expect(await screen.findByText("Bash")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("push-ask")).not.toBeInTheDocument());
   });
 
   it("enable push calls subscribe and dismisses", async () => {
     get.mockResolvedValue([card]);
-    render(<ApprovalsScreen />);
+    renderScreen(<ApprovalsScreen />);
     fireEvent.click(await screen.findByRole("button", { name: "enable push" }));
     await waitFor(() => expect(subscribe).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId("push-ask")).not.toBeInTheDocument());

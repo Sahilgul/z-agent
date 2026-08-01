@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { DataTable, type Column } from "@/components/ui/data-table";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterChips } from "@/components/ui/filter-chips";
+import { PageHead } from "@/components/ui/page-head";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tag } from "@/components/ui/tag";
 import { api } from "../../lib/api";
+import { qk } from "../../lib/queryKeys";
 
 interface Bucket {
   cost_usd: number;
@@ -25,100 +33,160 @@ interface Delivery {
   prs: { repo: string; ado_pr_id: number | null; status: string }[];
 }
 
-function Bars({ title, buckets }: { title: string; buckets: Record<string, Bucket> }) {
-  const entries = Object.entries(buckets).sort((a, b) => b[1].cost_usd - a[1].cost_usd);
-  const max = Math.max(1, ...entries.map(([, b]) => b.cost_usd));
-  if (entries.length === 0) return null;
-  return (
-    <section className="dash-block">
-      <h3 className="dash-h">{title}</h3>
-      {entries.map(([name, b]) => (
-        <div className="dash-row" key={name} data-testid={`bar-${title}-${name}`}>
-          <span className="dash-label mono">{name}</span>
-          <span className="dash-track">
-            <span className="dash-fill" style={{ width: `${(b.cost_usd / max) * 100}%` }} />
+interface LedgerRow {
+  name: string;
+  bucket: Bucket;
+  share: number;
+}
+
+const DAY_OPTIONS = [
+  { value: "7", label: "7d" },
+  { value: "30", label: "30d" },
+  { value: "90", label: "90d" },
+] as const;
+
+/** Ledger table with the bar INSIDE the row (costs signature) — the
+ *  proportional bar aligns with the cost column, not a separate chart. */
+function ledgerColumns(totalCost: number): Column<LedgerRow>[] {
+  return [
+    { key: "name", header: "name", render: (r) => <span className="font-mono text-[12px] text-ink-primary">{r.name}</span> },
+    { key: "runs", header: "runs", numeric: true, render: (r) => r.bucket.runs },
+    { key: "cost", header: "cost", numeric: true, render: (r) => `$${r.bucket.cost_usd.toFixed(2)}` },
+    {
+      key: "share",
+      header: "share",
+      className: "w-[40%]",
+      render: (r) => (
+        <span className="flex items-center gap-s2">
+          <span className="h-2 flex-1 overflow-hidden rounded-sm bg-jack" aria-hidden="true">
+            <span
+              className="block h-full rounded-sm bg-blue-bright"
+              style={{ width: `${totalCost > 0 ? (r.bucket.cost_usd / totalCost) * 100 : 0}%` }}
+            />
           </span>
-          <span className="dash-num mono">${b.cost_usd.toFixed(2)} · {b.runs} runs</span>
-        </div>
-      ))}
+          <span className="w-10 text-right font-mono text-[10.5px] tabular text-ink-faint">
+            {totalCost > 0 ? Math.round((r.bucket.cost_usd / totalCost) * 100) : 0}%
+          </span>
+        </span>
+      ),
+    },
+  ];
+}
+
+function Ledger({ title, buckets, loading }: { title: string; buckets?: Record<string, Bucket>; loading: boolean }) {
+  const entries = Object.entries(buckets ?? {}).sort((a, b) => b[1].cost_usd - a[1].cost_usd);
+  const total = entries.reduce((acc, [, b]) => acc + b.cost_usd, 0);
+  const rows: LedgerRow[] = entries.map(([name, bucket]) => ({ name, bucket, share: 0 }));
+  return (
+    <section className="mb-s6" aria-label={title}>
+      <h3 className="text-micro mb-s3 text-ink-faint">{title}</h3>
+      <DataTable
+        columns={ledgerColumns(total)}
+        rows={rows}
+        rowKey={(r) => r.name}
+        loading={loading}
+        skeletonRows={3}
+        empty={<EmptyState hint={`no ${title} data in this window`} />}
+        rowTestId={(r) => `bar-${title}-${r.name}`}
+      />
     </section>
   );
 }
 
 export function DashboardScreen() {
-  const [dash, setDash] = useState<Dashboard | null>(null);
-  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [err, setErr] = useState("");
+  const [days, setDays] = useState("30");
 
-  const load = useCallback(async () => {
-    try {
-      const [d, del] = await Promise.all([
-        api.get<Dashboard>("/stats/cost?days=30"),
-        api.get<{ items: Delivery[] }>("/deliveries"),
-      ]);
-      setDash(d);
-      setDeliveries(del.items);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "failed to load");
-    }
-  }, []);
+  const stats = useQuery({
+    queryKey: qk.costStats(Number(days)),
+    queryFn: () => api.get<Dashboard>(`/stats/cost?days=${days}`),
+    placeholderData: (prev) => prev,
+  });
+  const deliveries = useQuery({
+    queryKey: qk.deliveries,
+    queryFn: () => api.get<{ items: Delivery[] }>("/deliveries"),
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const dash = stats.data;
+  const perRun = dash && dash.total.runs > 0 ? dash.total.cost_usd / dash.total.runs : 0;
+  const topRepo = dash
+    ? Object.entries(dash.by_repo).sort((a, b) => b[1].cost_usd - a[1].cost_usd)[0]?.[0] ?? "—"
+    : "—";
 
   return (
-    <section className="dashboard">
-      <header className="screen-head">
-        <h1>costs &amp; campaigns</h1>
-        <p className="muted">30-day gateway metering — metadata only, never content</p>
-      </header>
-      {err && <div className="err">{err}</div>}
-      {dash && (
-        <>
-          <div className="dash-total" data-testid="dash-total">
-            <span className="dash-big mono">${dash.total.cost_usd.toFixed(2)}</span>
-            <span className="muted">{dash.total.tokens.toLocaleString()} tokens · {dash.total.runs} runs</span>
-          </div>
-          <Bars title="by mode" buckets={dash.by_mode} />
-          <Bars title="by repo" buckets={dash.by_repo} />
-          <Bars title="by teammate" buckets={dash.by_user} />
-        </>
-      )}
-      <section className="dash-block">
-        <h3 className="dash-h">campaigns</h3>
-        {deliveries.length === 0 && <p className="muted">no fleet campaigns yet</p>}
-        {deliveries.map((d) => (
-          <div className="card" key={d.id} data-testid={`delivery-${d.id}`}>
-            <header className="card-head">
-              <strong className="card-title">{d.title}</strong>
-              <span className="chip mono">${d.cost_usd.toFixed(2)}</span>
-            </header>
-            <div className="card-body meta-row">
-              {Object.entries(d.stages).map(([stage, n]) => (
-                <span className="tag mono" key={stage}>{stage} ×{n}</span>
-              ))}
-              {d.prs.map((p) => (
-                <span className="chip mono" key={`${p.repo}-${p.ado_pr_id}`}>
-                  {p.repo} PR {p.ado_pr_id ?? "?"} · {p.status}
-                </span>
-              ))}
-            </div>
+    <div className="mx-auto h-full max-w-canvas overflow-y-auto px-s8 py-s6">
+      <PageHead
+        title="costs & campaigns"
+        sub="gateway metering — metadata only, never content"
+        actions={<FilterChips options={[...DAY_OPTIONS]} value={days} onChange={setDays} />}
+      />
+
+      <div className="mb-s6 grid grid-cols-2 gap-s3 md:grid-cols-4">
+        {[
+          { label: "total spend", value: dash ? `$${dash.total.cost_usd.toFixed(2)}` : null, testId: "dash-total", accent: true },
+          { label: "runs", value: dash ? String(dash.total.runs) : null },
+          { label: "$ / run", value: dash ? `$${perRun.toFixed(2)}` : null },
+          { label: "top repo", value: dash ? topRepo : null },
+        ].map((s) => (
+          <div key={s.label} className="rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card">
+            <div className="text-micro mb-s2 text-ink-faint">{s.label}</div>
+            {s.value === null ? (
+              <Skeleton className="h-6 w-24 rounded-sm" />
+            ) : (
+              <div
+                data-testid={s.testId}
+                className={`font-mono text-[22px] tabular ${s.accent ? "text-green-bright" : "text-ink-primary"}`}
+              >
+                {s.value}
+              </div>
+            )}
           </div>
         ))}
+      </div>
+
+      <Ledger title="by mode" buckets={dash?.by_mode} loading={stats.isLoading} />
+      <Ledger title="by repo" buckets={dash?.by_repo} loading={stats.isLoading} />
+      <Ledger title="by teammate" buckets={dash?.by_user} loading={stats.isLoading} />
+
+      <section aria-label="campaigns">
+        <h3 className="text-micro mb-s3 text-ink-faint">campaigns</h3>
+        {deliveries.isLoading ? (
+          <div className="flex flex-col gap-s3">
+            {[0, 1].map((i) => (
+              <div key={i} className="rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card">
+                <Skeleton className="mb-s2 h-4 w-1/3 rounded-sm" />
+                <Skeleton className="h-3 w-2/3 rounded-sm" />
+              </div>
+            ))}
+          </div>
+        ) : (deliveries.data?.items ?? []).length === 0 ? (
+          <EmptyState hint="no fleet campaigns yet" />
+        ) : (
+          (deliveries.data?.items ?? []).map((d) => (
+            <article
+              key={d.id}
+              data-testid={`delivery-${d.id}`}
+              className="mb-s3 rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card"
+            >
+              <header className="mb-s2 flex items-center justify-between gap-s3">
+                <strong className="text-[15px] font-semibold">{d.title}</strong>
+                <span className="font-mono text-[12px] tabular text-ink-primary">${d.cost_usd.toFixed(2)}</span>
+              </header>
+              <div className="flex flex-wrap gap-s2">
+                {Object.entries(d.stages).map(([stage, n]) => (
+                  <Tag key={stage} tone={stage === "completed" ? "ok" : stage === "failed" ? "danger" : "info"}>
+                    {stage} ×{n}
+                  </Tag>
+                ))}
+                {d.prs.map((p) => (
+                  <Tag key={`${p.repo}-${p.ado_pr_id}`}>
+                    {p.repo} PR {p.ado_pr_id ?? "?"} · {p.status}
+                  </Tag>
+                ))}
+              </div>
+            </article>
+          ))
+        )}
       </section>
-      <style>{`
-        .dashboard { max-width: 780px; margin: 0 auto; padding: 22px 18px; overflow-y: auto; height: 100%; }
-        .dash-total { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
-        .dash-big { font-size: 28px; color: var(--green-bright); }
-        .dash-block { margin-bottom: 20px; }
-        .dash-h { font-family: var(--font-display); font-weight: 500; font-size: 14px; margin-bottom: 8px; }
-        .dash-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
-        .dash-label { width: 140px; font-size: 11px; color: var(--ink-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .dash-track { flex: 1; height: 8px; background: var(--jack); border-radius: 4px; overflow: hidden; }
-        .dash-fill { display: block; height: 100%; background: var(--blue-bright); border-radius: 4px; }
-        .dash-num { width: 140px; text-align: right; font-size: 10.5px; color: var(--ink-faint); }
-      `}</style>
-    </section>
+    </div>
   );
 }
