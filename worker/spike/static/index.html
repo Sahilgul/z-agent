@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zagent spike — live trace</title>
+<style>
+  :root { --bg:#202A35; --panel:#29343F; --ink:#EAF0EC; --ink2:#93A6AC; --faint:#5D6C73;
+          --green:#5FA777; --blue:#8FB4D9; --danger:#B23A45; --hair:#3B4854; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:13px;
+         background-image: radial-gradient(var(--hair) 1px, transparent 1px);
+         background-size: 26px 26px; }
+  header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--hair);
+           padding:12px 18px; display:flex; gap:10px; align-items:center; }
+  .led { width:8px; height:8px; border-radius:50%; background:var(--green);
+         box-shadow:0 0 8px 1px var(--green); animation:blink 2.4s infinite; }
+  .led.off { background:var(--danger); box-shadow:0 0 6px 1px var(--danger); animation:none; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+  #stream { padding:14px 18px; max-width:900px; margin:0 auto; }
+  .step { border:1px solid var(--hair); border-radius:6px; background:var(--panel);
+          margin-bottom:8px; overflow:hidden; }
+  .step summary { cursor:pointer; padding:9px 12px; list-style:none; display:flex; gap:10px; }
+  .step summary::-webkit-details-marker { display:none; }
+  .kind { color:var(--faint); min-width:86px; text-transform:uppercase; font-size:10.5px; padding-top:2px; }
+  .kind.command, .kind.test_run { color:var(--blue); }
+  .kind.file_edit { color:var(--green); }
+  .kind.message { color:var(--ink); }
+  .title { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .detail { border-top:1px dashed var(--hair); padding:10px 12px; color:var(--ink2);
+            white-space:pre-wrap; word-break:break-word; max-height:340px; overflow:auto; font-size:12px; }
+  #live { padding:8px 18px; color:var(--ink2); max-width:900px; margin:0 auto; }
+</style>
+</head>
+<body>
+<header><span class="led" id="led"></span> ZAGENT SPIKE — LIVE TRACE <span id="count" style="color:var(--faint)"></span></header>
+<div id="live"></div>
+<div id="stream"></div>
+<script>
+  const port = location.port === '8766' ? 8765 : location.port;
+  const ws = new WebSocket(`ws://${location.hostname}:${port}`);
+  const led = document.getElementById('led');
+  const stream = document.getElementById('stream');
+  const live = document.getElementById('live');
+  let n = 0;
+  ws.onopen = () => led.classList.remove('off');
+  ws.onclose = () => led.classList.add('off');
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.type === 'delta') { live.textContent = msg.delta.text.slice(-160); return; }
+    if (msg.type !== 'step') return;
+    const e = msg.event;
+    n++; document.getElementById('count').textContent = `${n} steps`;
+    const el = document.createElement('details');
+    el.className = 'step';
+    el.innerHTML = `<summary><span class="kind ${e.kind}">${e.kind}</span>
+      <span class="title"></span></summary>
+      <div class="detail"></div>`;
+    el.querySelector('.title').textContent = e.title;
+    el.querySelector('.detail').textContent = JSON.stringify(e.detail, null, 2).slice(0, 4000);
+    stream.appendChild(el);
+    window.scrollTo(0, document.body.scrollHeight);
+  };
+</script>
+</body>
+</html>

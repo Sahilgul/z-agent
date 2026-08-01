@@ -1,0 +1,142 @@
+name: zagent
+
+# Phase 0-3 local-era stack (plan §8):
+#   redis (AOF everysec) — Streams durability across restarts
+#   gateway + gateway-db — LiteLLM (virtual keys/budgets REQUIRE Postgres;
+#     gateway-db is LiteLLM-internal ONLY, disposable, re-mint keys to recreate)
+#   backend — FastAPI control plane; hosts fetch loop + jobs IN-PROCESS (SQLite era)
+# App data stays on the SQLite volume. App Postgres is added at the VM move (Phase 4 gate).
+
+networks:
+  internal:
+    driver: bridge
+    internal: false          # control plane: backend reaches ADO + host services
+  egress:
+    driver: bridge
+  lane:
+    # Worker lane lockdown (plan §10): NO internet route. Lanes reach ONLY the
+    # gateway (LLM) and redis (events/control). Git remotes never resolve —
+    # read-only golden mounts are the repos; writable stamps push via the
+    # backend-mediated flow, never direct from a lane.
+    driver: bridge
+    internal: true
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis-data:/data
+    networks: [internal, lane]
+    restart: unless-stopped
+
+  gateway-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${GATEWAY_DB_PASSWORD:?set in .env}
+      POSTGRES_DB: litellm
+    volumes:
+      - gateway-db-data:/var/lib/postgresql/data
+    networks: [internal]
+    restart: unless-stopped
+
+  gateway:
+    # PINNED — the one internet-adjacent proxy in the stack (CVE surface).
+    image: ghcr.io/berriai/litellm:main-v1.94.1-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    environment:
+      DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD}@gateway-db:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
+      AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:?set in .env}
+      STORE_MODEL_IN_DB: "True"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    depends_on:
+      - gateway-db
+    ports:
+      - "4000:4000"
+    networks:
+      - internal
+      - egress        # only the gateway may reach Foundry / the internet
+      - lane          # lanes' sole LLM egress point (virtual keys + budgets here)
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      ZAGENT_DB_URL: sqlite:////data/zagent.db
+      ZAGENT_REDIS_URL: redis://redis:6379/0
+      ZAGENT_GATEWAY_URL: http://gateway:4000
+      ZAGENT_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      ZAGENT_JWT_SECRET: ${ZAGENT_JWT_SECRET:?set in .env}
+      ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
+      ZAGENT_FETCH_PAT: ${FETCH_PAT:-}
+      ZAGENT_FLEET_PAT: ${FLEET_PAT:-}
+      ZAGENT_ADO_ORG: ${ADO_ORG:-}
+      ZAGENT_ADO_PROJECT: ${ADO_PROJECT:-}
+      ZAGENT_GOLDEN_DIR: /golden/repos
+      ZAGENT_SESSIONS_DIR: /sessions
+      ZAGENT_FLEET_CONFIG_DIR: /fleet-config
+    volumes:
+      - app-data:/data
+      - golden:/golden
+      - sessions:/sessions
+      - ../fleet-config:/fleet-config:ro
+    depends_on:
+      - redis
+      - gateway
+    ports:
+      - "8000:8000"
+    networks: [internal, lane]
+    restart: unless-stopped
+
+  # Package-registry egress for lanes (plan §10 Phase 2): allowlisting squid —
+  # pypi/npm only. Lanes get HTTP(S)_PROXY from the sandbox manager; their
+  # network stays internal-only, so this proxy is the whole internet they see.
+  pkgproxy:
+    profiles: [pkgproxy]
+    image: ubuntu/squid:latest
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - pkg-cache:/var/spool/squid
+    networks:
+      - lane            # lanes reach it here
+      - egress          # its own path out, domain-allowlisted by squid.conf
+    restart: unless-stopped
+
+  # Phone/laptop access over the tailnet (plan §1 milestone: watch a run from a
+  # phone). Brings the backend up as https://<host>.<tailnet>.ts.net — TLS
+  # terminated by Tailscale, cookie `secure` flag flips at the VM move.
+  # One-time: tailscale login on the host, then
+  #   docker compose --profile tailscale up -d
+  tailscale:
+    profiles: [tailscale]
+    image: tailscale/tailscale:stable
+    hostname: zagent
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}      # reusable auth key, or leave empty + login interactively once
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./tailscale/serve.json:/config/serve.json:ro
+    depends_on:
+      - backend
+    networks: [internal]
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  gateway-db-data:
+  app-data:
+  tailscale-state:
+  pkg-cache:
+  pip-cache:
+  npm-cache:
+  # Named volumes land on the WSL2 Linux fs under Docker Desktop — never NTFS
+  # (plan §10: heavy small-file IO, git ops inside Linux).
+  golden:
+  sessions:

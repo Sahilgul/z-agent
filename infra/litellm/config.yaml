@@ -1,0 +1,39 @@
+# LiteLLM gateway config — Anthropic-compatible facade in front of Azure AI Foundry.
+# Model routing is PURE CONFIG (plan §1): Kimi now; Claude-on-Foundry later = add a
+# model_list entry, zero architecture changes.
+
+model_list:
+  - model_name: kimi-foundry
+    litellm_params:
+      # Azure AI Foundry serverless/MaaS deployment of Kimi (Azure AI provider).
+      # Set the deployment name to YOUR Foundry deployment id.
+      model: azure_ai/Kimi-K2-Thinking
+      api_base: https://YOUR-FOUNDRY-RESOURCE.services.ai.azure.com/models
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+    model_info:
+      # EXPLICIT pricing — LiteLLM's registry may not price Kimi and the
+      # spend-readback data path (plan §4) depends on correct numbers.
+      # CONFIRM against the Foundry billing page on day 1; these are placeholders.
+      input_cost_per_token: 0.0000006        # $0.60 / 1M input
+      output_cost_per_token: 0.0000025       # $2.50 / 1M output
+      cache_read_input_token_cost: 0.00000015
+      max_tokens: 8192
+      mode: chat
+
+  # Fallback route, pre-wired: Anthropic Claude hosted on Foundry, same
+  # /anthropic/v1 surface. Flip worker env ANTHROPIC_MODEL alias to this when the
+  # decision matrix says so — nothing else changes.
+  # - model_name: claude-fallback
+  #   litellm_params:
+  #     model: azure_ai/claude-sonnet-4-5
+  #     api_base: https://YOUR-FOUNDRY-RESOURCE.services.ai.azure.com/models
+  #     api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+
+litellm_settings:
+  drop_params: true
+  num_retries: 2
+  request_timeout: 600
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

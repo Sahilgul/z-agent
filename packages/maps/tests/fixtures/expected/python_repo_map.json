@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "generated_at": "2026-01-01T00:00:00Z",
+  "repo": "python_repo",
+  "modules": [
+    {
+      "path": ".",
+      "language": "python",
+      "file_count": 2,
+      "purpose": "Application entrypoint — wires the package together."
+    },
+    {
+      "path": "pkg",
+      "language": "python",
+      "file_count": 4,
+      "purpose": "API surface — builds a Service."
+    },
+    {
+      "path": "tests",
+      "language": "python",
+      "file_count": 2,
+      "purpose": "Tests for the core service."
+    }
+  ],
+  "symbols": [
+    {
+      "module": ".",
+      "file": "main.py",
+      "name": "main",
+      "kind": "function",
+      "signature": "def main()",
+      "line": 6
+    },
+    {
+      "module": "pkg",
+      "file": "pkg/api.py",
+      "name": "build",
+      "kind": "function",
+      "signature": "def build()",
+      "line": 6
+    },
+    {
+      "module": "pkg",
+      "file": "pkg/core.py",
+      "name": "Service",
+      "kind": "class",
+      "signature": "class Service",
+      "line": 6
+    },
+    {
+      "module": "pkg",
+      "file": "pkg/core.py",
+      "name": "helper",
+      "kind": "function",
+      "signature": "def helper(a, b)",
+      "line": 13
+    },
+    {
+      "module": "pkg",
+      "file": "pkg/util.py",
+      "name": "format_name",
+      "kind": "function",
+      "signature": "def format_name(first, last)",
+      "line": 4
+    },
+    {
+      "module": "tests",
+      "file": "tests/test_core.py",
+      "name": "test_helper_adds",
+      "kind": "function",
+      "signature": "def test_helper_adds()",
+      "line": 6
+    },
+    {
+      "module": "tests",
+      "file": "tests/test_core.py",
+      "name": "test_helper_zero",
+      "kind": "function",
+      "signature": "def test_helper_zero()",
+      "line": 10
+    }
+  ],
+  "edges": [
+    {
+      "from": ".",
+      "to": "pkg",
+      "kind": "import"
+    },
+    {
+      "from": "tests",
+      "to": "pkg",
+      "kind": "import"
+    }
+  ],
+  "hot_files": [
+    {
+      "file": "pkg/core.py",
+      "importers": 2
+    },
+    {
+      "file": "pkg/api.py",
+      "importers": 1
+    }
+  ],
+  "entrypoints": [
+    "main.py"
+  ],
+  "tests": [
+    "tests/test_core.py"
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "version": 2,
+  "description": "Source of truth for HAMI inter-service dependencies (code-verified). The planner reads this in Phase 1 to compute blast radius. ONLY live flows are listed — stale/dead flows are deliberately omitted to avoid context-window bloat. Update when wiring changes.",
+  "callChain": "ClientApp -> ServerApp (REST + Socket.io) -> AIClusterApp (HTTP, BACKEND_*_ENDPOINT, v2) -> {ClinicalAIServices /score | Billing-Engine /icd,/cpt,/nbq | AIMedVision /message | PromptFlowApp intake-summary + after-visit-summary ONLY}. Separately: ClientApp -> LiveKit cloud (WebRTC, token from ServerApp) -> LivekitAgents (dispatch by agentName).",
+  "liveServices": ["ClientApp", "ServerApp", "AIClusterApp", "ClinicalAIServices", "Billing-Engine", "LivekitAgents", "AIMedVision", "LLMQuality"],
+  "legacyServicesStillPartiallyLive": ["PromptFlowApp"],
+  "ignoreForContext": "Do NOT load stale PromptFlowApp flows (assessment, treatment-recommendation, treatment-summary, AVS) into agent context. They are dead code replaced by ClinicalAIServices. Only the 2 live PromptFlowApp flows below are relevant.",
+  "services": [
+    {
+      "name": "ClientApp",
+      "stack": "React 18 + Ionic 8 + Vite + Capacitor 6 + TanStack Query + axios + socket.io-client + livekit-client",
+      "role": "Monolithic frontend (mobile + web).",
+      "calls": [
+        { "to": "ServerApp", "mechanism": "REST (axios, ${VITE_BACKEND_URL}/api)", "citation": "ClientApp/src/util/constants.ts:70" },
+        { "to": "ServerApp", "mechanism": "Socket.io /conversation,/real-time-intake,/scribe", "citation": "ClientApp/src/util/constants.ts:73-75" },
+        { "to": "LiveKit cloud", "mechanism": "WebRTC (token+serverUrl from ServerApp)", "citation": "ClientApp/src/services/ConversationService.ts:289-294" }
+      ],
+      "calledBy": [],
+      "notes": "Does NOT call AIClusterApp or any LLM microservice directly. Never bypasses ServerApp."
+    },
+    {
+      "name": "ServerApp",
+      "stack": "NestJS 11 + Drizzle ORM + Postgres + Socket.io + livekit-server-sdk + @azure/cosmos + @azure/service-bus + axios",
+      "role": "Monolithic backend. Socket.io server. Mints LiveKit tokens. DB schema source of truth.",
+      "calls": [
+        { "to": "AIClusterApp", "mechanism": "REST (axios, BACKEND_*_ENDPOINT, version:v2)", "citation": "ServerApp/src/services/intake/intake-summary.service.ts:36, configuration.ts:197-204" },
+        { "to": "LiveKit cloud", "mechanism": "livekit-server-sdk", "citation": "ServerApp/src/common/services/livekit/livekit.service.ts:42-66" },
+        { "to": "Postgres-hami", "mechanism": "Drizzle/pg (schema source of truth)", "citation": "ServerApp/package.json:75,89" },
+        { "to": "Cosmos", "mechanism": "@azure/cosmos", "citation": "ServerApp/src/common/config/configuration.ts:119-121" },
+        { "to": "ServiceBus", "mechanism": "@azure/service-bus queues", "citation": "ServerApp/src/common/config/configuration.ts:122-127" }
+      ],
+      "calledBy": ["ClientApp", "LLMQuality"],
+      "notes": "Reaches LLM microservices ONLY via AIClusterApp, never directly. No /score or ClinicalAIServices reference in ServerApp/src."
+    },
+    {
+      "name": "AIClusterApp",
+      "stack": "Python 3.11 + FastAPI + uvicorn + requests + azure-cosmos + psycopg3 + Azure Key Vault",
+      "role": "API GATEWAY for LLM microservices. Routes ServerApp requests to the right AI service.",
+      "calls": [
+        { "to": "ClinicalAIServices", "mechanism": "REST (as-pf-*-postgres-url -> /score, v2)", "citation": "AIClusterApp/api/helper.py:245-268" },
+        { "to": "Billing-Engine", "mechanism": "REST (billing-engine-postgres-url)", "citation": "AIClusterApp/api/helper.py:359-500" },
+        { "to": "AIMedVision", "mechanism": "REST (med-vision-url, parse_image)", "citation": "AIClusterApp/api/helper.py:328-356" },
+        { "to": "PromptFlowApp", "mechanism": "REST (as-pf-intake-url, as-pf-av-summary-url) — LIVE flows only", "citation": "AIClusterApp/api/helper.py:192-215,296-324" },
+        { "to": "FHIR-service", "mechanism": "REST (background, fhir-url + fhir-func-key)", "citation": "AIClusterApp/api/helper.py:174-189" },
+        { "to": "Postgres-hami", "mechanism": "psycopg3 (encounterLlmMetrics, v2)", "citation": "AIClusterApp/api/helper.py:133-157" },
+        { "to": "Cosmos", "mechanism": "azure-cosmos (LLMUsage, v1)", "citation": "AIClusterApp/api/helper.py:68-74" }
+      ],
+      "calledBy": ["ServerApp"],
+      "notes": "THE gateway. /scribe and /get_persona_doc DEPRECATED (410 Gone). Routes: /intake_summary,/treatment_recommendation,/assessment,/treatment_summary,/after_visit_summary,/icd/*,/cpt/*,/nbq/seed,/message,/document_quality."
+    },
+    {
+      "name": "ClinicalAIServices",
+      "stack": "Python 3.11 + FastAPI + pydantic-ai + psycopg3 + httpx + Azure OpenAI/Search",
+      "role": "LLM microservices: assessment-recommendation, treatment-recommendation. Replaces PromptFlowApp v1 flows.",
+      "calls": [
+        { "to": "Billing-Engine", "mechanism": "REST (httpx, fire_icd_trigger/fire_cpt_trigger, background)", "citation": "ClinicalAIServices/services/assessment-recommendation/assessment_recommendation/app/pipeline.py:281-305" },
+        { "to": "Postgres-hami", "mechanism": "psycopg3 AsyncConnectionPool", "citation": "ClinicalAIServices/common/config.py:36,116-125" },
+        { "to": "AzureOpenAI", "mechanism": "pydantic-ai", "citation": "ClinicalAIServices/common/config.py:37-49" }
+      ],
+      "calledBy": ["AIClusterApp"],
+      "notes": "Exposes POST /score. Only assessment & treatment-recommendation services exist. AVS, intake-summary, treatment-summary still on PromptFlowApp."
+    },
+    {
+      "name": "Billing-Engine",
+      "stack": "Python + FastAPI + pydantic-ai + psycopg3 + httpx + Azure Search",
+      "role": "ICD/CPT/NBQ coding engine. Leaf service.",
+      "calls": [
+        { "to": "Postgres-hami", "mechanism": "psycopg3", "citation": "Billing-Engine/src/common/config.py:42" },
+        { "to": "AzureOpenAI", "mechanism": "chat + embeddings", "citation": "Billing-Engine/src/common/config.py:33-39" }
+      ],
+      "calledBy": ["AIClusterApp", "ClinicalAIServices", "PromptFlowApp"],
+      "notes": "No outbound HTTP to any HAMI service. Leaf. Exposes /icd/*,/cpt/*,/nbq/seed,/health."
+    },
+    {
+      "name": "PromptFlowApp",
+      "stack": "Python + PromptFlow tool + psycopg3 + Azure Key Vault (legacy)",
+      "role": "Legacy. ONLY 2 LIVE FLOWS remain: intake-summary, after-visit-summary. All other flows (assessment, treatment-recommendation, treatment-summary, AVS) are STALE dead code replaced by ClinicalAIServices — DO NOT load into agent context.",
+      "liveFlows": ["intake-summary", "after-visit-summary"],
+      "staleFlowsIgnore": ["assessment", "treatment-recommendation", "treatment-summary", "AVS"],
+      "calls": [
+        { "to": "Billing-Engine", "mechanism": "REST (requests, trigger_icd_coding -> /icd/suggest, background) — only for live flows", "citation": "PromptFlowApp/mit-assessment-recommendation-generator/trigger_icd_coding.py:33-67" },
+        { "to": "Postgres-hami", "mechanism": "psycopg3", "citation": "PromptFlowApp/db/connection.py:1-19" }
+      ],
+      "calledBy": ["AIClusterApp"],
+      "notes": "When planning, account for PromptFlowApp ONLY if the feature touches intake-summary or after-visit-summary. For any other AI flow, route to ClinicalAIServices, NOT PromptFlowApp."
+    },
+    {
+      "name": "LivekitAgents",
+      "stack": "Python 3.13 + livekit-agents (uv workspace) + psycopg3 + openai/azure plugins",
+      "role": "Voice agents (intake, scribe). Dispatched by LiveKit cloud via agentName set by ServerApp.",
+      "calls": [
+        { "to": "LiveKit cloud", "mechanism": "livekit-agents WebSocket (NOT HTTP)", "citation": "LivekitAgents/packages/shared/pyproject.toml:6-18" },
+        { "to": "Postgres-hami", "mechanism": "psycopg3 (shares ServerApp drizzle schema)", "citation": "LivekitAgents/packages/shared/src/shared/database/llm_usage.py:7" }
+      ],
+      "calledBy": ["LiveKit cloud (dispatch)"],
+      "notes": "Not in HTTP request chain. Two agents: intake, scribe."
+    },
+    {
+      "name": "AIMedVision",
+      "stack": "Python + Azure Functions (durable) + FastAPI/uvicorn + psycopg3 + internal vision-model (VLM)",
+      "role": "Medical report/lab image parsing. Called by AIClusterApp /message.",
+      "calls": [
+        { "to": "vision-model", "mechanism": "REST (internal subproject)", "citation": "AIMedVision/medical-report-parser/shared/key_vault.py:29-32" },
+        { "to": "Postgres-hami", "mechanism": "psycopg3 (labs, medications - ServerApp drizzle schema)", "citation": "AIMedVision/medical-report-parser/db/repositories/lab_repo.py:11" }
+      ],
+      "calledBy": ["AIClusterApp"],
+      "notes": "Fans out to its own vision-model VLM subproject."
+    },
+    {
+      "name": "LLMQuality",
+      "stack": "Python + Django + azure-ai-evaluation + azure-cosmos + livekit-api + psycopg2",
+      "role": "Test/eval harness. NOT part of production request chain.",
+      "calls": [
+        { "to": "ServerApp", "mechanism": "REST (drives dev/staging/prod for eval)", "citation": "LLMQuality/app/hami_app.py:19-104" }
+      ],
+      "calledBy": [],
+      "notes": "Eval harness only. Not in prod call chain."
+    }
+  ],
+  "sharedStores": {
+    "Postgres-hami": {
+      "sharedBy": ["ServerApp", "AIClusterApp", "ClinicalAIServices", "Billing-Engine", "PromptFlowApp", "LivekitAgents", "AIMedVision"],
+      "schemaSourceOfTruth": "ServerApp/src/database/drizzle/schema/ + migrations",
+      "criticalNote": "DB schema change = WIDEST blast radius (7 services). Any schema delta MUST be flagged as touching all 7."
+    },
+    "Cosmos": { "sharedBy": ["ServerApp", "AIClusterApp", "PromptFlowApp", "LLMQuality"], "containers": ["LLMUsage", "conversations", "personaDocs (legacy)", "labs", "llmmetrics"] },
+    "AzureSearch": { "sharedBy": ["ClinicalAIServices", "Billing-Engine"] },
+    "KeyVault": { "sharedBy": ["all Python services"], "note": "Exact legacy secret names are sacred. Never invent new env vars." }
+  },
+  "blastRadiusRules": [
+    "ClientApp UI feature -> check if needs new ServerApp API endpoint (REST or Socket.io event) -> which may need new AIClusterApp route -> which may need new ClinicalAIServices/PromptFlowApp(live flows only) flow or Billing-Engine endpoint.",
+    "ClinicalAIServices flow change -> check AIClusterApp routing (as-pf-*-postgres-url secrets) -> check ServerApp BACKEND_*_ENDPOINT -> check ClientApp UI if user-facing.",
+    "Billing-Engine endpoint change -> check all callers: AIClusterApp, ClinicalAIServices, PromptFlowApp(live flows).",
+    "LivekitAgents change -> check ServerApp dispatch (agentName) + LiveKit token flow + ClientApp realtime UI.",
+    "DB schema change -> FLAG ALL 7 Postgres-hami services. ServerApp drizzle migration is source of truth. This is the highest-blast-radius change type.",
+    "Key Vault secret change -> check all Python services that resolve that secret. Never rename secrets.",
+    "AIMedVision change -> check AIClusterApp /message (fileMessage) caller. Usually contained."
+  ],
+  "unconfirmedFromCode": [
+    "Actual URL values of ServerApp BACKEND_*_ENDPOINT (live in Key Vault/ADO Library, not repo). ServerApp->AIClusterApp inferred from route-shape parity + ClinicalAIServices docstrings.",
+    "Whether BACKEND_SCRIBE_ENDPOINT, BACKEND_PERSONA_DOC_ENDPOINT, LLM_BRAIN_ENDPOINT point at AIClusterApp (deprecated /scribe,/get_persona_doc return 410) or ClinicalAIServices/LivekitAgents. Ask Sahil.",
+    "Which as-pf-*-postgres-url secrets now point at ClinicalAIServices vs still-live PromptFlowApp. Ask Sahil which flows are cut over (confirmed: assessment & treatment-recommendation are ClinicalAIServices; intake-summary & after-visit-summary still PromptFlowApp).",
+    "FHIR service ownership — no FHIR repo among the nine. Ask Sahil where the FHIR endpoint is hosted.",
+    "vision-model (inside AIMedVision) hosting topology."
+  ]
+}

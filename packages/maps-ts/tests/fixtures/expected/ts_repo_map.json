@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "generated_at": "2026-01-01T00:00:00Z",
+  "repo": "ts_repo",
+  "modules": [
+    {
+      "path": "src",
+      "language": "typescript",
+      "file_count": 1,
+      "purpose": "App entrypoint — wires the modules together."
+    },
+    {
+      "path": "src/pkg",
+      "language": "typescript",
+      "file_count": 3,
+      "purpose": "API surface — builds a Service."
+    },
+    {
+      "path": "tests",
+      "language": "typescript",
+      "file_count": 1,
+      "purpose": ""
+    }
+  ],
+  "symbols": [
+    {
+      "module": "src",
+      "file": "src/index.ts",
+      "name": "main",
+      "kind": "function",
+      "signature": "export function main(): number { ... }",
+      "line": 6
+    },
+    {
+      "module": "src/pkg",
+      "file": "src/pkg/api.ts",
+      "name": "build",
+      "kind": "function",
+      "signature": "export function build(): Service { ... }",
+      "line": 6
+    },
+    {
+      "module": "src/pkg",
+      "file": "src/pkg/core.ts",
+      "name": "Service",
+      "kind": "class",
+      "signature": "export class Service { ... }",
+      "line": 4
+    },
+    {
+      "module": "src/pkg",
+      "file": "src/pkg/core.ts",
+      "name": "helper",
+      "kind": "function",
+      "signature": "export function helper(a: number, b: number): number { ... }",
+      "line": 10
+    },
+    {
+      "module": "src/pkg",
+      "file": "src/pkg/core.ts",
+      "name": "IThing",
+      "kind": "interface",
+      "signature": "export interface IThing { ... }",
+      "line": 14
+    },
+    {
+      "module": "src/pkg",
+      "file": "src/pkg/util.ts",
+      "name": "formatName",
+      "kind": "function",
+      "signature": "export function formatName(first: string, last: string): string { ... }",
+      "line": 4
+    },
+    {
+      "module": "tests",
+      "file": "tests/core.spec.ts",
+      "name": "testService",
+      "kind": "function",
+      "signature": "export function testService(): void { ... }",
+      "line": 3
+    }
+  ],
+  "edges": [
+    {
+      "from": "src",
+      "to": "src/pkg",
+      "kind": "import"
+    },
+    {
+      "from": "tests",
+      "to": "src/pkg",
+      "kind": "import"
+    }
+  ],
+  "hot_files": [
+    {
+      "file": "src/pkg/core.ts",
+      "importers": 2
+    },
+    {
+      "file": "src/pkg/api.ts",
+      "importers": 1
+    }
+  ],
+  "entrypoints": [
+    "src/index.ts"
+  ],
+  "tests": [
+    "tests/core.spec.ts"
+  ]
+}

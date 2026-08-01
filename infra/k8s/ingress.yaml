@@ -1,0 +1,25 @@
+# Ingress (plan Phase 5): TLS at the cluster edge; the Tailscale funnel era
+# ends here. WebSocket upgrade headers are REQUIRED for the live trace.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zagent
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [zagent.bostonhealth.ai]
+      secretName: zagent-tls
+  rules:
+    - host: zagent.bostonhealth.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: zagent-backend
+                port: { number: 80 }

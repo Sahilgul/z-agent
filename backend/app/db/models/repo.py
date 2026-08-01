@@ -1,0 +1,64 @@
+"""repos (the LIVE registry — repos-as-data) + repo_profiles.
+
+integration_branch sourced from fleet-config/hami-repos.json at seed (6 of 10
+integrate on pg-main — golden tracks origin/<integrationBranch>, NEVER origin/HEAD
+or the local current branch). hami-repos.json is the bootstrap SEED; the DB row is
+the live registry afterwards. Archived repos: fetcher stops, hidden from the scope
+picker, old sessions still replay, golden dir shredded.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import sqlalchemy as sa
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class RepoStatus:
+    REGISTERED = "registered"
+    VALIDATING = "validating"
+    CLONING = "cloning"
+    INDEXING = "indexing"
+    READY = "ready"
+    READY_NO_MAP = "ready-no-map"
+    ERROR = "error"
+    ARCHIVED = "archived"
+
+
+class Repo(Base):
+    __tablename__ = "repos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(sa.String(128), unique=True, index=True)
+    ado_repo_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    remote_url: Mapped[str] = mapped_column(sa.String(512), default="")
+    integration_branch: Mapped[str] = mapped_column(sa.String(128))
+    status: Mapped[str] = mapped_column(sa.String(24), default=RepoStatus.REGISTERED, index=True)
+    status_detail: Mapped[str] = mapped_column(sa.Text, default="")
+    added_by: Mapped[int | None] = mapped_column(sa.ForeignKey("users.id"), nullable=True)
+    last_fetch_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_fetch_head: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    profile: Mapped["RepoProfile | None"] = relationship(back_populates="repo")
+
+
+class RepoProfile(Base):
+    __tablename__ = "repo_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repo_id: Mapped[int] = mapped_column(sa.ForeignKey("repos.id"), unique=True)
+    language: Mapped[str] = mapped_column(sa.String(32), default="")
+    test_cmds: Mapped[list] = mapped_column(sa.JSON, default=list)
+    map_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    extra: Mapped[dict] = mapped_column(sa.JSON, default=dict)
+
+    repo: Mapped["Repo"] = relationship(back_populates="profile")

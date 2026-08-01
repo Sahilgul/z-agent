@@ -1,0 +1,494 @@
+import asyncio
+
+import pytest
+from zagent_contracts import RunStage
+
+from app.db.models.lane import Lane
+from app.db.models.mode import Mode
+from app.db.models.run import Plan, Run
+from app.orchestrator import run_manager
+from app.orchestrator.run_manager import RunManager
+
+
+class _FakeIngest:
+    def __init__(self):
+        self.registered = []
+        self.unregistered = []
+    def register_run(self, run_id): self.registered.append(run_id)
+    def unregister_run(self, run_id): self.unregistered.append(run_id)
+
+
+class _FakeRelay:
+    def __init__(self):
+        self.stages = []
+        self.lanes = []
+    async def publish_run_stage(self, run_id, stage, actions):
+        self.stages.append((run_id, stage, actions))
+    async def publish_lane_status(self, run_id, lane_id, status):
+        self.lanes.append((run_id, lane_id, status))
+
+
+class _FakeControl:
+    def __init__(self):
+        self.interrupted = []
+        self.killed = []
+        self.nudged = []
+    async def interrupt(self, lane_id): self.interrupted.append(lane_id)
+    async def kill(self, lane_id): self.killed.append(lane_id)
+    async def nudge(self, lane_id, text): self.nudged.append((lane_id, text))
+
+
+class _FakeLaneManager:
+    pass
+
+
+def _seed_mode(session, name="ask", autonomy_default="supervised", enabled=True):
+    session.add(Mode(name=name, autonomy_default=autonomy_default, enabled=enabled,
+                     persona_prompt="p", permission_mode="default"))
+    session.commit()
+
+
+def _make_manager():
+    ingest, relay, control = _FakeIngest(), _FakeRelay(), _FakeControl()
+    rm = RunManager(ingest, relay, _FakeLaneManager(), control)
+    return rm, ingest, relay, control
+
+
+async def test_create_run_persists_and_registers(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session)
+    rm, ingest, relay, _ = _make_manager()
+    async def noop(*a, **k): pass
+    monkeypatch.setattr(rm, "_execute", noop)
+    run = await rm.create_run(source="button", initiated_by=u.id, mode_name="ask", task="do it")
+    assert run.stage == RunStage.QUEUED.value
+    assert run.created_by == u.id
+    assert run.mode == "ask"
+    assert run.id in ingest.registered
+    assert relay.stages[0][1] == RunStage.QUEUED.value
+    rm._tasks[run.id].cancel()
+    try: await rm._tasks[run.id]
+    except asyncio.CancelledError: pass
+
+
+async def test_create_run_unknown_mode_raises(session, make_user):
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    with pytest.raises(ValueError, match="unknown or disabled mode"):
+        await rm.create_run(source="button", initiated_by=u.id, mode_name="ghost", task="x")
+
+
+async def test_create_run_disabled_mode_raises(session, make_user):
+    u = make_user("a")
+    _seed_mode(session, name="ask", enabled=False)
+    rm, _, _, _ = _make_manager()
+    with pytest.raises(ValueError, match="unknown or disabled mode"):
+        await rm.create_run(source="button", initiated_by=u.id, mode_name="ask", task="x")
+
+
+async def test_create_run_autonomy_override(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session, autonomy_default="supervised")
+    rm, _, _, _ = _make_manager()
+    async def noop(*a, **k): pass
+    monkeypatch.setattr(rm, "_execute", noop)
+    run = await rm.create_run(source="button", initiated_by=u.id, mode_name="ask",
+                              task="x", autonomy="autonomous")
+    assert run.autonomy == "autonomous"
+    rm._tasks[run.id].cancel()
+    try: await rm._tasks[run.id]
+    except asyncio.CancelledError: pass
+
+
+async def test_stop_run_interrupts_and_cancels_task(session, make_user):
+    u = make_user("a")
+    _seed_mode(session)
+    rm, ingest, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, lane])
+    session.commit()
+    rm._tasks["r1"] = asyncio.create_task(asyncio.sleep(100))
+    await rm.stop_run("r1")
+    await asyncio.sleep(0)
+    session.expire_all()
+    assert session.get(Run, "r1").stage == RunStage.INTERRUPTED.value
+    assert "l1" in control.interrupted
+    assert relay.lanes[-1] == ("r1", "l1", "stopped")
+    assert relay.stages[-1][1] == RunStage.INTERRUPTED.value
+    assert rm._tasks["r1"].cancelled() or rm._tasks["r1"].done()
+
+
+async def test_abandon_run_kills_and_shreds(session, make_user, monkeypatch):
+    u = make_user("a")
+    rm, ingest, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", container_id="c1")
+    session.add_all([run, lane])
+    session.commit()
+    stopped = []
+    shredded = []
+    monkeypatch.setattr(run_manager.sandbox_manager, "stop_container", lambda cid: stopped.append(cid))
+    monkeypatch.setattr(run_manager.sandbox_manager, "shred_workspace", lambda rid: shredded.append(rid))
+    rm._tasks["r1"] = asyncio.create_task(asyncio.sleep(100))
+    await rm.abandon_run("r1")
+    session.expire_all()
+    assert session.get(Run, "r1").stage == RunStage.ABANDONED.value
+    assert "l1" in control.killed
+    assert stopped == ["c1"]
+    assert shredded == ["r1"]
+    assert "r1" in ingest.unregistered
+    assert relay.stages[-1][1] == RunStage.ABANDONED.value
+
+
+async def test_nudge_lane_sets_running(session, make_user):
+    u = make_user("a")
+    rm, _, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="researcher", status="idle")
+    session.add_all([run, lane])
+    session.commit()
+    await rm.nudge_lane("r1", "l1", "hurry up")
+    session.expire_all()
+    assert session.get(Lane, "l1").status == "running"
+    assert control.nudged == [("l1", "hurry up")]
+    assert relay.lanes[-1] == ("r1", "l1", "running")
+
+
+async def test_nudge_lane_missing_lane_is_noop(session, make_user):
+    u = make_user("a")
+    rm, _, _, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    session.add(run); session.commit()
+    await rm.nudge_lane("r1", "ghost", "x")
+    assert control.nudged == [("ghost", "x")]
+
+
+async def test_reconcile_on_boot_interrupts_active_runs(session, make_user):
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    for stage in (RunStage.PROVISIONING.value, RunStage.INVESTIGATING.value,
+                  RunStage.DEVELOPING.value, RunStage.VERIFYING.value,
+                  RunStage.COMPLETED.value):
+        r = Run(id=f"r-{stage}", created_by=u.id, mode="ask", stage=stage)
+        session.add(r)
+    session.commit()
+    count = await rm.reconcile_on_boot()
+    assert count == 4  # completed is not in the active set
+    session.expire_all()
+    assert session.get(Run, f"r-{RunStage.COMPLETED.value}").stage == RunStage.COMPLETED.value
+    assert session.get(Run, f"r-{RunStage.INVESTIGATING.value}").stage == RunStage.INTERRUPTED.value
+
+
+async def test_execute_failure_path_marks_failed(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session)
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.QUEUED.value)
+    session.add(run); session.commit()
+
+    class BoomBlueprint:
+        async def execute(self, ctx):
+            raise RuntimeError("agent crashed")
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: BoomBlueprint())
+    await rm._execute("r1", "task", None)
+    session.expire_all()
+    assert session.get(Run, "r1").stage == RunStage.FAILED.value
+    assert session.get(Run, "r1").finished_at is not None
+    assert relay.stages[-1][1] == RunStage.FAILED.value
+
+
+# --------------------------------------------------------------- plan HITL chains
+async def test_continue_to_development_runs_development_blueprint(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session, name="development")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="plan", stage=RunStage.AWAITING_USER.value, title="t", repo="ServerApp")
+    session.add(run); session.commit()
+
+    class SpyBlueprint:
+        ran = False
+        async def execute(self, ctx):
+            SpyBlueprint.ran = True
+
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: SpyBlueprint())
+    await rm.continue_to_development("r1")
+    await asyncio.sleep(0)
+    assert SpyBlueprint.ran is True
+    assert "r1" in rm._tasks
+
+
+async def test_replan_injects_critic_notes(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session, name="plan")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="plan", stage=RunStage.PLANNING.value, title="t", repo="ServerApp")
+    session.add(run); session.commit()
+    captured = {}
+
+    class SpyBlueprint:
+        async def execute(self, ctx):
+            captured["notes"] = ctx.artifacts.get("critic_notes")
+
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: SpyBlueprint())
+    await rm.replan("r1", notes="fix citations")
+    await asyncio.sleep(0)
+    assert captured["notes"] == "fix citations"
+
+
+async def test_create_pr_calls_delivery_and_stages_pr_ready(session, make_user, monkeypatch):
+    from app.db.models.delivery import PrLink
+    u = make_user("a")
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="development", stage=RunStage.VERIFYING.value,
+              title="ship it", repo="ServerApp")
+    session.add(run); session.commit()
+    from app.services import delivery
+
+    async def fake_open(run_id, repo_name, ws, ado_client=None):
+        return PrLink(run_id=run_id, repo=repo_name, branch="agent/x", ado_pr_id=7, status="open")
+    monkeypatch.setattr(delivery, "open_pr", fake_open)
+    await rm.create_pr("r1")
+    session.expire_all()
+    assert session.get(Run, "r1").stage == RunStage.PR_READY.value
+
+
+async def test_create_pr_falls_back_to_computed_workspace(session, make_user, monkeypatch):
+    from app.db.models.delivery import PrLink
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="development", stage=RunStage.VERIFYING.value,
+              title="t", repo="ServerApp")
+    session.add(run); session.commit()
+    from app.services import delivery
+    seen = {}
+
+    async def fake_open(run_id, repo_name, ws, ado_client=None):
+        seen["workspace"] = ws
+        return PrLink(run_id=run_id, repo=repo_name, branch="b", ado_pr_id=1, status="open")
+    monkeypatch.setattr(delivery, "open_pr", fake_open)
+    await rm.create_pr("r1")
+    assert "r1" in seen["workspace"]
+
+
+async def test_merge_pr_calls_delivery_and_completes(session, make_user, monkeypatch):
+    u = make_user("a")
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="development", stage=RunStage.PR_READY.value,
+              title="t", repo="ServerApp")
+    session.add(run); session.commit()
+    from app.services import delivery
+
+    async def fake_merge(run_id, user_id, ado_client=None):
+        return {"link": None, "handoff_url": None}
+    monkeypatch.setattr(delivery, "merge_pr", fake_merge)
+    handoff = await rm.merge_pr("r1", u.id)
+    assert handoff is None
+    session.expire_all()
+    assert session.get(Run, "r1").stage == RunStage.COMPLETED.value
+    assert session.get(Run, "r1").finished_at is not None
+
+
+async def test_merge_pr_handoff_keeps_run_pr_ready(session, make_user, monkeypatch):
+    """merge_native_ui path: no completion happened, so the run must NOT move
+    to completed — the human finishes in ADO; the handoff URL reaches the API."""
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="development", stage=RunStage.PR_READY.value,
+              title="t", repo="ServerApp")
+    session.add(run); session.commit()
+    from app.services import delivery
+
+    async def fake_merge(run_id, user_id, ado_client=None):
+        return {"link": None, "handoff_url": "https://dev.azure.com/o/p/_git/r/pullrequest/9"}
+    monkeypatch.setattr(delivery, "merge_pr", fake_merge)
+    handoff = await rm.merge_pr("r1", u.id)
+    assert handoff.endswith("pullrequest/9")
+    session.expire_all()
+    stayed = session.get(Run, "r1")
+    assert stayed.stage == RunStage.PR_READY.value
+    assert stayed.finished_at is None
+
+
+# --------------------------------------------------------------- lane controls (§4)
+async def test_stop_lane_interrupts_and_marks_stopped(session, make_user):
+    u = make_user("a")
+    rm, _, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="explorer", status="running")
+    session.add_all([run, lane]); session.commit()
+    await rm.stop_lane("r1", "l1")
+    session.expire_all()
+    stopped = session.get(Lane, "l1")
+    assert stopped.status == "stopped"
+    assert stopped.finished_at is not None
+    assert control.interrupted == ["l1"]
+    assert relay.lanes[-1] == ("r1", "l1", "stopped")
+
+
+async def test_pin_finding_records_event(session, make_user):
+    u = make_user("a")
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="explorer", status="idle", next_seq=3)
+    session.add_all([run, lane]); session.commit()
+    await rm.pin_finding("r1", "l1", "dedupe key is normalize()")
+    session.expire_all()
+    from app.db.models.event import Event
+    ev = session.query(Event).filter_by(run_id="r1", type="pin").one()
+    assert ev.lane_id == "l1"
+    assert ev.payload["note"] == "dedupe key is normalize()"
+    assert relay.lanes[-1] == ("r1", "l1", "pinned")
+
+
+async def test_pin_finding_wrong_run_raises(session, make_user):
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="other-run", persona="explorer", status="idle")
+    session.add_all([run, lane]); session.commit()
+    with pytest.raises(ValueError, match="lane not found"):
+        await rm.pin_finding("r1", "l1")
+
+
+async def test_kill_replace_respawns_with_original_context(session, make_user, monkeypatch):
+    u = make_user("a")
+    rm, _, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="explorer", status="running",
+                spawn_context={"prompt": "trace the webhook leg", "persona_prompt": "be an explorer"})
+    session.add_all([run, lane]); session.commit()
+
+    captured = {}
+
+    class _Replacement:
+        id = "lane-new"
+
+    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos):
+        captured.update({"persona": persona, "prompt": prompt,
+                         "persona_prompt": persona_prompt})
+        return _Replacement()
+    rm.lane_manager.spawn = fake_spawn
+
+    replacement = await rm.kill_replace_lane("r1", "l1")
+    assert replacement.id == "lane-new"
+    assert captured["prompt"] == "trace the webhook leg"
+    assert captured["persona_prompt"] == "be an explorer"
+    session.expire_all()
+    assert session.get(Lane, "l1").status == "replaced"
+    assert relay.lanes[-1] == ("r1", "lane-new", "running")
+
+
+async def test_kill_replace_wrong_run_raises(session, make_user):
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="other-run", persona="explorer", status="running")
+    session.add_all([run, lane]); session.commit()
+    with pytest.raises(ValueError, match="lane not found"):
+        await rm.kill_replace_lane("r1", "l1")
+
+
+# --------------------------------------------------------------- start_plan (debug -> plan promotion)
+async def test_start_plan_chains_into_plan_blueprint_with_seed(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session, name="plan")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="debug", stage=RunStage.AWAITING_USER.value,
+              title="Bug: dedupe", repo="ServerApp")
+    plan = Plan(run_id="r1", structured={"title": "Fix dedupe", "steps": [{"index": 0, "title": "s0"}]},
+                status="draft")
+    session.add_all([run, plan]); session.commit()
+    captured = {}
+
+    class SpyBlueprint:
+        async def execute(self, ctx):
+            captured["seed"] = ctx.artifacts.get("seed_plan")
+            captured["notes"] = ctx.artifacts.get("critic_notes")
+
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: SpyBlueprint())
+    await rm.start_plan("r1")
+    await asyncio.sleep(0)
+    assert captured["seed"] == plan.structured
+    assert "promoted from debug" in captured["notes"]
+
+
+async def test_start_plan_with_no_draft_seeds_none(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session, name="plan")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="debug", stage=RunStage.AWAITING_USER.value,
+              title="t", repo="ServerApp")
+    session.add(run); session.commit()
+    captured = {}
+
+    class SpyBlueprint:
+        async def execute(self, ctx):
+            captured["seed"] = ctx.artifacts.get("seed_plan")
+
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: SpyBlueprint())
+    await rm.start_plan("r1")
+    await asyncio.sleep(0)
+    assert captured["seed"] is None
+
+
+# --------------------------------------------------------------- title hydration (B4)
+async def test_create_run_hydrates_generic_title_from_work_item(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session)
+    rm, _, _, _ = _make_manager()
+    async def noop(*a, **k): pass
+    monkeypatch.setattr(rm, "_execute", noop)
+    from app.services import hydration
+    async def fake_hydrate(work_item_id, task, ado_client=None):
+        return "Bug: dedupe drift on normalize"
+    monkeypatch.setattr(hydration, "hydrate_title", fake_hydrate)
+    run = await rm.create_run(source="button", initiated_by=u.id, mode_name="ask",
+                              task="", work_item_id=42)
+    assert run.title == "Bug: dedupe drift on normalize"
+    rm._tasks[run.id].cancel()
+    try: await rm._tasks[run.id]
+    except asyncio.CancelledError: pass
+
+
+async def test_create_run_keeps_typed_title(session, make_user, monkeypatch):
+    u = make_user("a")
+    _seed_mode(session)
+    rm, _, _, _ = _make_manager()
+    async def noop(*a, **k): pass
+    monkeypatch.setattr(rm, "_execute", noop)
+    from app.services import hydration
+    async def boom(*a, **k):
+        raise AssertionError("hydrate_title must not run for a real typed title")
+    monkeypatch.setattr(hydration, "hydrate_title", boom)
+    run = await rm.create_run(source="button", initiated_by=u.id, mode_name="ask",
+                              task="Investigate dedupe drift", work_item_id=42)
+    assert run.title == "Investigate dedupe drift"
+    rm._tasks[run.id].cancel()
+    try: await rm._tasks[run.id]
+    except asyncio.CancelledError: pass
+
+
+# --------------------------------------------------------------- chained failure handling (B5)
+async def test_chained_blueprint_failure_marks_run_failed(session, make_user, monkeypatch):
+    """B5: a chained blueprint (approve/reject/start_plan chain) that raises must
+    transition the run to FAILED + relay — never die silently mid-stage."""
+    u = make_user("a")
+    _seed_mode(session, name="development")
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="plan", stage=RunStage.AWAITING_USER.value,
+              title="t", repo="ServerApp")
+    session.add(run); session.commit()
+
+    class BoomBlueprint:
+        async def execute(self, ctx):
+            raise RuntimeError("no approved plan to develop")
+
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: BoomBlueprint())
+    await rm.continue_to_development("r1")
+    task = rm._tasks["r1"]
+    await task  # guarded: the exception is handled inside, the task itself completes
+    session.expire_all()
+    assert session.get(Run, "r1").stage == RunStage.FAILED.value
+    assert session.get(Run, "r1").finished_at is not None
+    assert relay.stages[-1] == ("r1", RunStage.FAILED.value, [])

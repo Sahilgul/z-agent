@@ -1,0 +1,47 @@
+# Redis for the event bus + approval streams (plan Phase 5). Single replica
+# with AOF persistence — the streams are rebuildable from the DB, so HA Redis
+# is not worth the operational cost at fleet scale.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zagent-redis
+  labels: { app: zagent-redis }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: zagent-redis }
+  template:
+    metadata:
+      labels: { app: zagent-redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["redis-server", "--appendonly", "yes"]
+          ports: [{ containerPort: 6379 }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: zagent-redis-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zagent-redis-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 10Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zagent-redis
+spec:
+  selector: { app: zagent-redis }
+  ports: [{ port: 6379 }]

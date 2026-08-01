@@ -1,0 +1,21 @@
+[project]
+name = "zagent-worker"
+version = "0.1.0"
+description = "Sandbox-side agent runner: Claude Agent SDK session loop, StepEvent normalizer, Redis forwarder, control listener"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # SDK PINNED — fork_session lives in _internal (private API). Bump only with
+    # the fork smoke test green (worker/tests/test_fork_smoke.py).
+    "claude-agent-sdk==0.2.128",
+    "websockets>=13,<16",
+    "redis>=5,<7",
+    "zagent-contracts",
+    "zagent-ado-mcp",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["worker"]

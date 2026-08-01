@@ -1,0 +1,50 @@
+# Zagent backend on AKS (plan Phase 5 production hardening).
+# Secrets come from Key Vault via the CSI driver (BYO-PAT + gateway keys +
+# VAPID) — never from ConfigMaps, never baked into the image.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zagent-backend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zagent-backend
+  labels: { app: zagent-backend }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: zagent-backend }
+  template:
+    metadata:
+      labels: { app: zagent-backend }
+    spec:
+      serviceAccountName: zagent-backend
+      containers:
+        - name: backend
+          image: zagentacr.azurecr.io/zagent-backend:IMAGE_TAG
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: ZAGENT_DB_URL
+              valueFrom: { secretKeyRef: { name: zagent-secrets, key: db-url } }
+            - name: ZAGENT_REDIS_URL
+              value: redis://zagent-redis:6379/0
+            - name: ZAGENT_ENV
+              value: production
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zagent-backend
+spec:
+  selector: { app: zagent-backend }
+  ports: [{ port: 80, targetPort: 8000 }]

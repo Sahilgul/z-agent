@@ -1,0 +1,181 @@
+name: zagent
+
+# Ubuntu-VM stack (plan §7 Phase 4 gate — the production-shaped deployment).
+# Everything the app needs runs here; the only internet-egress services are
+# `gateway` (Foundry) and `db`-adjacent nothing. Access via Tailscale profile.
+#
+#   db          — APP Postgres (Phase 4 cutover: ZAGENT_DB_URL points here)
+#   redis       — event bus (AOF everysec)
+#   gateway-db  — LiteLLM-internal Postgres (disposable; re-mint keys to rebuild)
+#   gateway     — LiteLLM proxy, sole LLM egress, virtual keys + budgets
+#   migrate     — one-shot: alembic upgrade head + seed (runs before backend)
+#   backend     — FastAPI control plane; spawns lane containers via docker.sock
+#   web         — nginx: apps/web dist + API/WS reverse proxy (single origin)
+
+networks:
+  internal:
+    driver: bridge
+  egress:
+    driver: bridge
+  lane:
+    # Worker lane lockdown (plan §10): NO internet route — lanes reach ONLY the
+    # gateway (LLM) and redis (events/control).
+    driver: bridge
+    internal: true
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zagent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: zagent
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis-data:/data
+    networks: [internal, lane]
+    restart: unless-stopped
+
+  gateway-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${GATEWAY_DB_PASSWORD:?set in .env}
+      POSTGRES_DB: litellm
+    volumes:
+      - gateway-db-data:/var/lib/postgresql/data
+    networks: [internal]
+    restart: unless-stopped
+
+  gateway:
+    image: ghcr.io/berriai/litellm:main-v1.94.1-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    environment:
+      DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD}@gateway-db:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
+      AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:?set in .env}
+      STORE_MODEL_IN_DB: "True"
+    volumes:
+      - ../litellm/config.yaml:/app/config.yaml:ro
+    depends_on:
+      - gateway-db
+    networks:
+      - internal
+      - egress        # only the gateway may reach Foundry / the internet
+      - lane          # lanes' sole LLM egress point
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    working_dir: /app/backend
+    command: ["sh", "-c", "alembic upgrade head && python -m app.auth.seed_users"]
+    environment:
+      ZAGENT_DB_URL: postgresql+psycopg://zagent:${POSTGRES_PASSWORD}@db:5432/zagent
+      ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
+      ZAGENT_BOOTSTRAP_ADMIN_USERNAME: ${ZAGENT_BOOTSTRAP_ADMIN_USERNAME:-sahil}
+      ZAGENT_BOOTSTRAP_ADMIN_PIN: ${ZAGENT_BOOTSTRAP_ADMIN_PIN:?set in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    environment:
+      ZAGENT_DB_URL: postgresql+psycopg://zagent:${POSTGRES_PASSWORD}@db:5432/zagent
+      ZAGENT_REDIS_URL: redis://redis:6379/0
+      ZAGENT_GATEWAY_URL: http://gateway:4000
+      ZAGENT_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      ZAGENT_JWT_SECRET: ${ZAGENT_JWT_SECRET:?set in .env}
+      ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
+      ZAGENT_BOOTSTRAP_ADMIN_USERNAME: ${ZAGENT_BOOTSTRAP_ADMIN_USERNAME:-sahil}
+      ZAGENT_BOOTSTRAP_ADMIN_PIN: ${ZAGENT_BOOTSTRAP_ADMIN_PIN}
+      ZAGENT_FETCH_PAT: ${FETCH_PAT:-}
+      ZAGENT_FLEET_PAT: ${FLEET_PAT:-}
+      ZAGENT_ADO_ORG: ${ADO_ORG:-}
+      ZAGENT_ADO_PROJECT: ${ADO_PROJECT:-}
+      ZAGENT_ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET:-}
+      ZAGENT_SERVICE_ACCOUNT_DESCRIPTOR: ${SERVICE_ACCOUNT_DESCRIPTOR:-}
+      ZAGENT_GOLDEN_DIR: /golden/repos
+      ZAGENT_SESSIONS_DIR: /sessions
+      ZAGENT_FLEET_CONFIG_DIR: /fleet-config
+    volumes:
+      - golden:/golden
+      - sessions:/sessions
+      - ../../fleet-config:/fleet-config:ro
+      # Lane spawning: the sandbox manager drives sibling worker containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      gateway:
+        condition: service_started
+    networks: [internal, lane]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/vm/web.Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "127.0.0.1:8080:80"   # LAN-local; real access is the Tailscale profile
+    networks: [internal]
+    restart: unless-stopped
+
+  pkgproxy:
+    profiles: [pkgproxy]
+    image: ubuntu/squid:latest
+    volumes:
+      - ../squid/squid.conf:/etc/squid/squid.conf:ro
+      - pkg-cache:/var/spool/squid
+    networks:
+      - lane
+      - egress
+    restart: unless-stopped
+
+  tailscale:
+    profiles: [tailscale]
+    image: tailscale/tailscale:stable
+    hostname: zagent
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro
+    depends_on:
+      - web
+    networks: [internal]
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  redis-data:
+  gateway-db-data:
+  tailscale-state:
+  pkg-cache:
+  pip-cache:
+  npm-cache:
+  golden:
+  sessions:

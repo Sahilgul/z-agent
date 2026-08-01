@@ -1,0 +1,31 @@
+"""approvals — plan | tool | knowledge | pr. Timeout behavior is deterministic
+(plan §10): timeout = DENY + notify, EXCEPT Autonomous = allow-with-log.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import sqlalchemy as sa
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Approval(Base):
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid
+    run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)
+    lane_id: Mapped[str | None] = mapped_column(nullable=True)
+    kind: Mapped[str] = mapped_column(sa.String(16))  # plan | tool | knowledge | pr
+    payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)
+    decision: Mapped[str | None] = mapped_column(sa.String(16), nullable=True)  # approved|denied|timeout
+    decided_by: Mapped[int | None] = mapped_column(sa.ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
