@@ -41,14 +41,26 @@ def _set_status(repo_id: int, status: str, detail: str = "") -> None:
         session.close()
 
 
+def _pat_auth_env(pat: str) -> dict[str, str]:
+    """git has NO environment variable for http.extraHeader — the header is a
+    config key only. GIT_CONFIG_COUNT/KEY/VALUE (git >= 2.31) injects it as
+    config without putting the PAT in argv, where `ps` would show it."""
+    auth = base64.b64encode(f":{pat}".encode()).decode()
+    return {
+        **_env(),
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {auth}",
+    }
+
+
 def validate_remote(remote_url: str, pat: str) -> list[str]:
     """ls-remote validation — the branch list is FETCHED, never free-typed."""
-    auth = base64.b64encode(f":{pat}".encode()).decode()
     result = subprocess.run(
         ["git", "ls-remote", "--heads", remote_url],
         capture_output=True, text=True, timeout=60,
-        env={"GIT_TERMINAL_PROMPT": "0", "GIT_HTTP_EXTRA_HEADER": f"Authorization: Basic {auth}",
-             **_env()},
+        env=_pat_auth_env(pat),
     )
     if result.returncode != 0:
         raise OnboardingError(f"remote unreachable or PAT lacks Code:Read — {result.stderr[:200]}")
@@ -104,10 +116,14 @@ async def onboard(repo_id: int, relay=None) -> None:
         dest = settings.golden_dir / name
         if not dest.exists():
             settings.golden_dir.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(
+            clone = await asyncio.to_thread(
                 subprocess.run,
                 ["git", "clone", "--quiet", url, str(dest)],
+                capture_output=True, text=True,
+                env=_pat_auth_env(settings.fetch_pat),
             )
+            if clone.returncode != 0:
+                raise OnboardingError(f"clone failed — {clone.stderr[:200]}")
         helper = str(settings.fleet_config_dir.parent / "scripts" / "git-credential-zagent")
         auth = base64.b64encode(f":{settings.fetch_pat}".encode()).decode()
         for args in (
