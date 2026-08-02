@@ -3,12 +3,16 @@
 # model_list entry, zero architecture changes.
 
 model_list:
+  # kimi-foundry is the ONLY name the rest of the system may ask for: lane
+  # virtual keys are scoped to it (gateway/litellm.py mint_key). Renaming this
+  # alias breaks every lane.
   - model_name: kimi-foundry
     litellm_params:
-      # Azure AI Foundry serverless/MaaS deployment of Kimi (Azure AI provider).
-      # Set the deployment name to YOUR Foundry deployment id.
-      model: azure_ai/Kimi-K2-Thinking
-      api_base: https://YOUR-FOUNDRY-RESOURCE.services.ai.azure.com/models
+      # All three come from infra/vm/.env — nothing deployment-specific is
+      # committed here. FOUNDRY_MODEL carries the provider prefix AND the
+      # deployment name, e.g. openai/Kimi-K2.6.
+      model: os.environ/FOUNDRY_MODEL
+      api_base: os.environ/FOUNDRY_API_BASE
       api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
     model_info:
       # EXPLICIT pricing — LiteLLM's registry may not price Kimi and the

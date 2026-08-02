@@ -44,7 +44,7 @@ class GatewayClient:
             resp = await client.post("/key/generate", json={
                 "key_alias": alias,
                 "max_budget": max_budget_usd,
-                "models": models or ["kimi-foundry"],
+                "models": models or [get_settings().gateway_model],
             })
             resp.raise_for_status()
             data = resp.json()

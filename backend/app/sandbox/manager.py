@@ -119,6 +119,9 @@ class SandboxManager:
             "REDIS_URL": self.settings.worker_redis_url,
             "ANTHROPIC_BASE_URL": self.settings.worker_gateway_url,
             "ANTHROPIC_AUTH_TOKEN": lane.gateway_key or "",
+            # Without this the SDK sends its own default Claude model name, which
+            # the gateway does not publish and the lane key is not scoped to.
+            "MODEL": self.settings.gateway_model,
             "WORKSPACE_DIR": "/workspace",
         }
         if lane.session_id:

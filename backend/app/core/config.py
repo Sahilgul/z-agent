@@ -20,6 +20,10 @@ class Settings(BaseSettings):
 
     gateway_url: str = "http://localhost:4000"
     litellm_master_key: str = ""
+    # The gateway's public model alias (infra/litellm/config.yaml model_name).
+    # Lane virtual keys are scoped to it, so every caller must use this exact
+    # string — asking for anything else is rejected by the gateway.
+    gateway_model: str = "kimi-foundry"
     # URLs as seen FROM WORKER CONTAINERS (compose network / host.docker.internal)
     worker_redis_url: str = "redis://redis:6379/0"
     worker_gateway_url: str = "http://gateway:4000"
@@ -82,12 +86,12 @@ class Settings(BaseSettings):
     # Knowledge flywheel retrieval (plan §3 G-1 fix): cheap-model rerank of
     # trigger_descriptions at run start. Any gateway failure falls back to
     # deterministic lexical ranking — retrieval must never fail a run.
-    knowledge_rerank_model: str = "kimi-k2.5"
+    knowledge_rerank_model: str = "kimi-foundry"
     knowledge_top_k: int = 8
     knowledge_rerank_timeout_seconds: float = 10.0
 
     # Ideas space (plan §6): Counsel + Lead synthesis completions via the gateway.
-    ideas_model: str = "kimi-k2.5"
+    ideas_model: str = "kimi-foundry"
 
     # BYO-PAT (plan §1b Phase 3): local-era at-rest encryption key; Key Vault
     # takes over at the VM move. Empty disables BYO-PAT storage.

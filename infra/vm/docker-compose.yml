@@ -69,6 +69,10 @@ services:
       # Optional at first boot: the gateway starts without it; LLM calls fail
       # until a real Foundry key is set (UI/login/runs-metadata work regardless).
       AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:-}
+      # Which Foundry deployment kimi-foundry actually routes to (config.yaml
+      # reads both via os.environ/, so this file stays deployment-agnostic).
+      FOUNDRY_MODEL: ${FOUNDRY_MODEL:?set in .env}
+      FOUNDRY_API_BASE: ${FOUNDRY_API_BASE:?set in .env}
       STORE_MODEL_IN_DB: "True"
     volumes:
       - ../litellm/config.yaml:/app/config.yaml:ro

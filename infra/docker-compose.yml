@@ -49,6 +49,8 @@ services:
       DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD}@gateway-db:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
       AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:?set in .env}
+      FOUNDRY_MODEL: ${FOUNDRY_MODEL:?set in .env}
+      FOUNDRY_API_BASE: ${FOUNDRY_API_BASE:?set in .env}
       STORE_MODEL_IN_DB: "True"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
