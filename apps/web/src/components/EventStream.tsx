@@ -34,11 +34,29 @@ function Thinking({ item }: { item: StreamItem }) {
   );
 }
 
+/** The agent's prose reads as a left-aligned chat bubble, opposite the user's
+ *  right-aligned one — the two voices are told apart at a glance. */
+function Answer({ body }: { body: string }) {
+  return (
+    <div className="mb-2.5 flex" data-kind="message">
+      <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-hairline bg-bg-raised px-s4 py-2.5">
+        <div className="text-micro mb-s1 text-ink-faint">agent</div>
+        <div className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-[1.65] text-ink-primary">
+          {body}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Item({ item }: { item: StreamItem }) {
   const isAnswer = item.kind === "message" && !item.live;
   // Short replies arrive as a title with no detail body; the answer must still
   // render, so fall back to the title rather than suppressing both.
   const body = isAnswer ? item.text || item.title : item.text;
+  if (isAnswer) {
+    return <Answer body={body} />;
+  }
   return (
     <div className="mb-2.5 flex gap-2.5" data-kind={item.kind}>
       <span className={cn("w-0.5 flex-none rounded-sm", KIND_RAIL[item.kind] ?? "bg-hairline")} aria-hidden="true" />
@@ -46,23 +64,12 @@ function Item({ item }: { item: StreamItem }) {
         <Thinking item={item} />
       ) : (
         <div className="min-w-0 flex-1">
-          {/* The final answer is the point of the run — it gets prose treatment
-              instead of the mono step title every other kind carries. */}
-          {!isAnswer && (
-            <div className="font-mono text-[12px] text-ink-secondary">
-              {item.title}
-              {item.ok === false && <span className="text-danger-bright"> failed</span>}
-            </div>
-          )}
+          <div className="font-mono text-[12px] text-ink-secondary">
+            {item.title}
+            {item.ok === false && <span className="text-danger-bright"> failed</span>}
+          </div>
           {body && (
-            <pre
-              className={cn(
-                BODY,
-                isAnswer && "max-h-none font-sans text-[13.5px] leading-[1.65] text-ink-primary",
-              )}
-            >
-              {body}
-            </pre>
+            <pre className={BODY}>{body}</pre>
           )}
         </div>
       )}
@@ -102,10 +109,11 @@ export function EventStream({
       aria-label="agent event stream"
     >
       {prompt && (
-        <div className="mb-s3 flex gap-2.5" data-kind="prompt">
-          <span className="w-0.5 flex-none rounded-sm bg-blue" aria-hidden="true" />
-          <div className="min-w-0 flex-1">
-            <div className="text-micro mb-s1 text-ink-faint">you</div>
+        /* The user's message sits right-aligned in a filled bubble, mirroring
+           chat conventions so the two voices never blur. */
+        <div className="mb-s3 flex justify-end" data-kind="prompt">
+          <div className="max-w-[80%] rounded-2xl rounded-tr-sm border border-blue bg-bg-module px-s4 py-2.5">
+            <div className="text-micro mb-s1 text-right text-ink-faint">you</div>
             <div className="whitespace-pre-wrap break-words text-[13.5px] leading-[1.6] text-ink-primary">
               {prompt}
             </div>

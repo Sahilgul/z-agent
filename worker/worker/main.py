@@ -57,6 +57,8 @@ class LaneRuntime:
         self.status = "starting"
         self.last_activity = asyncio.get_event_loop().time()
         self._stop = asyncio.Event()
+        self._pump_done = asyncio.Event()
+        self._pump_task: asyncio.Task | None = None
 
     def _options(self) -> ClaudeAgentOptions:
         kwargs: dict = {
@@ -77,29 +79,37 @@ class LaneRuntime:
         self.status = "running"
         await self.forwarder.heartbeat(self.status)
         async with ClaudeSDKClient(options=self._options()) as client:
-            pump = asyncio.create_task(self._pump(client), name="event-pump")
+            self._pump_task = asyncio.create_task(self._pump(client), name="event-pump")
             control = asyncio.create_task(self._control_loop(client), name="control")
             heartbeat = asyncio.create_task(self._heartbeat_loop(), name="heartbeat")
             watchdog = asyncio.create_task(self._idle_watchdog(), name="idle-watchdog")
             await client.query(self.cfg.task_prompt)
-            done, pending = await asyncio.wait(
-                {pump, control, heartbeat, watchdog},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            for task in done:
-                if task is pump and (exc := task.exception()):
-                    # Gateway-down failure story: lane FAILS SAFE — the session
-                    # volume makes it resumable (plan §10).
-                    self.status = "failed"
-                    await self.forwarder.heartbeat(self.status)
-                    raise exc
+            try:
+                # Wait for the CONTROL loop, not the pump: the pump legitimately
+                # ends after every turn and is re-armed by nudges; control ends
+                # only on kill. A pump exception is the lane's death, though.
+                while not self._stop.is_set():
+                    if control.done():
+                        break
+                    if self._pump_task.done() and (exc := self._pump_task.exception()):
+                        # Gateway-down failure story: lane FAILS SAFE — the session
+                        # volume makes it resumable (plan §10).
+                        self.status = "failed"
+                        await self.forwarder.heartbeat(self.status)
+                        raise exc
+                    await asyncio.sleep(0.25)
+            finally:
+                for task in (self._pump_task, control, heartbeat, watchdog):
+                    task.cancel()
         return 0 if self.status != "failed" else 1
 
     # ---------------------------------------------------------- task 1: pump
 
     async def _pump(self, client: ClaudeSDKClient) -> None:
+        """One receive_messages() call per turn. The iterator ENDS at each
+        ResultMessage — draining it here and re-arming on the next query is
+        what keeps the SDK session (and the agent's memory of the conversation)
+        alive across nudges instead of restarting a stranger every message."""
         async for msg in client.receive_messages():
             self.last_activity = asyncio.get_event_loop().time()
             events, deltas = self.normalizer.handle(msg)
@@ -110,6 +120,7 @@ class LaneRuntime:
                 # loop; after it ends the lane idles for nudges until idle TTL.
                 self.status = "idle" if not msg.is_error else "failed"
                 await self.forwarder.heartbeat(self.status)
+        self._pump_done.set()
 
     # ------------------------------------------------------- task 2: control
 
@@ -124,9 +135,15 @@ class LaneRuntime:
                     self.status = "interrupted"
                 elif msg.type == "nudge":
                     # graceful interrupt + inject + resume (plan §8 decided semantics)
-                    await client.interrupt()
+                    if self.status == "running":
+                        await client.interrupt()
                     await client.query(msg.text)
                     self.status = "running"
+                    # The previous turn's pump drained and exited at the result
+                    # boundary; re-arm so this turn's messages are seen.
+                    if self._pump_done.is_set():
+                        self._pump_done.clear()
+                        self._pump_task = asyncio.create_task(self._pump(client), name="event-pump")
                 elif msg.type == "mode":
                     await client.set_permission_mode(msg.mode)
                 elif msg.type == "kill":
