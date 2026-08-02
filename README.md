@@ -137,11 +137,16 @@ The ones that matter most:
 | `ZAGENT_JWT_SECRET` | `dev-only-change-me` | **Must** be overridden |
 | `ZAGENT_BYO_PAT_ENCRYPTION_KEY` | `dev-only-byo-pat-key` | At-rest key for user PATs |
 | `ZAGENT_BOOTSTRAP_ADMIN_PIN` | `4545` | First admin, created once by the seed |
-| `FETCH_PAT` / `FLEET_PAT` | empty | ADO: read-only fetcher, and read/write for pushes and PRs |
+| `ZAGENT_FETCH_PAT` / `ZAGENT_FLEET_PAT` | empty | ADO: read-only fetcher, and read/write for pushes and PRs |
 | `ZAGENT_ADO_WEBHOOK_SECRET` | empty | Empty means webhook ingress rejects everything (fail-closed) |
 | `ZAGENT_DEFAULT_LANE_BUDGET_USD` | `5.0` | Enforced by the gateway virtual key |
 | `ZAGENT_GLOBAL_LANE_CAP` | `12` | Concurrent lanes across the whole system |
 | `ZAGENT_APPROVAL_TIMEOUT_SECONDS` | `900` | After this the worker denies and the card expires |
+
+The Compose files accept the ADO and gateway secrets under short aliases
+(`FETCH_PAT`, `FLEET_PAT`, `ADO_ORG`, `LITELLM_MASTER_KEY`, …) and map them onto
+the prefixed settings — fill in the `.env.example` names, not the table names,
+when deploying.
 
 ## Modes and autonomy
 
