@@ -108,6 +108,10 @@
   body,
   #root {
     height: 100%;
+    /* The app is a fixed-height shell: only designated panes scroll. Without
+       this a tall pane spills past 100% and scrolls the DOCUMENT, dragging the
+       side rail and header out of view alongside it. */
+    overflow: hidden;
   }
 
   body {

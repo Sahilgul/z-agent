@@ -86,7 +86,7 @@ function AuthedShell() {
       <div className="flex h-full">
         <SideRail />
         <div className="flex min-w-0 flex-1 flex-col">
-          <main id="main" className="min-h-0 flex-1 max-[700px]:pb-[56px]">
+          <main id="main" className="min-h-0 flex-1 overflow-hidden max-[700px]:pb-[56px]">
             <ErrorBoundary>
               <Suspense fallback={<ScreenSkeleton />}>
                 <Outlet />

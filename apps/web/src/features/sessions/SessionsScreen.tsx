@@ -231,13 +231,15 @@ export function SessionsScreen() {
             />
 
             {current.auto_summary && (
-              <div className="mt-s3 flex-none rounded-r-md border-l-2 border-green bg-bg-module px-s4 py-2.5 text-[13px] leading-[1.6] whitespace-pre-wrap">
+              <div className="mt-s3 max-h-[140px] flex-none overflow-y-auto rounded-r-md border-l-2 border-green bg-bg-module px-s4 py-2.5 text-[13px] leading-[1.6] whitespace-pre-wrap">
                 <div className="text-micro mb-s1 text-ink-faint">lead</div>
                 {current.auto_summary}
               </div>
             )}
 
-            <div className="min-h-0 flex-1">
+            {/* The ONLY scrollable region in a session: everything around it is
+                flex-none, so the stream absorbs the height instead of the page. */}
+            <div className="min-h-0 flex-1 overflow-hidden">
               <EventStream events={events} deltas={deltas} prompt={current.title} />
             </div>
           </div>
