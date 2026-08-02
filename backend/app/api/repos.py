@@ -70,6 +70,21 @@ def remote_branches(name: str, user: User = Depends(current_user)):
 async def add_repo(body: AddRepoBody, request: Request, user: User = Depends(current_user)):
     settings = get_settings()
     url = f"https://dev.azure.com/{settings.ado_org}/{settings.ado_project}/_git/{body.name}"
+    # Re-registering an ARCHIVED repo revives it (register_repo handles that); a
+    # live one is a duplicate — refuse rather than silently re-clone into golden.
+    session = get_session()
+    try:
+        dupe = session.query(Repo).filter(
+            ((Repo.remote_url == url) | (Repo.name == body.name))
+            & (Repo.status != RepoStatus.ARCHIVED)
+        ).one_or_none()
+        if dupe is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{dupe.name} is already registered on {dupe.integration_branch}",
+            )
+    finally:
+        session.close()
     repo = register_repo(body.name, url, body.integration_branch, added_by=user.id)
     relay = request.app.state.relay
     asyncio.create_task(onboard(repo.id, relay))

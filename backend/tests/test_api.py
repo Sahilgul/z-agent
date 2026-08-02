@@ -322,6 +322,29 @@ def test_add_repo(auth_client, monkeypatch):
     assert r.json()["name"] == "ServerApp"
 
 
+def test_add_repo_rejects_duplicate(auth_client, session):
+    client, _, _, _ = auth_client
+    session.add(Repo(name="ServerApp", integration_branch="main", status="ready"))
+    session.commit()
+    r = client.post("/repos", json={"name": "ServerApp", "integration_branch": "pg-main"})
+    assert r.status_code == 409
+    assert "already registered" in r.json()["detail"]
+
+
+def test_add_repo_revives_archived(auth_client, session, monkeypatch):
+    client, _, _, _ = auth_client
+    session.add(Repo(name="ServerApp", integration_branch="main", status="archived"))
+    session.commit()
+    import app.api.repos as route
+    monkeypatch.setattr(route, "register_repo",
+                        lambda name, url, branch, added_by=None: Repo(id=1, name=name, integration_branch=branch))
+
+    async def fake_onboard(repo_id, relay):
+        return None
+    monkeypatch.setattr(route, "onboard", fake_onboard)
+    assert client.post("/repos", json={"name": "ServerApp", "integration_branch": "main"}).status_code == 200
+
+
 def test_edit_repo(auth_client, session):
     client, _, _, _ = auth_client
     repo = Repo(name="ServerApp", integration_branch="main")

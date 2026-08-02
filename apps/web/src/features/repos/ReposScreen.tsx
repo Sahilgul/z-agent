@@ -19,6 +19,9 @@ export interface Repo {
 
 const SETTLED = ["ready", "ready-no-map", "error"];
 
+const selectClass =
+  "h-8 w-full rounded-md border border-hairline bg-bg-raised px-s3 text-[13px] text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack";
+
 function repoTone(status: string): "ok" | "warn" | "danger" | "info" {
   if (status === "ready" || status === "ready-no-map") return "ok";
   if (status === "error") return "danger";
@@ -35,6 +38,7 @@ export function ReposScreen() {
   const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: repos = [], refetch } = useQuery({
@@ -82,6 +86,18 @@ export function ReposScreen() {
       setError(e instanceof Error ? e.message : "add failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function removeRepo(repo: Repo) {
+    // Archiving shreds the golden clone — irreversible enough to confirm.
+    if (!window.confirm(`remove ${repo.name}? the golden clone is deleted.`)) return;
+    setError("");
+    try {
+      await api.post(`/repos/${repo.id}/archive`);
+      await refetch();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "remove failed");
     }
   }
 
@@ -137,7 +153,7 @@ export function ReposScreen() {
                   id="repo-branch"
                   value={branch}
                   onChange={(e) => setBranch(e.target.value)}
-                  className="h-8 w-full rounded-md border border-hairline bg-bg-raised px-s3 text-[13px] text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack"
+                  className={selectClass}
                 >
                   {branches.map((b) => (
                     <option key={b} value={b}>
@@ -157,6 +173,8 @@ export function ReposScreen() {
         </div>
       )}
 
+      {!adding && error && <p className="mb-s3 text-[12.5px] text-danger-bright">{error}</p>}
+
       <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-s3">
         {repos.map((repo) => (
           <article
@@ -169,17 +187,114 @@ export function ReposScreen() {
               <StatusLamp tone={repoTone(repo.status)} label={repo.status} />
             </header>
             <div className="flex flex-col gap-s2">
-              <div>
-                <Tag>{repo.integration_branch}</Tag>
-              </div>
+              {editing === repo.id ? (
+                <RepoBranchEditor
+                  repo={repo}
+                  onDone={() => {
+                    setEditing(null);
+                    void refetch();
+                  }}
+                />
+              ) : (
+                <div className="flex items-center gap-s2">
+                  <Tag>{repo.integration_branch}</Tag>
+                  <button
+                    type="button"
+                    className="font-mono text-[10.5px] text-ink-faint underline-offset-2 hover:text-ink-primary hover:underline"
+                    onClick={() => setEditing(repo.id)}
+                  >
+                    change
+                  </button>
+                </div>
+              )}
               {repo.status_detail && <p className="text-[12px] leading-[1.5] text-ink-secondary">{repo.status_detail}</p>}
               <p className="font-mono text-[10.5px] text-ink-faint">
                 {repo.last_fetch_head ? `HEAD ${repo.last_fetch_head.slice(0, 7)}` : "not fetched yet"}
               </p>
+              <div>
+                <button
+                  type="button"
+                  className="font-mono text-[10.5px] text-ink-faint underline-offset-2 hover:text-danger-bright hover:underline"
+                  onClick={() => void removeRepo(repo)}
+                >
+                  remove
+                </button>
+              </div>
             </div>
           </article>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Branch switch on a registered repo. The list is fetched from the remote for
+ *  the same reason the add form does it — a typo'd branch is an unclonable repo.
+ *  The golden clone follows on the next fetcher pass (5 min). */
+function RepoBranchEditor({ repo, onDone }: { repo: Repo; onDone: () => void }) {
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [branch, setBranch] = useState(repo.integration_branch);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .get<{ branches: string[] }>(`/repos/remote-branches?name=${encodeURIComponent(repo.name)}`)
+      .then((d) => live && setBranches(d.branches))
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "could not reach remote"));
+    return () => {
+      live = false;
+    };
+  }, [repo.name]);
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.patch(`/repos/${repo.id}`, {
+        integration_branch: branch,
+        audit_note: `switched from ${repo.integration_branch}`,
+      });
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "branch change failed");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-s2">
+      {branches ? (
+        <select
+          aria-label="integration branch"
+          value={branch}
+          onChange={(e) => setBranch(e.target.value)}
+          className={selectClass}
+        >
+          {branches.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <p className="font-mono text-[10.5px] text-ink-faint">loading branches…</p>
+      )}
+      <div className="flex gap-s2">
+        <Button
+          size="sm"
+          className="font-mono"
+          disabled={busy || !branches || branch === repo.integration_branch}
+          onClick={() => void save()}
+        >
+          save
+        </Button>
+        <Button variant="secondary" size="sm" className="font-mono" onClick={onDone}>
+          cancel
+        </Button>
+      </div>
+      {error && <p className="text-[12px] text-danger-bright">{error}</p>}
     </div>
   );
 }
