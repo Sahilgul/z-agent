@@ -49,13 +49,27 @@ function Answer({ body }: { body: string }) {
   );
 }
 
+/** The user's own message — right-aligned and filled, the mirror of Answer. */
+function UserBubble({ body }: { body: string }) {
+  return (
+    <div className="mb-2.5 flex justify-end" data-kind="message">
+      <div className="max-w-[80%] rounded-2xl rounded-tr-sm border border-blue bg-bg-module px-s4 py-2.5">
+        <div className="text-micro mb-s1 text-right text-ink-faint">you</div>
+        <div className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-[1.6] text-ink-primary">
+          {body}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Item({ item }: { item: StreamItem }) {
   const isAnswer = item.kind === "message" && !item.live;
   // Short replies arrive as a title with no detail body; the answer must still
   // render, so fall back to the title rather than suppressing both.
   const body = isAnswer ? item.text || item.title : item.text;
   if (isAnswer) {
-    return <Answer body={body} />;
+    return item.role === "user" ? <UserBubble body={body} /> : <Answer body={body} />;
   }
   return (
     <div className="mb-2.5 flex gap-2.5" data-kind={item.kind}>
@@ -108,18 +122,7 @@ export function EventStream({
       aria-relevant="additions"
       aria-label="agent event stream"
     >
-      {prompt && (
-        /* The user's message sits right-aligned in a filled bubble, mirroring
-           chat conventions so the two voices never blur. */
-        <div className="mb-s3 flex justify-end" data-kind="prompt">
-          <div className="max-w-[80%] rounded-2xl rounded-tr-sm border border-blue bg-bg-module px-s4 py-2.5">
-            <div className="text-micro mb-s1 text-right text-ink-faint">you</div>
-            <div className="whitespace-pre-wrap break-words text-[13.5px] leading-[1.6] text-ink-primary">
-              {prompt}
-            </div>
-          </div>
-        </div>
-      )}
+      {prompt && <UserBubble body={prompt} />}
       {items.length === 0 && (
         <div className="px-s2 py-s4 font-mono text-[12px] text-ink-faint">
           no trace yet — the agent's first step lands here

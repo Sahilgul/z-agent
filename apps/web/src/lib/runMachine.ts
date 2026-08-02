@@ -89,6 +89,8 @@ export interface StreamItem {
   ok: boolean | null;
   /** Still streaming — drives the open/closed state of collapsible sections. */
   live: boolean;
+  /** Who spoke: agent prose vs the user's own message. Drives chat alignment. */
+  role: "user" | "agent" | null;
 }
 
 /** Fold WS typing deltas + stored events into display items. Deltas for the
@@ -106,6 +108,7 @@ export function foldStream(
     laneId: e.lane_id,
     ok: typeof e.detail.ok === "boolean" ? (e.detail.ok as boolean) : null,
     live: false,
+    role: e.detail.role === "user" ? "user" : e.detail.role === "agent" ? "agent" : null,
   }));
   const live = new Map<string, StreamItem>();
   for (const d of deltas) {
@@ -122,6 +125,7 @@ export function foldStream(
         laneId: d.lane_id,
         ok: null,
         live: true,
+        role: null,
       });
     }
   }

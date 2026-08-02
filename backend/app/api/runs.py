@@ -23,6 +23,29 @@ from app.services.sessions import replay_events
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
+def _persist_user_message(run_id: str, lane_id: str, text: str) -> None:
+    """Store the user's own message as a message event so the transcript is a
+    real conversation — otherwise only the agent's side renders and follow-ups
+    look like they vanished. role="user" lets the stream style it as the
+    sender's bubble; seq rides the lane's counter like every other event."""
+    from app.db.models.event import Event
+    session = get_session()
+    try:
+        lane = session.get(Lane, lane_id)
+        if lane is None:
+            return
+        seq = lane.next_seq
+        lane.next_seq = seq + 1
+        session.add(Event(
+            run_id=run_id, lane_id=lane_id, seq=seq,
+            type="message", title=text[:120],
+            payload={"text": text, "role": "user"}, sdk_message_uuid=None,
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+
 class CreateRunBody(BaseModel):
     mode: str = "ask"
     task: str
@@ -193,8 +216,12 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                                 source=IntentSource.TEXT, text=body.text,
                                 lane_id=body.lane_id)
     else:
+        # The frontend always sends intent="send_message" with the text as a
+        # SEPARATE field — this branch must carry body.text through or every
+        # follow-up message reaches the agent empty (the "no content" loop).
         intent = UserIntent(run_id=run_id, intent=ActionKind(body.intent),
                             source=IntentSource(body.source), lane_id=body.lane_id,
+                            text=body.text,
                             confirmed=body.confirmed, payload=body.payload)
 
     try:
@@ -211,6 +238,8 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind in (ActionKind.NUDGE, ActionKind.SEND_MESSAGE):
         lane_id = intent.lane_id or _lead_lane_id(run_id)
         if lane_id:
+            if intent.text:
+                _persist_user_message(run_id, lane_id, intent.text)
             await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
     elif kind == ActionKind.APPROVE_PLAN:
         try:
