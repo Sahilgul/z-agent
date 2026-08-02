@@ -102,7 +102,7 @@ export function ReposScreen() {
   }
 
   return (
-    <div className="mx-auto h-full max-w-[860px] overflow-y-auto px-s8 py-s6">
+    <div className="mx-auto h-full max-w-[1180px] overflow-y-auto px-s8 py-s6">
       <PageHead
         title="repo rack"
         sub={`${repos.length} repos registered — the fleet the agents can touch`}
@@ -116,36 +116,25 @@ export function ReposScreen() {
       {adding && (
         <div
           data-testid="add-repo-form"
-          className="mb-s4 flex max-w-[480px] flex-col gap-s3 rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card animate-enter"
+          className="mb-s4 rounded-lg border border-hairline bg-bg-panel p-s5 shadow-card animate-enter"
         >
-          <div>
-            <label htmlFor="repo-name" className="mb-s1 block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-              ADO repo name
-            </label>
-            <Input
-              id="repo-name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setBranches(null);
-              }}
-              placeholder="e.g. Billing-Engine"
-            />
-          </div>
-          <div>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="font-mono"
-              disabled={!name.trim() || busy}
-              onClick={() => void fetchBranches()}
-            >
-              {busy && !branches ? "checking remote…" : "fetch branches"}
-            </Button>
-          </div>
-          {branches && (
-            <>
-              <div>
+          <div className="flex flex-wrap items-end gap-s3">
+            <div className="min-w-[260px] flex-1">
+              <label htmlFor="repo-name" className="mb-s1 block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                ADO repo name
+              </label>
+              <Input
+                id="repo-name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setBranches(null);
+                }}
+                placeholder="e.g. Billing-Engine"
+              />
+            </div>
+            {branches && (
+              <div className="min-w-[260px] flex-1">
                 <label htmlFor="repo-branch" className="mb-s1 block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
                   integration branch (from remote)
                 </label>
@@ -162,32 +151,56 @@ export function ReposScreen() {
                   ))}
                 </select>
               </div>
-              <div>
-                <Button size="sm" className="font-mono" disabled={!branch || busy} onClick={() => void addRepo()}>
-                  register &amp; onboard
-                </Button>
-              </div>
-            </>
-          )}
-          {error && <p className="text-[12.5px] text-danger-bright">{error}</p>}
+            )}
+            {branches ? (
+              <Button size="sm" className="font-mono" disabled={!branch || busy} onClick={() => void addRepo()}>
+                register &amp; onboard
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="font-mono"
+                disabled={!name.trim() || busy}
+                onClick={() => void fetchBranches()}
+              >
+                {busy ? "checking remote…" : "fetch branches"}
+              </Button>
+            )}
+          </div>
+          {error && <p className="mt-s3 text-[12.5px] text-danger-bright">{error}</p>}
         </div>
       )}
 
       {!adding && error && <p className="mb-s3 text-[12.5px] text-danger-bright">{error}</p>}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-s3">
+      {/* A rack reads as stacked rails, not as a grid of loose tiles: one row per
+          repo, columns aligned so branch and HEAD scan vertically down the list. */}
+      <div className="overflow-hidden rounded-lg border border-hairline bg-bg-panel shadow-card">
+        <div className="grid grid-cols-[minmax(0,1fr)_180px_150px_auto] items-center gap-s4 border-b border-hairline px-s5 py-s2 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+          <span>repo</span>
+          <span>integration branch</span>
+          <span>head</span>
+          <span className="w-[120px] text-right">actions</span>
+        </div>
         {repos.map((repo) => (
           <article
             key={repo.id}
             data-testid={`repo-${repo.name}`}
-            className="rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card"
+            className="group grid grid-cols-[minmax(0,1fr)_180px_150px_auto] items-center gap-s4 border-b border-hairline px-s5 py-s3 last:border-b-0 hover:bg-bg-raised"
           >
-            <header className="mb-s2 flex items-center justify-between gap-s2">
-              <strong className="font-mono text-[13px] font-semibold text-ink-primary">{repo.name}</strong>
-              <StatusLamp tone={repoTone(repo.status)} label={repo.status} />
-            </header>
-            <div className="flex flex-col gap-s2">
-              {editing === repo.id ? (
+            <div className="flex min-w-0 flex-col gap-s1">
+              <div className="flex items-center gap-s3">
+                <strong className="truncate font-mono text-[13px] font-semibold text-ink-primary">{repo.name}</strong>
+                <StatusLamp tone={repoTone(repo.status)} label={repo.status} />
+              </div>
+              {repo.status_detail && (
+                <p className="truncate text-[12px] leading-[1.5] text-ink-secondary">{repo.status_detail}</p>
+              )}
+            </div>
+
+            {editing === repo.id ? (
+              <div className="col-span-3">
                 <RepoBranchEditor
                   repo={repo}
                   onDone={() => {
@@ -195,9 +208,18 @@ export function ReposScreen() {
                     void refetch();
                   }}
                 />
-              ) : (
-                <div className="flex items-center gap-s2">
+              </div>
+            ) : (
+              <>
+                <div className="min-w-0">
                   <Tag>{repo.integration_branch}</Tag>
+                </div>
+                <p className="font-mono text-[10.5px] text-ink-faint">
+                  {repo.last_fetch_head ? repo.last_fetch_head.slice(0, 7) : "not fetched yet"}
+                </p>
+                {/* Destructive and rare actions stay out of the way until hover,
+                    so the resting state is just the data. */}
+                <div className="flex w-[120px] justify-end gap-s3 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                   <button
                     type="button"
                     className="font-mono text-[10.5px] text-ink-faint underline-offset-2 hover:text-ink-primary hover:underline"
@@ -205,24 +227,23 @@ export function ReposScreen() {
                   >
                     change
                   </button>
+                  <button
+                    type="button"
+                    className="font-mono text-[10.5px] text-ink-faint underline-offset-2 hover:text-danger-bright hover:underline"
+                    onClick={() => void removeRepo(repo)}
+                  >
+                    remove
+                  </button>
                 </div>
-              )}
-              {repo.status_detail && <p className="text-[12px] leading-[1.5] text-ink-secondary">{repo.status_detail}</p>}
-              <p className="font-mono text-[10.5px] text-ink-faint">
-                {repo.last_fetch_head ? `HEAD ${repo.last_fetch_head.slice(0, 7)}` : "not fetched yet"}
-              </p>
-              <div>
-                <button
-                  type="button"
-                  className="font-mono text-[10.5px] text-ink-faint underline-offset-2 hover:text-danger-bright hover:underline"
-                  onClick={() => void removeRepo(repo)}
-                >
-                  remove
-                </button>
-              </div>
-            </div>
+              </>
+            )}
           </article>
         ))}
+        {repos.length === 0 && (
+          <p className="px-s5 py-s6 text-center text-[12.5px] text-ink-faint">
+            no repos yet — add one to give the agents something to touch
+          </p>
+        )}
       </div>
     </div>
   );
@@ -264,13 +285,13 @@ function RepoBranchEditor({ repo, onDone }: { repo: Repo; onDone: () => void }) 
   }
 
   return (
-    <div className="flex flex-col gap-s2">
+    <div className="flex items-center gap-s3">
       {branches ? (
         <select
           aria-label="integration branch"
           value={branch}
           onChange={(e) => setBranch(e.target.value)}
-          className={selectClass}
+          className={`${selectClass} max-w-[280px]`}
         >
           {branches.map((b) => (
             <option key={b} value={b}>
@@ -281,19 +302,17 @@ function RepoBranchEditor({ repo, onDone }: { repo: Repo; onDone: () => void }) 
       ) : (
         <p className="font-mono text-[10.5px] text-ink-faint">loading branches…</p>
       )}
-      <div className="flex gap-s2">
-        <Button
-          size="sm"
-          className="font-mono"
-          disabled={busy || !branches || branch === repo.integration_branch}
-          onClick={() => void save()}
-        >
-          save
-        </Button>
-        <Button variant="secondary" size="sm" className="font-mono" onClick={onDone}>
-          cancel
-        </Button>
-      </div>
+      <Button
+        size="sm"
+        className="font-mono"
+        disabled={busy || !branches || branch === repo.integration_branch}
+        onClick={() => void save()}
+      >
+        save
+      </Button>
+      <Button variant="secondary" size="sm" className="font-mono" onClick={onDone}>
+        cancel
+      </Button>
       {error && <p className="text-[12px] text-danger-bright">{error}</p>}
     </div>
   );

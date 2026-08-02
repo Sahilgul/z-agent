@@ -29,7 +29,7 @@ describe("ReposScreen", () => {
     renderScreen(<ReposScreen />);
     expect(await screen.findByTestId("repo-ServerApp")).toBeInTheDocument();
     expect(screen.getByText("ready")).toBeInTheDocument();
-    expect(screen.getByText("HEAD abc1234")).toBeInTheDocument();
+    expect(screen.getByText("abc1234")).toBeInTheDocument();
     expect(screen.getByText("not fetched yet")).toBeInTheDocument();
   });
 
