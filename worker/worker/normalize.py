@@ -30,6 +30,10 @@ TOOL_KIND_MAP = {
     "Glob": StepKind.COMMAND,
 }
 
+# System subtypes that fire once per turn and carry no investigative value —
+# they're plumbing, not progress, so they never become transcript lines.
+_NOISY_SYSTEM_SUBTYPES = {"init", "thinking_tokens"}
+
 
 def _tool_kind(name: str) -> StepKind:
     if name.startswith("mcp__"):
@@ -106,10 +110,15 @@ class Normalizer:
                     events.append(self._complete_tool(block, uuid))
 
         elif isinstance(msg, SystemMessage):
-            events.append(self._next(
-                StepKind.STATUS, f"session {msg.subtype}",
-                {"subtype": msg.subtype, "data": msg.data}, uuid,
-            ))
+            # Per-turn housekeeping (init, thinking_tokens) fires on EVERY turn,
+            # including injected nudge turns on the same live session — storing
+            # it makes a healthy persistent conversation READ like a restart.
+            # Only genuinely informative subtypes become transcript lines.
+            if msg.subtype not in _NOISY_SYSTEM_SUBTYPES:
+                events.append(self._next(
+                    StepKind.STATUS, f"session {msg.subtype}",
+                    {"subtype": msg.subtype, "data": msg.data}, uuid,
+                ))
 
         elif isinstance(msg, ResultMessage):
             events.append(self._next(

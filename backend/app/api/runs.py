@@ -23,17 +23,18 @@ from app.services.sessions import replay_events
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
-def _persist_user_message(run_id: str, lane_id: str, text: str) -> None:
+def _persist_user_message(run_id: str, lane_id: str, text: str) -> dict | None:
     """Store the user's own message as a message event so the transcript is a
     real conversation — otherwise only the agent's side renders and follow-ups
     look like they vanished. role="user" lets the stream style it as the
-    sender's bubble; seq rides the lane's counter like every other event."""
+    sender's bubble; seq rides the lane's counter like every other event.
+    Returns the serialized event so the caller can push it live over WS."""
     from app.db.models.event import Event
     session = get_session()
     try:
         lane = session.get(Lane, lane_id)
         if lane is None:
-            return
+            return None
         seq = lane.next_seq
         lane.next_seq = seq + 1
         session.add(Event(
@@ -42,6 +43,11 @@ def _persist_user_message(run_id: str, lane_id: str, text: str) -> None:
             payload={"text": text, "role": "user"}, sdk_message_uuid=None,
         ))
         session.commit()
+        return {
+            "run_id": run_id, "lane_id": lane_id, "seq": seq,
+            "kind": "message", "title": text[:120],
+            "detail": {"text": text, "role": "user"}, "sdk_message_uuid": None,
+        }
     finally:
         session.close()
 
@@ -239,7 +245,21 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
         lane_id = intent.lane_id or _lead_lane_id(run_id)
         if lane_id:
             if intent.text:
-                _persist_user_message(run_id, lane_id, intent.text)
+                user_event = _persist_user_message(run_id, lane_id, intent.text)
+                # The persisted row bypasses the worker's Redis stream, so it
+                # never reaches an open browser on its own — push it over the
+                # run socket or the user's bubble only appears after a reload.
+                if user_event is not None:
+                    try:
+                        from zagent_contracts import StepEvent, StepKind
+                        await request.app.state.relay.publish_step(run_id, StepEvent(
+                            run_id=user_event["run_id"], lane_id=user_event["lane_id"],
+                            seq=user_event["seq"], kind=StepKind.MESSAGE,
+                            title=user_event["title"], detail=user_event["detail"],
+                            sdk_message_uuid=None,
+                        ))
+                    except Exception:  # WS fanout is best-effort; the row is durable
+                        pass
             await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
     elif kind == ActionKind.APPROVE_PLAN:
         try:

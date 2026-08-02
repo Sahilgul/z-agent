@@ -18,6 +18,7 @@ from app.orchestrator.lane_manager import LaneManager
 from app.orchestrator.run_manager import RunManager
 from app.sandbox.fetcher import start_fetch_loop
 from app.services.approvals import ApprovalService
+from app.services.heartbeats import HeartbeatPersister
 
 log = get_logger(service="main")
 
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI):
     lane_manager = LaneManager(ingest, relay, gateway)
     run_manager = RunManager(ingest, relay, lane_manager, control)
     approval_service = ApprovalService(relay, control)
+    heartbeat_persister = HeartbeatPersister()
 
     app.state.relay = relay
     app.state.ingest = ingest
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
 
     await ingest.start()
     await approval_service.start()
+    await heartbeat_persister.start()
     start_fetch_loop()
     zombies = await run_manager.reconcile_on_boot()
     if zombies:
@@ -56,6 +59,7 @@ async def lifespan(app: FastAPI):
 
     await ingest.stop()
     await approval_service.stop()
+    await heartbeat_persister.stop()
     await relay.close()
     await control.close()
 

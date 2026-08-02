@@ -88,6 +88,7 @@ export function SessionsScreen() {
     loadRuns,
     openRun,
     closeRun,
+    refreshLanes,
     createRun,
     current,
     lanes,
@@ -109,12 +110,17 @@ export function SessionsScreen() {
   }, [loadRuns]);
 
   // Lane heartbeats age against wall time; re-render occasionally so stale
-  // lanes surface without waiting for the next socket message.
+  // lanes surface without waiting for the next socket message. Refreshing the
+  // lanes themselves on the same tick keeps heartbeat_at current — otherwise
+  // the watchdog judges liveness from the snapshot taken when the run opened.
   useEffect(() => {
     if (!current) return;
-    const t = setInterval(() => setNow(Date.now()), 15_000);
+    const t = setInterval(() => {
+      setNow(Date.now());
+      void refreshLanes();
+    }, 15_000);
     return () => clearInterval(t);
-  }, [current]);
+  }, [current, refreshLanes]);
 
   const { data: tickets = [] } = useQuery({
     queryKey: qk.tickets,

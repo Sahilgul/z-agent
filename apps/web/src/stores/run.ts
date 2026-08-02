@@ -23,6 +23,7 @@ interface RunState {
   loadRuns: () => Promise<void>;
   openRun: (runId: string) => Promise<void>;
   closeRun: () => void;
+  refreshLanes: () => Promise<void>;
   sendIntent: (intent: string, opts?: { laneId?: string; text?: string; confirmed?: boolean; payload?: Record<string, unknown> }) => Promise<Record<string, unknown>>;
   createRun: (body: { mode: string; task: string; repo?: string; fanout?: number }) => Promise<Run>;
 }
@@ -106,6 +107,19 @@ export const useRuns = create<RunState>((set, get) => ({
     socket?.close();
     socket = null;
     set({ current: null, lanes: [], events: [], deltas: [], socketConnected: false });
+  },
+
+  // Lanes carry heartbeat_at, which the watchdog reads against wall time —
+  // it must be re-polled or the UI judges liveness from a frozen snapshot.
+  refreshLanes: async () => {
+    const run = get().current;
+    if (!run) return;
+    try {
+      const lanes = await api.get<Lane[]>(`/runs/${run.id}/lanes`);
+      set({ lanes });
+    } catch {
+      /* a failed poll just leaves the previous snapshot in place */
+    }
   },
 
   sendIntent: async (intent, opts = {}) => {
