@@ -87,6 +87,8 @@ export interface StreamItem {
   text: string;
   laneId: string;
   ok: boolean | null;
+  /** Still streaming — drives the open/closed state of collapsible sections. */
+  live: boolean;
 }
 
 /** Fold WS typing deltas + stored events into display items. Deltas for the
@@ -103,21 +105,23 @@ export function foldStream(
     text: String(e.detail.text ?? e.detail.output ?? ""),
     laneId: e.lane_id,
     ok: typeof e.detail.ok === "boolean" ? (e.detail.ok as boolean) : null,
+    live: false,
   }));
   const live = new Map<string, StreamItem>();
   for (const d of deltas) {
     const k = `${d.lane_id}:${d.kind}`;
     const existing = live.get(k);
     if (existing) {
-      existing.text += d.text;
+      existing.text += d.text ?? "";
     } else {
       live.set(k, {
         key: `d-${k}`,
         kind: d.kind,
         title: d.kind === "thinking" ? "thinking…" : "typing…",
-        text: d.text,
+        text: d.text ?? "",
         laneId: d.lane_id,
         ok: null,
+        live: true,
       });
     }
   }

@@ -96,11 +96,12 @@ export function SessionsScreen() {
     socketConnected,
     sendIntent,
   } = useRuns();
-  const { overlays, pushOverlay } = useUi();
+  const { overlays, pushOverlay, closedTabs, closeTab, reopenTab } = useUi();
   const [task, setTask] = useState("");
   const [mode, setMode] = useState<Mode>("ask");
   const [fanout, setFanout] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
+  const [startingNew, setStartingNew] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -131,6 +132,7 @@ export function SessionsScreen() {
         fanout: fanout === "" ? undefined : fanout,
       });
       setTask("");
+      setStartingNew(false);
       await openRun(run.id);
     } finally {
       setBusy(false);
@@ -162,9 +164,23 @@ export function SessionsScreen() {
     <div className="flex h-full w-full flex-col">
       <SessionTabs
         runs={runs}
+        tabRuns={runs.filter((r) => !closedTabs.includes(r.id))}
         current={current}
-        onOpen={(runId) => void (runId === current?.id ? undefined : openRun(runId))}
-        onNew={closeRun}
+        // Opening from history un-dismisses the tab, so a reopened run lands
+        // back in the strip instead of vanishing the moment you leave it.
+        onOpen={(runId) => {
+          reopenTab(runId);
+          setStartingNew(false);
+          if (runId !== current?.id) void openRun(runId);
+        }}
+        onNew={() => {
+          closeRun();
+          setStartingNew(true);
+        }}
+        onClose={(runId) => {
+          closeTab(runId);
+          if (runId === current?.id) closeRun();
+        }}
       />
 
       {current ? (
@@ -216,15 +232,34 @@ export function SessionsScreen() {
             )}
 
             <div className="min-h-0 flex-1">
-              <EventStream events={events} deltas={deltas} />
+              <EventStream events={events} deltas={deltas} prompt={current.title} />
             </div>
           </div>
         </>
       ) : (
         <div className="mx-auto min-h-0 w-full max-w-canvas flex-1 overflow-y-auto px-s8 py-s6">
-          <PageHead title="sessions" sub="your runs — describe a task to start a new one" />
+          <PageHead
+            title={startingNew ? "new session" : "sessions"}
+            sub={
+              startingNew
+                ? "blank slate — describe the task below"
+                : "your runs — describe a task to start a new one"
+            }
+          />
 
-          {!runsLoaded ? (
+          {/* Asking for a new session means a clean desk: past runs stay one
+              click away in the tab strip and history, not stacked underneath. */}
+          {startingNew ? (
+            runs.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setStartingNew(false)}
+                className="font-mono text-[12px] text-ink-faint underline-offset-2 hover:text-ink-primary hover:underline"
+              >
+                back to all sessions
+              </button>
+            )
+          ) : !runsLoaded ? (
             <RunListSkeleton />
           ) : runs.length === 0 ? (
             <EmptyState

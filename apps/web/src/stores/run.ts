@@ -62,9 +62,17 @@ export const useRuns = create<RunState>((set, get) => ({
         (msg: WsMessage) => {
           const s = get();
           if (msg.type === "step") {
-            set({ events: [...s.events, msg.event] });
+            // The worker emits a delta stream AND a stored event for the same
+            // block. Once the event lands it supersedes its live bubble —
+            // keeping both is what rendered the answer twice.
+            set({
+              events: [...s.events, msg.event],
+              deltas: s.deltas.filter(
+                (d) => !(d.lane_id === msg.event.lane_id && d.kind === msg.event.kind),
+              ),
+            });
           } else if (msg.type === "delta") {
-            set({ deltas: [...s.deltas, msg] });
+            set({ deltas: [...s.deltas, msg.delta] });
           } else if (msg.type === "lane_status") {
             set({
               lanes: s.lanes.map((l) =>

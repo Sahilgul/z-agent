@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { HistoryIcon, PlusIcon } from "lucide-react";
+import { HistoryIcon, PlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -40,18 +40,24 @@ function StageLed({ tone, label }: { tone: LampTone; label: string }) {
  *  present in the strip even when it has aged past the cut. */
 export function SessionTabs({
   runs,
+  tabRuns,
   current,
   onOpen,
   onNew,
+  onClose,
 }: {
+  /** Every run — history lists these, including tabs the user has closed. */
   runs: Run[];
+  /** Runs eligible for the strip, minus anything dismissed. */
+  tabRuns: Run[];
   current: Run | null;
   onOpen: (runId: string) => void;
   onNew: () => void;
+  onClose: (runId: string) => void;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const recent = runs.slice(0, RECENT_TABS);
+  const recent = tabRuns.slice(0, RECENT_TABS);
   const tabs =
     current && !recent.some((r) => r.id === current.id) ? [current, ...recent].slice(0, RECENT_TABS) : recent;
 
@@ -62,26 +68,44 @@ export function SessionTabs({
           const meta = stageMeta(run.stage);
           const active = current?.id === run.id;
           return (
-            <button
+            <div
               key={run.id}
-              type="button"
-              onClick={() => onOpen(run.id)}
-              title={run.title}
-              aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-w-0 max-w-[220px] flex-none items-center gap-s2 border-b-2 px-s3 py-s2 font-mono text-[12px] transition-colors duration-fast",
-                active
-                  ? "border-green text-ink-primary"
-                  : "border-transparent text-ink-secondary hover:text-ink-primary",
+                "group flex min-w-0 max-w-[240px] flex-none items-center gap-s2 border-b-2 pl-s3 pr-s2 transition-colors duration-fast",
+                active ? "border-green" : "border-transparent",
               )}
             >
-              <StageLed tone={meta.tone} label={meta.label} />
-              <span className="truncate">{run.title}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => onOpen(run.id)}
+                title={run.title}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex min-w-0 items-center gap-s2 py-s2 font-mono text-[12px] transition-colors duration-fast",
+                  active ? "text-ink-primary" : "text-ink-secondary hover:text-ink-primary",
+                )}
+              >
+                <StageLed tone={meta.tone} label={meta.label} />
+                <span className="truncate">{run.title}</span>
+              </button>
+              {/* Dismissal is reversible and rare, so it stays out of the way
+                  until the tab is hovered or the close button takes focus. */}
+              <button
+                type="button"
+                onClick={() => onClose(run.id)}
+                title="close tab — the run stays in history"
+                aria-label={`close ${run.title}`}
+                className="flex-none rounded-sm p-0.5 text-ink-faint opacity-0 transition-opacity duration-fast hover:text-ink-primary focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <XIcon className="size-3" aria-hidden="true" />
+              </button>
+            </div>
           );
         })}
         {tabs.length === 0 && (
-          <span className="px-s2 py-s2 font-mono text-[12px] text-ink-faint">no sessions yet</span>
+          <span className="px-s2 py-s2 font-mono text-[12px] text-ink-faint">
+            {runs.length === 0 ? "no sessions yet" : "all tabs closed — reopen one from history"}
+          </span>
         )}
       </div>
 
