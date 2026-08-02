@@ -14,7 +14,9 @@ RUN npm install -g @anthropic-ai/claude-code@2.0.0 || npm install -g @anthropic-
 
 WORKDIR /app
 COPY packages/contracts /app/packages/contracts
-COPY worker /app/worker
+# The importable package is worker/worker — copying the project dir instead puts
+# main.py at /app/worker/worker/main.py, where `python -m worker.main` can't see it.
+COPY worker/worker /app/worker
 
 RUN pip install --no-cache-dir /app/packages/contracts
 RUN pip install --no-cache-dir "claude-agent-sdk==0.2.128" "websockets>=13,<16" "redis>=5,<7"
