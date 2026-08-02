@@ -14,6 +14,10 @@ model_list:
       model: os.environ/FOUNDRY_MODEL
       api_base: os.environ/FOUNDRY_API_BASE
       api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+      # The Agent SDK asks for extended thinking, which LiteLLM renders as
+      # reasoning_effort/thinking. The openai/ prefix makes drop_params assume
+      # OpenAI accepts both, so this Foundry deployment 400s unless named here.
+      additional_drop_params: ["reasoning_effort", "thinking"]
     model_info:
       # EXPLICIT pricing — LiteLLM's registry may not price Kimi and the
       # spend-readback data path (plan §4) depends on correct numbers.
