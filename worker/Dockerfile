@@ -14,12 +14,10 @@ RUN npm install -g @anthropic-ai/claude-code@2.0.0 || npm install -g @anthropic-
 
 WORKDIR /app
 COPY packages/contracts /app/packages/contracts
-COPY packages/ado-mcp /app/packages/ado-mcp
 COPY worker /app/worker
 
-RUN pip install --no-cache-dir /app/packages/contracts \
- && pip install --no-cache-dir /app/packages/ado-mcp \
- && pip install --no-cache-dir "claude-agent-sdk==0.2.128" "websockets>=13,<16" "redis>=5,<7"
+RUN pip install --no-cache-dir /app/packages/contracts
+RUN pip install --no-cache-dir "claude-agent-sdk==0.2.128" "websockets>=13,<16" "redis>=5,<7"
 
 # API keys arrive via env at container start (ANTHROPIC_BASE_URL -> LiteLLM gateway,
 # ANTHROPIC_AUTH_TOKEN -> per-lane virtual key, FLEET_PAT -> git credential helper).

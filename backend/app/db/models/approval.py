@@ -18,6 +18,11 @@ def utcnow() -> datetime:
 
 class Approval(Base):
     __tablename__ = "approvals"
+    __table_args__ = (
+        # The console docks approvals inside the open session and polls:
+        # WHERE run_id = ? AND decision IS NULL ORDER BY created_at DESC.
+        sa.Index("ix_approvals_run_pending", "run_id", "decision", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)

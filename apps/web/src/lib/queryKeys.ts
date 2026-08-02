@@ -13,6 +13,7 @@ export const qk = {
   team: ["team", "users"] as const,
   costStats: (days: number) => ["stats", "cost", days] as const,
   deliveries: ["deliveries"] as const,
+  resumable: (runId: string) => ["sessions", runId, "resumable"] as const,
   plan: (runId: string) => ["runs", runId, "plan"] as const,
   pr: (runId: string) => ["runs", runId, "pr"] as const,
 };

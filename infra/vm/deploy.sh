@@ -11,6 +11,16 @@ cd "$(dirname "$0")"
 
 [ -f .env ] || { echo "missing .env — step 1: cp .env.example .env and fill it"; exit 1; }
 
+# Lane containers are siblings: the HOST daemon resolves the bind sources the
+# backend hands it, so these dirs must exist on the host at the same paths the
+# backend uses. Docker would otherwise auto-create them as empty root-owned
+# dirs and lanes would mount empty repos.
+DATA_ROOT="$(grep -E '^ZAGENT_DATA_ROOT=' .env | cut -d= -f2- | tr -d '"' || true)"
+DATA_ROOT="${DATA_ROOT:-/srv/zagent}"
+echo "==> preparing data root at $DATA_ROOT"
+sudo mkdir -p "$DATA_ROOT"/{golden,sessions,workspaces,transcripts,evidence}
+sudo chown -R "$(id -u):$(id -g)" "$DATA_ROOT"
+
 echo "==> building worker image (lane runtime)"
 docker build -f ../../worker/Dockerfile -t zagent-worker:0.1.0 ../..
 
@@ -23,7 +33,15 @@ docker compose up -d
 if [ "${1:-}" = "tailscale" ]; then
   echo "==> starting tailscale profile"
   docker compose --profile tailscale up -d
-  docker compose --profile tailscale exec tailscale tailscale status || true
+  # First ever run needs ONE interactive login:
+  #   docker compose --profile tailscale exec tailscale tailscale up --accept-dns=false
+  # The serve config only applies AFTER the node is logged in, so enforce it here:
+  if docker compose --profile tailscale exec tailscale tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'; then
+    docker compose --profile tailscale exec tailscale tailscale serve --bg --https=443 http://web:80
+    echo "==> tailnet serve: https://zagent.<tailnet>.ts.net -> web:80"
+  else
+    echo "==> not logged in yet — run the 'tailscale up' line above once, then re-run: ./deploy.sh tailscale"
+  fi
 fi
 
 echo

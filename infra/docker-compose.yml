@@ -79,11 +79,20 @@ services:
       ZAGENT_ADO_PROJECT: ${ADO_PROJECT:-}
       ZAGENT_GOLDEN_DIR: /golden/repos
       ZAGENT_SESSIONS_DIR: /sessions
+      ZAGENT_WORKSPACES_DIR: /workspaces
+      ZAGENT_TRANSCRIPTS_DIR: /transcripts
+      ZAGENT_EVIDENCE_DIR: /evidence
       ZAGENT_FLEET_CONFIG_DIR: /fleet-config
+      # Image copies the tree to /app/backend while WORKDIR is /app; without this
+      # the playbook loader silently finds nothing.
+      ZAGENT_PLAYBOOKS_DIR: /app/backend/playbooks
     volumes:
       - app-data:/data
       - golden:/golden
       - sessions:/sessions
+      - workspaces:/workspaces
+      - transcripts:/transcripts
+      - evidence:/evidence
       - ../fleet-config:/fleet-config:ro
     depends_on:
       - redis
@@ -140,3 +149,6 @@ volumes:
   # (plan §10: heavy small-file IO, git ops inside Linux).
   golden:
   sessions:
+  workspaces:
+  transcripts:
+  evidence:

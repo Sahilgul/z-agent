@@ -30,7 +30,7 @@ export function FilterChips<T extends string>({
             className={cn(
               "inline-flex items-center gap-s1 rounded-pill border px-3 py-1 font-mono text-[11.5px] font-semibold transition-colors duration-fast",
               on
-                ? "border-green bg-green/10 text-green-bright"
+                ? "border-green bg-green/10 text-ok-bright"
                 : "border-hairline text-ink-secondary hover:border-blue-bright hover:text-ink-primary",
             )}
           >

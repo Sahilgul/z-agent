@@ -4,7 +4,7 @@ import { OverlayShell } from "../../components/OverlayShell";
 import { useRuns } from "../../stores/run";
 
 /** Lane trace overlay: the subagent's full glass-box trace at 80%, with its
- *  lane controls — stop, pin a finding, kill & replace. The run's monitor
+ *  lane controls — stop, pin a finding, kill & replace. The run's session
  *  keeps streaming underneath. */
 export function LaneOverlay({ laneId }: { laneId: string }) {
   const { events, deltas, lanes, sendIntent } = useRuns();

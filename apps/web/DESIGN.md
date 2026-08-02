@@ -51,6 +51,13 @@
 
 **Rules (v2.1 — mono-green accent):** green = the single accent (action, healthy, information, navigation — distinguished by weight/placement, not hue), warn = attention, danger = destructive. Everything else stays neutral ink. No gradients anywhere except the LED glow (box-shadow) and the dot-grid.
 
+## v2.3 — Neutral charcoal + unified terminal monitor (supersedes v2.2)
+
+v2.2 (light chrome + green rail) was rejected in review: green-on-offwhite read as "2000s website". Direction now:
+
+1. **Neutral charcoal chrome** (Cursor-agent class): `#1B1B1A` stage, `#232322` panels, `#2C2C2A` modules, `#121212` terminal (`--jack`). No blue tint anywhere in the greys — v1's failure was blue-grey mud, not darkness itself. Mono-green accent unchanged from v2.1.
+2. **The monitor is one terminal.** The 50/50 split panes are gone: a single full-bleed charcoal column holds the swarm strip (horizontal lane tiles), the lead summary bubble, the full-height interleaved event stream, the action card, and the chat composer docked at the bottom of the same terminal. The traces get maximum space; chat lives inside the trace surface, Cursor-agent style. `ChatPane` is deleted — merged into `MonitorScreen`.
+
 ## Type
 
 | Role | Face | Usage |

@@ -4,6 +4,8 @@ to the worker's blocking BLPOP (services/approvals.py).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -22,22 +24,39 @@ class DecideBody(BaseModel):
 
 
 @router.get("")
-def pending(user: User = Depends(current_user)):
+def pending(run_id: str | None = None, user: User = Depends(current_user)):
+    """Pending cards for MY runs. `run_id` narrows to one session — the console
+    docks approvals inside the open session, so it asks for that run only."""
     session = get_session()
     try:
-        rows = (
+        query = (
             session.query(Approval)
             .join(Run, Approval.run_id == Run.id)
             .filter(Run.created_by == user.id, Approval.decision.is_(None))
-            .order_by(Approval.created_at.desc())
-            .all()
         )
+        if run_id:
+            query = query.filter(Approval.run_id == run_id)
+        rows = query.order_by(Approval.created_at.desc()).all()
+        # The sweep in services/approvals.py stamps decision=timeout, but it runs
+        # on its own tick — never hand the console a card the worker has already
+        # stopped waiting on.
+        now = datetime.now(timezone.utc)
         return [{
             "id": a.id, "run_id": a.run_id, "lane_id": a.lane_id, "kind": a.kind,
             "payload": a.payload, "created_at": a.created_at.isoformat(),
-        } for a in rows]
+            "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+        } for a in rows if not _expired(a, now)]
     finally:
         session.close()
+
+
+def _expired(approval: Approval, now: datetime) -> bool:
+    if approval.expires_at is None:
+        return False
+    expires = approval.expires_at
+    if expires.tzinfo is None:  # SQLite hands back naive UTC
+        expires = expires.replace(tzinfo=timezone.utc)
+    return expires <= now
 
 
 @router.post("/{approval_id}/decide")

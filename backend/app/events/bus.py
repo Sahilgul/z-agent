@@ -2,7 +2,9 @@
 backend -> DB + WS (plan §8 events split).
 
 The events table is the PHI-grade system of record; Streams + acks mean a backend
-crash mid-write never loses an event. Transient typing deltas ride pub/sub ONLY.
+crash mid-write never loses an event. Every stored event is also appended to the
+run's flat JSONL transcript (services/transcript.py) for open/export without a
+database. Transient typing deltas ride pub/sub ONLY.
 Poison-pill path (plan §10): a StepEvent failing Pydantic validation goes to the
 DEAD-LETTER stream + watchdog card — never acked-and-dropped (that would silently
 hole the record), never blocks the consumer group.
@@ -24,6 +26,7 @@ from app.db.base import get_session
 from app.db.models.event import Event
 from app.db.models.lane import Lane
 from app.db.models.run import Run
+from app.services import transcript
 
 log = get_logger(service="ingest")
 
@@ -126,6 +129,18 @@ class IngestConsumer:
             session.commit()
         finally:
             session.close()
+
+        # Flat JSONL mirror. Best-effort: the row is already committed, so a
+        # transcript failure must not re-deliver or drop the event.
+        try:
+            transcript.append(run_id, {
+                "run_id": event.run_id, "lane_id": event.lane_id, "seq": event.seq,
+                "ts": event.ts.isoformat() if hasattr(event.ts, "isoformat") else event.ts,
+                "kind": event.kind.value, "title": event.title,
+                "detail": event.detail, "sdk_message_uuid": event.sdk_message_uuid,
+            })
+        except OSError as exc:
+            log.warning("transcript append failed", run_id=run_id, error=str(exc)[:200])
 
         await self.redis.xack(stream, GROUP, msg_id)
         await self.relay.publish_step(run_id, event)

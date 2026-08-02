@@ -168,6 +168,18 @@ def _no_knowledge_block(monkeypatch):
     monkeypatch.setattr(knowledge_mod, "prompt_block_for_run", _empty)
 
 
+# The JSONL transcript writer appends to a real directory; keep every test's
+# writes inside tmp so the suite never litters the repo checkout. Set via env,
+# not on the cached instance: tests that call get_settings.cache_clear() would
+# otherwise rebuild Settings with the default ./transcripts path.
+@pytest.fixture(autouse=True)
+def _isolated_transcripts(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZAGENT_TRANSCRIPTS_DIR", str(tmp_path / "transcripts"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 # ---------------------------------------------------------------- user factory
 @pytest.fixture
 def make_user(session):

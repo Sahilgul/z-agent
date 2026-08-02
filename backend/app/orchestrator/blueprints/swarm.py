@@ -30,7 +30,7 @@ from app.db.base import get_session
 from app.db.models.event import Event
 from app.db.models.lane import Lane
 from app.db.models.mode import Mode
-from app.db.models.repo import Repo
+from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Run
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
@@ -87,7 +87,8 @@ class SwarmBlueprint(Blueprint):
                 repo = session.query(Repo).filter_by(name=target).one_or_none()
                 if repo is None:
                     raise RuntimeError(f"repo '{target}' not registered")
-            context = [repo] if repo else session.query(Repo).filter_by(status="ready").all()
+            context = ([repo] if repo
+                       else session.query(Repo).filter(Repo.status.in_(RepoStatus.USABLE)).all())
             mode = session.query(Mode).filter_by(name=ctx.run.mode).one_or_none()
             persona_prompt = mode.persona_prompt if mode else ""
         finally:

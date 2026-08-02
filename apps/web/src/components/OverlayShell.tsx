@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useUi } from "../stores/ui";
 
 /** 80% overlay shell on the Dialog primitive (focus trap + ESC built in):
- *  the monitor keeps streaming underneath; close returns to a live screen,
+ *  the session keeps streaming underneath; close returns to a live screen,
  *  never a stale one. Entrance is motion moment #1. */
 export function OverlayShell({ title, children }: { title: string; children: ReactNode }) {
   const popOverlay = useUi((s) => s.popOverlay);

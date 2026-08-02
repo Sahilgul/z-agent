@@ -31,6 +31,11 @@ class RepoStatus:
     ERROR = "error"
     ARCHIVED = "archived"
 
+    # Onboarding lands every repo at READY_NO_MAP until the Phase 2 map
+    # generator covers its language, so anything selecting "repos an agent can
+    # work on" must accept both — filtering on READY alone matches nothing.
+    USABLE = (READY, READY_NO_MAP)
+
 
 class Repo(Base):
     __tablename__ = "repos"

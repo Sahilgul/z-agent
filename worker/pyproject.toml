@@ -10,7 +10,6 @@ dependencies = [
     "websockets>=13,<16",
     "redis>=5,<7",
     "zagent-contracts",
-    "zagent-ado-mcp",
 ]
 
 [build-system]

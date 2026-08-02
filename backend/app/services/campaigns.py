@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from app.db.base import get_session
 from app.db.models.delivery import Delivery, PrLink
-from app.db.models.repo import Repo
+from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Run
 
 
@@ -21,7 +21,7 @@ async def launch(task: str, repo_names: list[str] | None, user_id: int,
     """Validate targets, create the Delivery, fan out one run per repo."""
     session = get_session()
     try:
-        q = session.query(Repo).filter_by(status="ready")
+        q = session.query(Repo).filter(Repo.status.in_(RepoStatus.USABLE))
         if repo_names:
             q = q.filter(Repo.name.in_(repo_names))
         repos = [r.name for r in q.order_by(Repo.name).all()]

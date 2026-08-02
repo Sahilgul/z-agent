@@ -5,7 +5,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  *  https endpoints — no native-only APIs beyond push (web push → APNs/FCM via
  *  Capacitor push plugin lands with the VM move, env-gated). */
 const config: CapacitorConfig = {
-  appId: "ai.bostonhealth.zagent",
+  appId: "ai.zagentharness.zagent",
   appName: "zagent",
   webDir: "dist",
   server: {

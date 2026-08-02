@@ -11,9 +11,9 @@ const LED_CLASS: Record<LampTone, string> = {
 };
 
 const TEXT_CLASS: Record<LampTone, string> = {
-  ok: "text-green-bright",
+  ok: "text-ok-bright",
   info: "text-blue-bright",
-  warn: "text-warn",
+  warn: "text-warn-bright",
   danger: "text-danger-bright",
   off: "text-ink-faint",
 };

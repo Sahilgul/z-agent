@@ -45,7 +45,8 @@ export type StepKind =
   | "test_run" | "message" | "notebook" | "status";
 
 export interface StepEvent {
-  schema_version: number;
+  /** Present on the live WS payload; replay rows are serialized without it. */
+  schema_version?: number;
   run_id: string;
   lane_id: string;
   seq: number;
@@ -60,7 +61,12 @@ export type WsMessage =
   | { type: "step"; event: StepEvent }
   | { type: "lane_status"; lane_id: string; status: string }
   | { type: "run_stage"; stage: RunStage; available_actions: string[] }
-  | { type: "delta"; run_id: string; lane_id: string; kind: StepKind; text: string };
+  | { type: "delta"; run_id: string; lane_id: string; kind: StepKind; text: string }
+  | {
+      type: "approval_card";
+      approval: { id: string; kind: string; payload: Record<string, unknown>; lane_id: string | null };
+    }
+  | { type: "approval_resolved"; approval_id: string; decision: string };
 
 export interface PlanStep {
   id: number;
@@ -87,11 +93,18 @@ export interface PlanPayload {
 export interface Approval {
   id: string;
   run_id: string;
-  lane_id: string;
-  tool: string;
-  input: Record<string, unknown>;
-  status: string;
+  lane_id: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
   created_at: string | null;
+  /** When the worker stops waiting and denies on its own. */
+  expires_at?: string | null;
+}
+
+export interface ResumableLane {
+  lane_id: string;
+  persona: string;
+  resumable: boolean;
 }
 
 export interface Me {
@@ -101,3 +114,9 @@ export interface Me {
   role: string;
   must_change_pin: boolean;
 }
+
+/** Logical destinations — the rail's IA. Routed via react-router; see
+ *  lib/routes.ts for the screen → URL map. */
+export type Screen =
+  | "sessions" | "knowledge" | "ideas"
+  | "proposals" | "dashboard" | "repos" | "team";

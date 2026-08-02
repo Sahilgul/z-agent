@@ -24,6 +24,9 @@ class Event(Base):
     __table_args__ = (
         sa.Index("ix_events_lane_seq", "lane_id", "seq"),
         sa.Index("ix_events_run_ts", "run_id", "ts"),
+        # Replay + JSONL transcript fallback: WHERE run_id = ? [AND lane_id = ?]
+        # [AND seq > ?] ORDER BY lane_id, seq — filter and sort from one index.
+        sa.Index("ix_events_run_lane_seq", "run_id", "lane_id", "seq"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

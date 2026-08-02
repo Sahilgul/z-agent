@@ -1,0 +1,60 @@
+{
+  "nav": {
+    "sessions": "sessions",
+    "knowledge": "knowledge",
+    "ideas": "ideas",
+    "patrol": "patrol",
+    "costs": "costs",
+    "repos": "repos",
+    "team": "team",
+    "operate": "operate",
+    "intelligence": "intelligence",
+    "fleet": "fleet"
+  },
+  "common": {
+    "signOut": "sign out",
+    "live": "live",
+    "idle": "idle",
+    "close": "close",
+    "send": "send",
+    "cancel": "cancel"
+  },
+  "login": {
+    "tagline": "the rack runs the fleet",
+    "heading": "sign in — internal team",
+    "username": "username",
+    "pin": "pin",
+    "submit": "sign in",
+    "submitting": "signing in…",
+    "remember": "remember me on this device",
+    "showPin": "show pin",
+    "hidePin": "hide pin",
+    "errRequired": "required",
+    "errUsernameMin": "at least 2 characters",
+    "errPinLen": "pin must be 4 digits",
+    "footerOrg": "© Zagent Harness AI"
+  },
+  "empty": {
+    "inbox": "no runs yet — describe the first one below",
+    "inboxTitle": "your rack is empty",
+    "inboxCta": "describe a task above",
+    "knowledge": "nothing distilled yet",
+    "ideas": "no open threads",
+    "proposals": "no proposals — the patrols run on schedule",
+    "dashboard": "no fleet campaigns yet"
+  },
+  "cmdk": {
+    "title": "Command Palette",
+    "desc": "Jump to a screen or run an action",
+    "placeholder": "type a command or screen…",
+    "navigate": "navigate",
+    "actions": "actions",
+    "newRun": "new run",
+    "empty": "no matches"
+  },
+  "errBoundary": {
+    "title": "something broke",
+    "body": "an unexpected error rendered this screen. reload to recover — your runs are safe on the server.",
+    "reload": "reload"
+  }
+}

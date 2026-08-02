@@ -11,10 +11,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [zagent.bostonhealth.ai]
+    - hosts: [zagent.zagentharness.ai]
       secretName: zagent-tls
   rules:
-    - host: zagent.bostonhealth.ai
+    - host: zagent.zagentharness.ai
       http:
         paths:
           - path: /

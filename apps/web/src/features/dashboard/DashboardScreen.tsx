@@ -49,9 +49,15 @@ const DAY_OPTIONS = [
  *  proportional bar aligns with the cost column, not a separate chart. */
 function ledgerColumns(totalCost: number): Column<LedgerRow>[] {
   return [
-    { key: "name", header: "name", render: (r) => <span className="font-mono text-[12px] text-ink-primary">{r.name}</span> },
-    { key: "runs", header: "runs", numeric: true, render: (r) => r.bucket.runs },
-    { key: "cost", header: "cost", numeric: true, render: (r) => `$${r.bucket.cost_usd.toFixed(2)}` },
+    {
+      key: "name",
+      header: "name",
+      sortable: true,
+      sortAccessor: (r) => r.name,
+      render: (r) => <span className="font-mono text-[12px] text-ink-primary">{r.name}</span>,
+    },
+    { key: "runs", header: "runs", numeric: true, sortable: true, sortAccessor: (r) => r.bucket.runs, render: (r) => r.bucket.runs },
+    { key: "cost", header: "cost", numeric: true, sortable: true, sortAccessor: (r) => r.bucket.cost_usd, render: (r) => `$${r.bucket.cost_usd.toFixed(2)}` },
     {
       key: "share",
       header: "share",
@@ -134,7 +140,7 @@ export function DashboardScreen() {
             ) : (
               <div
                 data-testid={s.testId}
-                className={`font-mono text-[22px] tabular ${s.accent ? "text-green-bright" : "text-ink-primary"}`}
+                className={`font-mono text-[22px] tabular ${s.accent ? "text-ok-bright" : "text-ink-primary"}`}
               >
                 {s.value}
               </div>

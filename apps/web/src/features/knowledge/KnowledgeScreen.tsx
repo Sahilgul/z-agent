@@ -44,7 +44,7 @@ function DraftCard({ entry }: { entry: KnowledgeEntry }) {
 
   return (
     <article className="rounded-lg border border-warn/40 bg-bg-panel p-s4 shadow-card">
-      <div className="mb-s1 font-mono text-[10px] uppercase tracking-[0.08em] text-warn">
+      <div className="mb-s1 font-mono text-[10px] uppercase tracking-[0.08em] text-warn-bright">
         PHI checkpoint — review before sharing
       </div>
       <div className="text-[13px] font-semibold leading-[1.4] text-ink-primary">{entry.content}</div>

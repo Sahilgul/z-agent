@@ -55,7 +55,11 @@ export function IdeasScreen() {
 
   const send = useMutation({
     mutationFn: ({ id, kind }: { id: number; kind: "ask-counsel" | "promote" | "comment" }) =>
-      api.post(`/ideas/${id}/${kind}`, kind === "comment" ? { body: comment } : {}),
+      // The comment route is plural (/comments); the other two match their kind.
+      api.post(
+        `/ideas/${id}/${kind === "comment" ? "comments" : kind}`,
+        kind === "comment" ? { body: comment } : {},
+      ),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.ideas });
       if (openId !== null) void qc.invalidateQueries({ queryKey: qk.ideaThread(String(openId)) });

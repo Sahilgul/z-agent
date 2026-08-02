@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApprovalsScreen } from "../features/approvals/ApprovalsScreen";
+import { ApprovalQueue } from "../components/ApprovalQueue";
 
 const get = vi.fn();
 const post = vi.fn();
@@ -19,10 +19,10 @@ vi.mock("../lib/push", () => ({
 
 const card = {
   id: "a-1", run_id: "run-1234567890", lane_id: "lane-abcdef123456",
-  tool: "Bash", input: { cmd: "npm test" },
+  kind: "Bash", payload: { cmd: "npm test" },
 };
 
-describe("ApprovalsScreen", () => {
+describe("ApprovalQueue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hasSub.mockResolvedValue(false);
@@ -32,7 +32,7 @@ describe("ApprovalsScreen", () => {
 
   it("renders cards and posts decisions", async () => {
     get.mockResolvedValue([card]);
-    renderScreen(<ApprovalsScreen />);
+    renderScreen(<ApprovalQueue runId={card.run_id} />);
     expect(await screen.findByText("Bash")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "allow once" }));
     await waitFor(() =>
@@ -40,30 +40,39 @@ describe("ApprovalsScreen", () => {
     );
   });
 
+  it("asks the API for the open run only", async () => {
+    get.mockResolvedValue([card]);
+    renderScreen(<ApprovalQueue runId={card.run_id} />);
+    await waitFor(() =>
+      expect(get).toHaveBeenCalledWith(`/approvals?run_id=${encodeURIComponent(card.run_id)}`)
+    );
+  });
+
   it("asks for push opt-in only when a card is waiting", async () => {
     get.mockResolvedValue([card]);
-    renderScreen(<ApprovalsScreen />);
+    renderScreen(<ApprovalQueue runId={card.run_id} />);
     expect(await screen.findByTestId("push-ask")).toBeInTheDocument();
   });
 
-  it("hides the opt-in when nothing is waiting", async () => {
+  it("renders nothing when nothing is waiting", async () => {
     get.mockResolvedValue([]);
-    renderScreen(<ApprovalsScreen />);
-    expect(await screen.findByText("nothing waiting on you")).toBeInTheDocument();
+    renderScreen(<ApprovalQueue runId={card.run_id} />);
+    await waitFor(() => expect(get).toHaveBeenCalled());
+    expect(screen.queryByTestId("approval-queue")).not.toBeInTheDocument();
     expect(screen.queryByTestId("push-ask")).not.toBeInTheDocument();
   });
 
   it("hides the opt-in when already subscribed", async () => {
     hasSub.mockResolvedValue(true);
     get.mockResolvedValue([card]);
-    renderScreen(<ApprovalsScreen />);
+    renderScreen(<ApprovalQueue runId={card.run_id} />);
     expect(await screen.findByText("Bash")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("push-ask")).not.toBeInTheDocument());
   });
 
   it("enable push calls subscribe and dismisses", async () => {
     get.mockResolvedValue([card]);
-    renderScreen(<ApprovalsScreen />);
+    renderScreen(<ApprovalQueue runId={card.run_id} />);
     fireEvent.click(await screen.findByRole("button", { name: "enable push" }));
     await waitFor(() => expect(subscribe).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId("push-ask")).not.toBeInTheDocument());

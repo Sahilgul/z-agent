@@ -9,11 +9,9 @@ members = [
     "backend",
     "worker",
     "packages/contracts",
-    "packages/ado-mcp",
     "packages/maps",
 ]
 
 [tool.uv.sources]
 zagent-contracts = { workspace = true }
-zagent-ado-mcp = { workspace = true }
 zagent-maps = { workspace = true }

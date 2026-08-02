@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -18,6 +18,7 @@ def _svc(fake_redis, relay=None, control=None):
     svc.redis = fake_redis
     svc.run_streams = set()
     svc._task = None
+    svc._last_sweep = datetime.now(timezone.utc)
     return svc
 
 
@@ -144,6 +145,50 @@ async def test_loop_processes_approval_card(session, make_user, fake_redis):
     assert row.kind == "tool"
     assert row.payload == {"k": 1}
     assert any(m[1].get("type") == "approval_card" for m in svc.relay.published)
+
+
+async def test_create_card_stamps_expiry(session, make_user, fake_redis):
+    u = make_user("a")
+    session.add(Run(id="r-exp", created_by=u.id, mode="ask"))
+    session.commit()
+    svc = _svc(fake_redis)
+    await svc._create_card("r-exp", {"approval_id": "ap-exp"})
+    row = session.query(Approval).filter_by(id="ap-exp").one()
+    assert row.expires_at is not None
+
+
+async def test_expire_stale_times_out_and_fans_out(session, make_user, fake_redis):
+    """The worker's BLPOP has already denied these; the card must not linger."""
+    u = make_user("a")
+    session.add(Run(id="r-st", created_by=u.id, mode="ask"))
+    session.commit()
+    past = datetime.now(timezone.utc) - timedelta(minutes=5)
+    session.add(Approval(id="ap-old", run_id="r-st", kind="tool", expires_at=past))
+    session.add(Approval(id="ap-live", run_id="r-st", kind="tool",
+                         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5)))
+    session.commit()
+
+    svc = _svc(fake_redis)
+    svc._last_sweep = datetime.now(timezone.utc) - timedelta(hours=1)
+    await svc._expire_stale()
+
+    session.expire_all()
+    assert session.query(Approval).filter_by(id="ap-old").one().decision == "timeout"
+    assert session.query(Approval).filter_by(id="ap-live").one().decision is None
+    assert any(m[1].get("type") == "approval_resolved" for m in svc.relay.published)
+
+
+async def test_expire_stale_throttles_between_sweeps(session, make_user, fake_redis):
+    u = make_user("a")
+    session.add(Run(id="r-th", created_by=u.id, mode="ask"))
+    session.commit()
+    session.add(Approval(id="ap-th", run_id="r-th", kind="tool",
+                         expires_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+    session.commit()
+    svc = _svc(fake_redis)  # _last_sweep = now, so this tick is a no-op
+    await svc._expire_stale()
+    session.expire_all()
+    assert session.query(Approval).filter_by(id="ap-th").one().decision is None
 
 
 async def test_loop_sleeps_when_no_streams(fake_redis, monkeypatch):

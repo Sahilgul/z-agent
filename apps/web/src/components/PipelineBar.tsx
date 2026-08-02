@@ -35,7 +35,7 @@ export function PipelineBar({ stage }: { stage: RunStage }) {
               <span
                 className={cn(
                   "text-center font-mono text-[9px]",
-                  state === "current" ? "text-green-bright" : "text-ink-faint",
+                  state === "current" ? "text-ok-bright" : "text-ink-faint",
                 )}
               >
                 {s.replace(/_/g, " ")}

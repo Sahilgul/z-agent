@@ -22,6 +22,9 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         sa.Index("ix_runs_owner_status_repo", "created_by", "stage", "repo"),
+        # Session list + tab strip: WHERE created_by = ? ORDER BY last_active_at
+        # DESC LIMIT 100. The filter-first index above can't serve the sort.
+        sa.Index("ix_runs_owner_active", "created_by", "last_active_at"),
     )
 
     id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid

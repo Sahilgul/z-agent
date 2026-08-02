@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -561,6 +562,41 @@ def test_pending_approvals(auth_client, session, make_user):
     assert r.json()[0]["id"] == "a1"
 
 
+def test_pending_approvals_filtered_by_run(auth_client, session, make_user):
+    """The console docks approvals inside the open session, so it asks for one
+    run — other runs' pending cards must not come back."""
+    client, _, _, user = auth_client
+    for rid, aid in (("r1", "a1"), ("r2", "a2")):
+        session.add_all([
+            Run(id=rid, created_by=user.id, mode="ask", stage="investigating"),
+            Lane(id=f"l-{rid}", run_id=rid, persona="researcher", status="running"),
+            Approval(id=aid, run_id=rid, lane_id=f"l-{rid}", kind="bash", payload={}),
+        ])
+    session.commit()
+    assert {a["id"] for a in client.get("/approvals").json()} == {"a1", "a2"}
+    scoped = client.get("/approvals", params={"run_id": "r2"}).json()
+    assert [a["id"] for a in scoped] == ["a2"]
+
+
+def test_pending_approvals_hides_expired_cards(auth_client, session, make_user):
+    """Past expires_at the worker has already denied the tool — offering the
+    buttons would let the user 'approve' something nobody is waiting on."""
+    from datetime import timedelta
+    client, _, _, user = auth_client
+    session.add(Run(id="r1", created_by=user.id, mode="ask", stage="investigating"))
+    now = datetime.now(timezone.utc)
+    session.add_all([
+        Approval(id="a-dead", run_id="r1", lane_id="l1", kind="bash", payload={},
+                 expires_at=now - timedelta(minutes=1)),
+        Approval(id="a-live", run_id="r1", lane_id="l1", kind="bash", payload={},
+                 expires_at=now + timedelta(minutes=10)),
+    ])
+    session.commit()
+    body = client.get("/approvals").json()
+    assert [a["id"] for a in body] == ["a-live"]
+    assert body[0]["expires_at"] is not None
+
+
 def test_decide_approval(auth_client, session, make_user):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
@@ -625,6 +661,45 @@ def test_session_replay(auth_client, session, make_user):
 def test_session_replay_not_found(auth_client):
     client, _, _, _ = auth_client
     assert client.get("/sessions/ghost/replay").status_code == 404
+
+
+def test_session_transcript_streams_jsonl_file(auth_client, session):
+    client, _, _, user = auth_client
+    session.add(Run(id="r1", created_by=user.id, mode="ask", stage="completed"))
+    session.commit()
+    from app.services import transcript
+    transcript.append("r1", {"seq": 0, "kind": "message", "title": "first"})
+    transcript.append("r1", {"seq": 1, "kind": "command", "title": "second"})
+
+    r = client.get("/sessions/r1/transcript")
+    assert r.status_code == 200
+    lines = [json.loads(line) for line in r.text.strip().splitlines()]
+    assert [line["title"] for line in lines] == ["first", "second"]
+
+    after = client.get("/sessions/r1/transcript", params={"after_seq": 0})
+    assert [json.loads(x)["seq"] for x in after.text.strip().splitlines()] == [1]
+
+
+def test_session_transcript_falls_back_to_events(auth_client, session):
+    """Runs that predate the transcript writer still export — the events table
+    is the source of truth and the file is only a mirror."""
+    client, _, _, user = auth_client
+    session.add_all([
+        Run(id="r1", created_by=user.id, mode="ask", stage="completed"),
+        Lane(id="l1", run_id="r1", persona="researcher", status="completed"),
+    ])
+    session.commit()
+    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="from-db", payload={}))
+    session.commit()
+
+    r = client.get("/sessions/r1/transcript")
+    assert r.status_code == 200
+    assert json.loads(r.text.strip())["title"] == "from-db"
+
+
+def test_session_transcript_not_found(auth_client):
+    client, _, _, _ = auth_client
+    assert client.get("/sessions/ghost/transcript").status_code == 404
 
 
 def test_session_resumable(auth_client, session, make_user, monkeypatch):

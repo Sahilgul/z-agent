@@ -52,6 +52,10 @@ class Settings(BaseSettings):
 
     golden_dir: Path = Path("./golden/repos")
     sessions_dir: Path = Path("./sessions")
+    # Flat JSONL mirror of each run's event stream. Deliberately NOT under
+    # sessions_dir: that tree is purged at session_retention_days, while a
+    # transcript should live as long as the events rows (events_ttl_months).
+    transcripts_dir: Path = Path("./transcripts")
     workspaces_dir: Path = Path("./workspaces")
     evidence_dir: Path = Path("./evidence")  # Playwright screenshots + run evidence artifacts
     fleet_config_dir: Path = Path("./fleet-config")
@@ -61,6 +65,11 @@ class Settings(BaseSettings):
     fetch_interval_seconds: int = 300
     session_retention_days: int = 30
     events_ttl_months: int = 12
+
+    # Tool-permission cards. The worker's BLPOP gives up after this long and
+    # denies deterministically (plan §10), so the backend has to expire the row
+    # on the same clock or the console keeps offering a dead button.
+    approval_timeout_seconds: int = 900
 
     global_lane_cap: int = 12
     default_lane_budget_usd: float = 5.0
@@ -100,7 +109,7 @@ class Settings(BaseSettings):
     # empty = push disabled (sends are skipped, subscriptions still stored).
     vapid_public_key: str = ""
     vapid_private_key: str = ""
-    vapid_subject: str = "mailto:admin@bostonhealth.ai"
+    vapid_subject: str = "mailto:admin@zagentharness.ai"
     # Autonomy promotion (Phase 4): evidence thresholds — completed runs at the
     # level below before the dial unlocks one notch. Failures reset nothing;
     # they just don't count.

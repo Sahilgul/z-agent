@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as redis
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -24,6 +25,9 @@ log = get_logger(service="approvals")
 
 # Idle-loop poll interval; tests monkeypatch this down to keep the suite fast.
 IDLE_POLL_SECONDS = 0.5
+# How often the loop looks for cards the worker has already timed out on. The
+# deadline itself is approval_timeout_seconds; this is just the check cadence.
+SWEEP_INTERVAL_SECONDS = 30
 
 
 class ApprovalService:
@@ -33,6 +37,7 @@ class ApprovalService:
         self.redis = make_redis()
         self.run_streams: set[str] = set()
         self._task: asyncio.Task | None = None
+        self._last_sweep = datetime.now(timezone.utc)
 
     def register_run(self, run_id: str) -> None:
         self.run_streams.add(run_id)
@@ -50,6 +55,7 @@ class ApprovalService:
 
     async def _loop(self) -> None:
         while True:
+            await self._expire_stale()
             if not self.run_streams:
                 await asyncio.sleep(IDLE_POLL_SECONDS)
                 continue
@@ -72,13 +78,49 @@ class ApprovalService:
                     await self._create_card(run_id, fields)
                     await self.redis.xack(stream, "approvals", msg_id)
 
+    async def _expire_stale(self) -> None:
+        """The worker's BLPOP has already given up on these and denied the tool,
+        so a card past expires_at is answering nothing. Stamp decision=timeout
+        (the audit trail keeps the distinction from a human deny) and tell the
+        console to drop it — otherwise it sits there all night looking live."""
+        now = datetime.now(timezone.utc)
+        if now - self._last_sweep < timedelta(seconds=SWEEP_INTERVAL_SECONDS):
+            return
+        self._last_sweep = now
+        session = get_session()
+        try:
+            stale = (session.query(Approval)
+                     .filter(Approval.decision.is_(None),
+                             Approval.expires_at.isnot(None),
+                             Approval.expires_at <= now)
+                     .all())
+            if not stale:
+                return
+            resolved = [(a.id, a.run_id) for a in stale]
+            for approval in stale:
+                approval.decision = "timeout"
+                approval.decided_at = now
+            session.commit()
+        except SQLAlchemyError as exc:  # a sweep hiccup must not kill the consumer
+            log.warning("approval sweep failed", error=str(exc)[:200])
+            return
+        finally:
+            session.close()
+        for approval_id, run_id in resolved:
+            log.info("approval timed out", approval_id=approval_id, run_id=run_id)
+            await self.relay._fanout(run_id, {
+                "type": "approval_resolved", "approval_id": approval_id, "decision": "timeout",
+            })
+
     async def _create_card(self, run_id: str, fields: dict) -> None:
+        ttl = get_settings().approval_timeout_seconds
         approval = Approval(
             id=fields.get("approval_id", str(uuid.uuid4())),
             run_id=run_id,
             lane_id=fields.get("lane_id"),
             kind=fields.get("kind", "tool"),
             payload=json.loads(fields.get("payload", "{}")),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl),
         )
         session = get_session()
         try:
@@ -131,4 +173,7 @@ class ApprovalService:
         finally:
             session.close()
         await self.control.resolve_approval(approval_id, decision, reason)
+        await self.relay._fanout(approval.run_id, {
+            "type": "approval_resolved", "approval_id": approval_id, "decision": decision,
+        })
         return approval

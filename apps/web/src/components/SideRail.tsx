@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
+import { NavLink } from "react-router-dom";
 import {
-  ActivityIcon,
   BookOpenIcon,
   CircleDollarSignIcon,
   FolderGit2Icon,
@@ -8,14 +8,14 @@ import {
   LightbulbIcon,
   LogOutIcon,
   RadarIcon,
-  ShieldCheckIcon,
   UsersIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSession } from "../stores/session";
 import { useRuns } from "../stores/run";
-import { useUi, type Screen } from "../stores/ui";
+import { SCREEN_PATHS } from "../lib/routes";
+import type { Screen } from "../types";
 
 interface NavItem {
   screen: Screen;
@@ -33,9 +33,7 @@ const GROUPS: NavGroup[] = [
   {
     label: "operate",
     items: [
-      { screen: "inbox", label: "inbox", icon: InboxIcon },
-      { screen: "monitor", label: "monitor", icon: ActivityIcon },
-      { screen: "approvals", label: "approvals", icon: ShieldCheckIcon },
+      { screen: "sessions", label: "sessions", icon: InboxIcon },
     ],
   },
   {
@@ -57,26 +55,28 @@ const GROUPS: NavGroup[] = [
 ];
 
 function RailButton({ item }: { item: NavItem }) {
-  const { screen, setScreen } = useUi();
-  const on = screen === item.screen;
+  const to = SCREEN_PATHS[item.screen];
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
-            onClick={() => setScreen(item.screen)}
-            aria-current={on ? "page" : undefined}
-            className={cn(
-              "flex w-full items-center gap-s3 rounded-md px-s3 py-[7px] font-mono text-[12px] font-semibold transition-colors duration-fast",
-              "max-[1100px]:justify-center max-[1100px]:px-0",
-              on ? "bg-bg-module text-green-bright" : "text-ink-secondary hover:bg-bg-module/60 hover:text-ink-primary",
-            )}
+          <NavLink
+            to={to}
+            end={item.screen === "sessions"}
+            aria-current="page"
+            className={({ isActive }) =>
+              cn(
+                "flex w-full items-center gap-s3 rounded-md px-s3 py-[7px] font-mono text-[12px] font-semibold transition-colors duration-fast",
+                "max-[1100px]:justify-center max-[1100px]:px-0",
+                isActive
+                  ? "bg-bg-module text-green-bright"
+                  : "text-ink-secondary hover:bg-bg-module/60 hover:text-ink-primary",
+              )
+            }
           >
             <item.icon className="size-4 shrink-0" aria-hidden="true" />
             <span className="max-[1100px]:hidden">{item.label}</span>
-            {on && <span className="led ml-auto max-[1100px]:hidden" aria-hidden="true" />}
-          </button>
+          </NavLink>
         }
       />
       <TooltipContent side="right">{item.label}</TooltipContent>
@@ -85,7 +85,8 @@ function RailButton({ item }: { item: NavItem }) {
 }
 
 /** Left rail (DESIGN.md): grouped nav + status footer — chrome as
- *  instrumentation. 224px, collapses to a 56px icon rail under 1100px. */
+ *  instrumentation. 224px, collapses to a 56px icon rail under 1100px.
+ *  NavLink gives aria-current="page" and active styling for free. */
 export function SideRail() {
   const { me, logout } = useSession();
   const socketConnected = useRuns((s) => s.socketConnected);

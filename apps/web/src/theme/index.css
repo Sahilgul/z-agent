@@ -6,23 +6,24 @@
    Locked brand palette; shadcn semantic colors rebound (no zinc defaults).
    ========================================================================== */
 @theme {
-  /* surfaces + neutrals */
-  --color-bg-base: #202a35;
-  --color-bg-panel: #29343f;
-  --color-bg-module: #323f4b;
-  --color-jack: #0c1013;
-  --color-hairline: #3b4854;
+  /* v2.3 — neutral charcoal chrome (Cursor-agent class), mono-green accent */
+  --color-bg-base: #1b1b1a;
+  --color-bg-panel: #232322;
+  --color-bg-module: #2c2c2a;
+  --color-bg-raised: #2c2c2a; /* inputs/wells that sit on a panel */
+  --color-jack: #121212; /* terminal wells — deepest surface */
+  --color-hairline: #373736;
 
   /* ink */
-  --color-ink-primary: #eaf0ec;
-  --color-ink-secondary: #93a6ac;
-  --color-ink-faint: #7c8b92; /* AA-legal text tint */
-  --color-ink-ghost: #5d6c73; /* decorative only — never text */
+  --color-ink-primary: #e8e8e4;
+  --color-ink-secondary: #9c9c96;
+  --color-ink-faint: #74746d; /* AA-legal text tint */
+  --color-ink-ghost: #55554f; /* decorative only — never text */
 
-  /* accents — mono-green: blue tokens are aliased to the green family */
+  /* accents — mono-green */
   --color-blue: #5fa777;
-  --color-blue-bright: #7fcb9a;
-  --color-green: #5fa777;
+  --color-blue-bright: #7fcb9a; /* interactive text/links/focus */
+  --color-green: #5fa777; /* fills with dark ink (primary button) */
   --color-green-bright: #7fcb9a;
   --color-danger: #b23a45; /* fills/borders only */
   --color-danger-bright: #d96771; /* danger text/icons */
@@ -33,10 +34,10 @@
   --color-ok: var(--color-green);
   --color-ok-bright: var(--color-green-bright);
   --color-warn-bright: #e6c88a;
-  --color-ok-soft: color-mix(in srgb, var(--color-green) 14%, transparent);
-  --color-blue-soft: color-mix(in srgb, var(--color-green) 16%, transparent);
-  --color-warn-soft: color-mix(in srgb, var(--color-warn) 14%, transparent);
-  --color-danger-soft: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  --color-ok-soft: color-mix(in srgb, var(--color-green) 12%, transparent);
+  --color-blue-soft: color-mix(in srgb, var(--color-green) 12%, transparent);
+  --color-warn-soft: color-mix(in srgb, var(--color-warn) 18%, transparent);
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 10%, transparent);
 
   /* shadcn semantic rebind */
   --color-background: var(--color-bg-base);
@@ -90,9 +91,9 @@
   --radius-pill: 999px;
 
   /* shadow */
-  --shadow-card: 0 1px 2px rgb(12 16 19 / 0.35);
-  --shadow-pop: 0 12px 32px rgb(12 16 19 / 0.45);
-  --shadow-overlay: 0 24px 60px rgb(12 16 19 / 0.6);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.45);
+  --shadow-overlay: 0 24px 60px rgb(0 0 0 / 0.6);
 
   /* motion */
   --ease-soft: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -118,16 +119,30 @@
     -webkit-font-smoothing: antialiased;
     /* dot-grid stage — patch-bay instrumentation, base layer only */
     background-image: radial-gradient(
-      color-mix(in srgb, var(--color-hairline) 40%, transparent) 1px,
+      color-mix(in srgb, var(--color-hairline) 45%, transparent) 1px,
       transparent 1px
     );
     background-size: 26px 26px;
     background-attachment: fixed;
   }
 
+  /* Chrome paints autofilled fields with a UA background that background-color
+     cannot override; the inset shadow is the only way to repaint the well. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--color-ink-primary);
+    caret-color: var(--color-ink-primary);
+    box-shadow:
+      inset 0 0 0 1000px var(--color-jack),
+      inset 0 2px 6px rgb(0 0 0 / 0.5);
+    transition: background-color 9999s ease-in-out 0s;
+  }
+
   ::selection {
     background: var(--color-green);
-    color: var(--color-bg-base);
+    color: var(--color-ink-on-green);
   }
 
   :where(button, a, input, select, textarea, [tabindex]):focus-visible {

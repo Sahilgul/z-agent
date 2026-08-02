@@ -1,5 +1,5 @@
 /** Pure run-state logic (plan §8 lib/runMachine.ts) — the tested heart of the
- *  monitor: stage presentation, live-state interaction rules (§1a), watchdog
+ *  session: stage presentation, live-state interaction rules (§1a), watchdog
  *  detection, and the swarm critical path. No React imports. */
 
 import type { Lane, RunStage } from "../types";

@@ -56,7 +56,14 @@ export function EventStream({
   }, [items.length]);
 
   return (
-    <div className="h-full overflow-y-auto px-s4 py-s3 text-[13px]" data-testid="event-stream">
+    <div
+      className="h-full overflow-y-auto px-s4 py-s3 text-[13px]"
+      data-testid="event-stream"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
+      aria-label="agent event stream"
+    >
       {items.length === 0 && (
         <div className="px-s2 py-s4 font-mono text-[12px] text-ink-faint">
           no trace yet — the agent's first step lands here
@@ -65,6 +72,9 @@ export function EventStream({
       {items.map((i) => (
         <Item key={i.key} item={i} />
       ))}
+      <span className="sr-only" aria-live="polite">
+        {items.length} events
+      </span>
       <div ref={endRef} />
     </div>
   );

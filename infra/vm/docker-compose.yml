@@ -60,12 +60,15 @@ services:
     restart: unless-stopped
 
   gateway:
-    image: ghcr.io/berriai/litellm:main-v1.94.1-stable
+    # LiteLLM tag scheme changed mid-2026: PEP 440 pins; main-v*-stable is gone.
+    image: ghcr.io/berriai/litellm:1.84.0
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     environment:
       DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD}@gateway-db:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
-      AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:?set in .env}
+      # Optional at first boot: the gateway starts without it; LLM calls fail
+      # until a real Foundry key is set (UI/login/runs-metadata work regardless).
+      AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:-}
       STORE_MODEL_IN_DB: "True"
     volumes:
       - ../litellm/config.yaml:/app/config.yaml:ro
@@ -112,12 +115,32 @@ services:
       ZAGENT_ADO_PROJECT: ${ADO_PROJECT:-}
       ZAGENT_ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET:-}
       ZAGENT_SERVICE_ACCOUNT_DESCRIPTOR: ${SERVICE_ACCOUNT_DESCRIPTOR:-}
-      ZAGENT_GOLDEN_DIR: /golden/repos
-      ZAGENT_SESSIONS_DIR: /sessions
+      ZAGENT_BYO_PAT_ENCRYPTION_KEY: ${ZAGENT_BYO_PAT_ENCRYPTION_KEY:?set in .env}
+      # HOST PATHS, mounted at the SAME path inside this container (see below).
+      ZAGENT_GOLDEN_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/golden/repos
+      ZAGENT_SESSIONS_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/sessions
+      ZAGENT_WORKSPACES_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/workspaces
+      ZAGENT_TRANSCRIPTS_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/transcripts
+      ZAGENT_EVIDENCE_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/evidence
       ZAGENT_FLEET_CONFIG_DIR: /fleet-config
+      # The image copies the tree to /app/backend, but WORKDIR is /app — without
+      # this the playbook loader finds an empty dir and modes lose their SKILL.md
+      # guidance silently.
+      ZAGENT_PLAYBOOKS_DIR: /app/backend/playbooks
     volumes:
-      - golden:/golden
-      - sessions:/sessions
+      # PATH PARITY (required, not cosmetic): the sandbox manager asks the HOST
+      # daemon over docker.sock to bind these dirs into sibling lane containers,
+      # and the daemon resolves those sources in the HOST namespace. A named
+      # volume mounted at /golden here does not exist at /golden on the host, so
+      # Docker would silently create an empty dir and every lane would see an
+      # empty repo. Mounting host path -> identical container path keeps the
+      # paths the backend writes and the paths the daemon reads the same string.
+      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/golden:${ZAGENT_DATA_ROOT:-/srv/zagent}/golden
+      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/sessions:${ZAGENT_DATA_ROOT:-/srv/zagent}/sessions
+      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/workspaces:${ZAGENT_DATA_ROOT:-/srv/zagent}/workspaces
+      # Backend-only state, but on the same root so one dir is the whole backup.
+      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/transcripts:${ZAGENT_DATA_ROOT:-/srv/zagent}/transcripts
+      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/evidence:${ZAGENT_DATA_ROOT:-/srv/zagent}/evidence
       - ../../fleet-config:/fleet-config:ro
       # Lane spawning: the sandbox manager drives sibling worker containers.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -138,7 +161,9 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:8080:80"   # LAN-local; real access is the Tailscale profile
+      # Public pilot mode (user decision, Aug 2): plain HTTP on all interfaces;
+      # NSG inbound 8080 must be open. Tailscale profile remains the secure path.
+      - "8080:80"
     networks: [internal]
     restart: unless-stopped
 
@@ -177,5 +202,5 @@ volumes:
   pkg-cache:
   pip-cache:
   npm-cache:
-  golden:
-  sessions:
+# golden/sessions/workspaces are deliberately NOT named volumes — see the path
+# parity note on the backend service.

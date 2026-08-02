@@ -18,7 +18,7 @@ const LED: Record<LaneStatus, string> = {
 };
 
 const PULSE: Partial<Record<LaneStatus, string>> = {
-  running: "text-green-bright",
+  running: "text-ok-bright",
   queued: "text-blue-bright",
   idle: "text-blue-bright",
 };

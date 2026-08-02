@@ -5,9 +5,9 @@ export type TagTone = "neutral" | "ok" | "info" | "warn" | "danger";
 
 const TONE_CLASS: Record<TagTone, string> = {
   neutral: "border-hairline bg-bg-module text-ink-secondary",
-  ok: "border-green/45 bg-bg-module text-green-bright",
+  ok: "border-green/45 bg-bg-module text-ok-bright",
   info: "border-blue/55 bg-bg-module text-blue-bright",
-  warn: "border-warn/40 bg-bg-module text-warn",
+  warn: "border-warn/40 bg-bg-module text-warn-bright",
   danger: "border-danger/60 bg-bg-module text-danger-bright",
 };
 

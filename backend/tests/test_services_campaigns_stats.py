@@ -52,6 +52,17 @@ async def test_launch_scoped_subset_and_missing_repos(session, make_user):
         await campaigns.launch("x task", ["Ghost-Repo"], u.id, FakeRM())
 
 
+async def test_launch_includes_ready_no_map_repos(session, make_user):
+    """Onboarding lands every repo at ready-no-map until the Phase 2 map
+    generator exists, so filtering on 'ready' alone matched the whole fleet out
+    of every campaign."""
+    session.add(Repo(name="ServerApp", integration_branch="main", status="ready-no-map"))
+    session.add(Repo(name="Archived-One", integration_branch="main", status="archived"))
+    session.commit()
+    out = await campaigns.launch("bump timeouts", None, make_user().id, FakeRM())
+    assert out["repos"] == ["ServerApp"]
+
+
 async def test_launch_rejects_empty_fleet(session, make_user):
     u = make_user()
     with pytest.raises(campaigns.CampaignError, match="no ready repos"):

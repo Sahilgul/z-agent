@@ -1,5 +1,8 @@
 import { create } from "zustand";
+import { toast } from "@/components/ui/sonner";
 import { api } from "../lib/api";
+import { qk } from "../lib/queryKeys";
+import { queryClient } from "../lib/queryClient";
 import { RunSocket } from "../lib/ws";
 import type { Lane, Run, StepEvent, WsMessage } from "../types";
 
@@ -46,38 +49,49 @@ export const useRuns = create<RunState>((set, get) => ({
 
   openRun: async (runId) => {
     socket?.close();
-    const [run, lanes, events] = await Promise.all([
-      api.get<Run>(`/runs/${runId}`),
-      api.get<Lane[]>(`/runs/${runId}/lanes`),
-      api.get<StepEvent[]>(`/runs/${runId}/events`),
-    ]);
-    set({ current: run, lanes, events, deltas: [] });
+    try {
+      const [run, lanes, events] = await Promise.all([
+        api.get<Run>(`/runs/${runId}`),
+        api.get<Lane[]>(`/runs/${runId}/lanes`),
+        api.get<StepEvent[]>(`/runs/${runId}/events`),
+      ]);
+      set({ current: run, lanes, events, deltas: [] });
 
-    socket = new RunSocket(
-      runId,
-      (msg: WsMessage) => {
-        const s = get();
-        if (msg.type === "step") {
-          set({ events: [...s.events, msg.event] });
-        } else if (msg.type === "delta") {
-          set({ deltas: [...s.deltas, msg] });
-        } else if (msg.type === "lane_status") {
-          set({
-            lanes: s.lanes.map((l) =>
-              l.id === msg.lane_id ? { ...l, status: msg.status as Lane["status"] } : l,
-            ),
-          });
-        } else if (msg.type === "run_stage" && s.current) {
-          set({
-            current: { ...s.current, stage: msg.stage, available_actions: msg.available_actions },
-          });
-          // lanes move with stage transitions — refresh silently
-          void api.get<Lane[]>(`/runs/${runId}/lanes`).then((lanes) => set({ lanes }));
-        }
-      },
-      (connected) => set({ socketConnected: connected }),
-    );
-    socket.connect();
+      socket = new RunSocket(
+        runId,
+        (msg: WsMessage) => {
+          const s = get();
+          if (msg.type === "step") {
+            set({ events: [...s.events, msg.event] });
+          } else if (msg.type === "delta") {
+            set({ deltas: [...s.deltas, msg] });
+          } else if (msg.type === "lane_status") {
+            set({
+              lanes: s.lanes.map((l) =>
+                l.id === msg.lane_id ? { ...l, status: msg.status as Lane["status"] } : l,
+              ),
+            });
+          } else if (msg.type === "approval_card" || msg.type === "approval_resolved") {
+            // Cards arrive and expire on the run socket; refetching is what makes
+            // them appear (and vanish) immediately rather than on the next poll.
+            void queryClient.invalidateQueries({ queryKey: [...qk.approvals, runId] });
+          } else if (msg.type === "run_stage" && s.current) {
+            set({
+              current: { ...s.current, stage: msg.stage, available_actions: msg.available_actions },
+            });
+            // lanes move with stage transitions — refresh silently
+            void api.get<Lane[]>(`/runs/${runId}/lanes`).then((lanes) => set({ lanes }));
+          }
+        },
+        (connected) => set({ socketConnected: connected }),
+      );
+      socket.connect();
+    } catch (err) {
+      toast.error("couldn't open run", {
+        description: err instanceof Error ? err.message : "run may not exist",
+      });
+      throw err;
+    }
   },
 
   closeRun: () => {
@@ -89,22 +103,37 @@ export const useRuns = create<RunState>((set, get) => ({
   sendIntent: async (intent, opts = {}) => {
     const run = get().current;
     if (!run) throw new Error("no open run");
-    const res = await api.post<Record<string, unknown>>(`/runs/${run.id}/intent`, {
-      intent,
-      source: opts.text ? "text" : "button",
-      lane_id: opts.laneId ?? null,
-      text: opts.text ?? null,
-      confirmed: opts.confirmed ?? false,
-      payload: opts.payload ?? {},
-    });
-    const fresh = await api.get<Run>(`/runs/${run.id}`);
-    set({ current: fresh });
-    return res;
+    try {
+      const res = await api.post<Record<string, unknown>>(`/runs/${run.id}/intent`, {
+        intent,
+        source: opts.text ? "text" : "button",
+        lane_id: opts.laneId ?? null,
+        text: opts.text ?? null,
+        confirmed: opts.confirmed ?? false,
+        payload: opts.payload ?? {},
+      });
+      const fresh = await api.get<Run>(`/runs/${run.id}`);
+      set({ current: fresh });
+      return res;
+    } catch (err) {
+      toast.error(`${intent} failed`, {
+        description: err instanceof Error ? err.message : undefined,
+      });
+      throw err;
+    }
   },
 
   createRun: async (body) => {
-    const run = await api.post<Run>("/runs", body);
-    await get().loadRuns();
-    return run;
+    try {
+      const run = await api.post<Run>("/runs", body);
+      await get().loadRuns();
+      toast.success("run routed", { description: run.title });
+      return run;
+    } catch (err) {
+      toast.error("couldn't start run", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+      throw err;
+    }
   },
 }));
