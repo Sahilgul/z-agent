@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BranchPicker } from "@/components/ui/branch-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHead } from "@/components/ui/page-head";
@@ -18,9 +19,6 @@ export interface Repo {
 }
 
 const SETTLED = ["ready", "ready-no-map", "error"];
-
-const selectClass =
-  "h-8 w-full rounded-md border border-hairline bg-bg-raised px-s3 text-[13px] text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack";
 
 function repoTone(status: string): "ok" | "warn" | "danger" | "info" {
   if (status === "ready" || status === "ready-no-map") return "ok";
@@ -138,18 +136,7 @@ export function ReposScreen() {
                 <label htmlFor="repo-branch" className="mb-s1 block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
                   integration branch (from remote)
                 </label>
-                <select
-                  id="repo-branch"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  className={selectClass}
-                >
-                  {branches.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
+                <BranchPicker id="repo-branch" branches={branches} value={branch} onChange={setBranch} />
               </div>
             )}
             {branches ? (
@@ -287,18 +274,7 @@ function RepoBranchEditor({ repo, onDone }: { repo: Repo; onDone: () => void }) 
   return (
     <div className="flex items-center gap-s3">
       {branches ? (
-        <select
-          aria-label="integration branch"
-          value={branch}
-          onChange={(e) => setBranch(e.target.value)}
-          className={`${selectClass} max-w-[280px]`}
-        >
-          {branches.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </select>
+        <BranchPicker branches={branches} value={branch} onChange={setBranch} className="w-[280px]" />
       ) : (
         <p className="font-mono text-[10.5px] text-ink-faint">loading branches…</p>
       )}

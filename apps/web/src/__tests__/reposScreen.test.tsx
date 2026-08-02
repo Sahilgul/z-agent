@@ -54,6 +54,36 @@ describe("ReposScreen", () => {
     );
   });
 
+  it("filters the branch list by typing — hundreds of branches are unscrollable", async () => {
+    get.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.startsWith("/repos/remote-branches")
+          ? { branches: ["main", "release-2026", "19601-jwt-httponly"] }
+          : repos
+      )
+    );
+    renderScreen(<ReposScreen />);
+    await screen.findByTestId("repo-ServerApp");
+    fireEvent.click(screen.getByRole("button", { name: "+ add repo" }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Billing-Engine"), {
+      target: { value: "Billing-Engine" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "fetch branches" }));
+
+    const combo = await screen.findByRole("combobox");
+    fireEvent.change(combo, { target: { value: "jwt" } });
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(1);
+
+    fireEvent.click(options[0]);
+    fireEvent.click(screen.getByRole("button", { name: "register & onboard" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/repos", {
+        name: "Billing-Engine", integration_branch: "19601-jwt-httponly",
+      })
+    );
+  });
+
   it("shows remote errors in the form", async () => {
     get.mockImplementation((url: string) =>
       url.startsWith("/repos/remote-branches")
