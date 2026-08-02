@@ -27,7 +27,8 @@ function Thinking({ item }: { item: StreamItem }) {
   return (
     <details open={item.live} className="min-w-0 flex-1">
       <summary className="cursor-pointer list-none font-mono text-[12px] text-ink-faint hover:text-ink-secondary">
-        {item.live ? "thinking…" : "thought for a moment"}
+        &lt;thinking&gt;
+        {item.live && <span className="ml-s1 text-ink-faint">…</span>}
       </summary>
       <pre className={BODY}>{item.text}</pre>
     </details>

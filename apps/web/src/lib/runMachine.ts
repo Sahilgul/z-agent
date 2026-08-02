@@ -93,6 +93,14 @@ export interface StreamItem {
   role: "user" | "agent" | null;
 }
 
+/** Status events are the agent's plumbing, not its progress: every turn emits
+ *  session-init / thinking_tokens / turn-complete bookkeeping. Rendering them
+ *  makes one healthy reply look like a stack of restarts, so they never reach
+ *  the stream regardless of what's stored. */
+function isPlumbing(e: { kind: string }): boolean {
+  return e.kind === "status";
+}
+
 /** Fold WS typing deltas + stored events into display items. Deltas for the
  *  same (lane, kind) collapse into one growing bubble; stored events pass
  *  through untouched. Pure — tested without React. */
@@ -100,7 +108,7 @@ export function foldStream(
   events: { lane_id: string; kind: string; title: string; detail: Record<string, unknown>; seq: number }[],
   deltas: { lane_id: string; kind: string; text: string }[],
 ): StreamItem[] {
-  const items: StreamItem[] = events.map((e) => ({
+  const items: StreamItem[] = events.filter((e) => !isPlumbing(e)).map((e) => ({
     key: `e-${e.lane_id}-${e.seq}`,
     kind: e.kind,
     title: e.title,
