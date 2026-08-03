@@ -105,18 +105,24 @@ export function EventStream({
    *  like an answer to a question nobody can see. */
   prompt?: string;
 }) {
-  const endRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   const filtered = laneFilter ? events.filter((e) => e.lane_id === laneFilter) : events;
   const filteredDeltas = laneFilter ? deltas.filter((d) => d.lane_id === laneFilter) : deltas;
   const items = foldStream(filtered, filteredDeltas);
 
+  // scrollIntoView walks up and scrolls every ancestor — including the
+  // overflow:hidden shell and the document — which drags the whole app
+  // sideways and up. Drive this pane's own scrollTop instead.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = logRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [items.length]);
 
   return (
     <div
-      className="h-full overflow-y-auto px-s4 py-s3 text-[13px]"
+      ref={logRef}
+      className="h-full overflow-x-hidden overflow-y-auto overscroll-contain px-s4 py-s3 text-[13px]"
       data-testid="event-stream"
       role="log"
       aria-live="polite"
@@ -135,7 +141,6 @@ export function EventStream({
       <span className="sr-only" aria-live="polite">
         {items.length} events
       </span>
-      <div ref={endRef} />
     </div>
   );
 }
