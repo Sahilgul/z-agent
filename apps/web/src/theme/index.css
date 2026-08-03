@@ -332,17 +332,37 @@
   .md li {
     margin: 4px 0;
   }
+  /* Tables scroll inside their own frame rather than stretching the bubble:
+     min-width keeps a narrow table full-width, max-content lets a wide one
+     grow into the scroller instead of crushing its columns. */
+  .md .md-scroll {
+    overflow-x: auto;
+    margin: 12px 0;
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-sm);
+  }
   .md table {
     border-collapse: collapse;
-    width: 100%;
-    margin: 12px 0;
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
   }
   .md th,
   .md td {
-    border: 1px solid var(--color-hairline);
-    padding: 6px 10px;
+    border-right: 1px solid var(--color-hairline);
+    border-bottom: 1px solid var(--color-hairline);
+    padding: 7px 12px;
     font-size: 13px;
     text-align: left;
+    vertical-align: top;
+    overflow-wrap: break-word;
+  }
+  /* The wrapper draws the outer frame, so the edge cells must not double it. */
+  .md tr > *:last-child {
+    border-right: 0;
+  }
+  .md tbody tr:last-child > * {
+    border-bottom: 0;
   }
   .md th {
     font-family: var(--font-mono);
@@ -351,6 +371,15 @@
     letter-spacing: 0.06em;
     color: var(--color-ink-secondary);
     background: var(--color-bg-module);
+    white-space: nowrap;
+  }
+  /* Zebra rows: the cheapest way to keep the eye on one row across many columns. */
+  .md tbody tr:nth-child(even) > * {
+    background: color-mix(in srgb, var(--color-bg-module) 45%, transparent);
+  }
+  .md td:has(> code:only-child) {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .md a {
     color: var(--color-blue-bright);

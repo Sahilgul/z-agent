@@ -1,30 +1,45 @@
 import { Button } from "@/components/ui/button";
-import { criticalLaneIds, isStaleLane } from "../../lib/runMachine";
+import { criticalLaneIds, staleLanes } from "../../lib/runMachine";
 import { LaneTile } from "../../components/LaneTile";
-import type { Lane } from "../../types";
+import type { Lane, RunStage } from "../../types";
 
 /** Swarm strip (monitor v2.3): the lead chip plus one compact tile per
  *  worker in a horizontal scroll row — the stream gets the space, lanes
- *  stay glanceable. Watchdog alerts pin below the strip. */
+ *  stay glanceable. Watchdog alerts pin below the strip.
+ *
+ * Hidden for a single-lane run (ask mode): one researcher IS the chat
+ * partner, so a "swarm of one" plus its destructive lane controls is dead
+ * weight above the conversation. The main stream already is that lane's
+ * trace, so nothing becomes unreachable. */
 export function SwarmView({
   lanes,
   now,
+  stage,
   onOpenLane,
   onNudge,
   onLetItRun,
 }: {
   lanes: Lane[];
   now: number;
+  stage: RunStage;
   onOpenLane: (laneId: string) => void;
   onNudge: (laneId: string) => void;
   onLetItRun: (laneId: string) => void;
 }) {
-  const critical = criticalLaneIds(lanes);
-  const stale = lanes.filter((l) => isStaleLane(l, now));
   const lead = lanes.find((l) => l.persona === "lead");
   const workers = lanes.filter((l) => l !== lead);
 
-  if (lanes.length === 0) return null;
+  // A real swarm is more than one worker lane, or any lead lane (the lead
+  // orchestrates a fan-out and is never the sole voice in an ask chat).
+  const isSwarm = workers.length > 1 || lead !== undefined;
+  if (!isSwarm) return null;
+
+  const critical = criticalLaneIds(lanes);
+  // Terminal runs never nag: a finished run with a row stranded at "running"
+  // (a lost status-change beat) would otherwise show "heartbeat stale"
+  // forever. The backend's heartbeat fix keeps the row honest; this keeps
+  // the UI correct even when a beat slips through.
+  const stale = staleLanes(lanes, now, stage);
 
   return (
     <section aria-label="swarm lanes" data-testid="swarm-view" className="flex-none border-b border-hairline">

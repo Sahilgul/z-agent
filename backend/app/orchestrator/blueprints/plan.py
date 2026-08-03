@@ -129,6 +129,7 @@ class PlanBlueprint(Blueprint):
         lane = await lane_manager.spawn(
             ctx.run, persona="planner", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=[repo],
+            resume_from_lane_id=ctx.artifacts.get("resume_from_lane_id"),
         )
         ctx.artifacts["draft_lane_id"] = lane.id
         await self._await_lane(lane.id)

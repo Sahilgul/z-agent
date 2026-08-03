@@ -10,10 +10,13 @@ dist/
 *.db
 *.db-wal
 *.db-shm
-golden/
-sessions/
-workspaces/
-data/
+# Runtime lane data, anchored to the data root. Unanchored, "sessions/" also
+# matched apps/web/src/features/sessions/ — hiding the whole session feature
+# from ripgrep and silently ignoring any new file added there.
+/data/
+/data/golden/
+/data/sessions/
+/data/workspaces/
 .cursor/
 .coverage
 out.txt

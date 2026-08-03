@@ -55,12 +55,30 @@ export function agentWorking(stage: RunStage): boolean {
 // ------------------------------------------------------------------ watchdog
 export const WATCHDOG_STALE_MS = 3 * 60 * 1000;
 
+/** Run stages where no lane is doing anything — a finished run must never
+ *  nag the user to nudge a lane, even if a beat was lost and the row is
+ *  stranded at "running". The backend's heartbeat fix keeps the row honest,
+ *  but the UI must be correct even when a beat slips through. */
+const TERMINAL_STAGES = new Set([
+  "completed", "failed", "abandoned", "interrupted",
+]);
+
 /** A lane is a watchdog candidate when it claims to be active but its
  *  heartbeat has gone stale — the UI shows "nudge / let it run" (§4). */
 export function isStaleLane(lane: Lane, now: number): boolean {
   if (lane.status !== "running" && lane.status !== "queued") return false;
   if (!lane.heartbeat_at) return lane.status === "running";
   return now - Date.parse(lane.heartbeat_at) > WATCHDOG_STALE_MS;
+}
+
+/** Stale lanes for a run, suppressing the watchdog once the run is terminal.
+ *  A completed run with a row stranded at "running" (a lost status-change
+ *  beat) would otherwise show "heartbeat stale — nudge" forever. */
+export function staleLanes(
+  lanes: Lane[], now: number, stage: string,
+): Lane[] {
+  if (TERMINAL_STAGES.has(stage)) return [];
+  return lanes.filter((l) => isStaleLane(l, now));
 }
 
 // ------------------------------------------------------------- critical path
@@ -108,8 +126,15 @@ export function foldStream(
   events: { lane_id: string; kind: string; title: string; detail: Record<string, unknown>; seq: number }[],
   deltas: { lane_id: string; kind: string; text: string }[],
 ): StreamItem[] {
+  // The key must distinguish a user-authored message from an agent-authored
+  // one even when they share (lane_id, seq) — which happens today because the
+  // worker and the backend each run their own seq allocator (worker/worker/
+  // normalize.py and backend/app/api/runs.py:_persist_user_message). Without
+  // the role in the key, two messages on the same seq collapse into one
+  // React component instance and the agent's prose renders inside the
+  // user's green bubble.
   const items: StreamItem[] = events.filter((e) => !isPlumbing(e)).map((e) => ({
-    key: `e-${e.lane_id}-${e.seq}`,
+    key: `e-${e.lane_id}-${e.seq}-${e.detail.role ?? "agent"}`,
     kind: e.kind,
     title: e.title,
     text: String(e.detail.text ?? e.detail.output ?? ""),

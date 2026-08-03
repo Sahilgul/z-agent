@@ -39,6 +39,48 @@ describe("EventStream", () => {
     expect(screen.queryByText("other lane cmd")).not.toBeInTheDocument();
   });
 
+  it("renders markdown in messages instead of printing it raw", () => {
+    render(
+      <EventStream
+        events={[ev(0, "message", "greeting", { text: "hello **Sahil** and `code`" })]}
+        deltas={[]}
+      />,
+    );
+    expect(screen.getByText("Sahil").tagName).toBe("STRONG");
+    expect(screen.getByText("code").tagName).toBe("CODE");
+    expect(screen.queryByText(/\*\*Sahil\*\*/)).not.toBeInTheDocument();
+  });
+
+  it("renders GFM tables into a scrollable frame", () => {
+    const table = ["| lane | cost |", "| --- | --- |", "| researcher | $0.02 |"].join("\n");
+    const { container } = render(
+      <EventStream events={[ev(0, "message", "costs", { text: table })]} deltas={[]} />,
+    );
+    expect(container.querySelector("table")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "lane" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "researcher" })).toBeInTheDocument();
+    // Wide tables must scroll in their own frame; the stream pane clips X.
+    expect(container.querySelector(".md-scroll > table")).toBeInTheDocument();
+  });
+
+  it("keeps both speakers in the left column, tagged and full width", () => {
+    const { container } = render(
+      <EventStream
+        events={[
+          ev(0, "message", "q", { text: "my question", role: "user" }),
+          ev(1, "message", "a", { text: "my answer", role: "agent" }),
+        ]}
+        deltas={[]}
+      />,
+    );
+    expect(screen.getByText("you")).toBeInTheDocument();
+    expect(screen.getByText("agent")).toBeInTheDocument();
+    // Neither bubble may re-introduce right alignment or a width cap.
+    for (const el of container.querySelectorAll("[data-kind='message']")) {
+      expect(el.className).not.toMatch(/justify-end|max-w-\[/);
+    }
+  });
+
   it("renders a failed marker on bad steps", () => {
     render(<EventStream events={[ev(0, "command", "pytest", { ok: false })]} deltas={[]} />);
     expect(screen.getByText(/failed/)).toBeInTheDocument();

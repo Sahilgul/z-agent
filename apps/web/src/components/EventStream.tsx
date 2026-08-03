@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { Markdown } from "./Markdown";
 import { foldStream, type StreamItem } from "../lib/runMachine";
 import type { StepEvent } from "../types";
 
@@ -35,30 +36,25 @@ function Thinking({ item }: { item: StreamItem }) {
   );
 }
 
-/** The agent's prose reads as a left-aligned chat bubble, opposite the user's
- *  right-aligned one — the two voices are told apart at a glance. */
-function Answer({ body }: { body: string }) {
+/** Both voices share the left column and the full width: a transcript reads as
+ *  one column of prose, not a chat app's zigzag, and wide payloads — tables,
+ *  code fences, file:line citations — get every pixel instead of 80%. The tag
+ *  and the frame colour tell the two speakers apart, so alignment doesn't
+ *  have to. Markdown is rendered, never printed raw. */
+function Bubble({ role, body }: { role: "user" | "agent"; body: string }) {
+  const isUser = role === "user";
   return (
-    <div className="mb-2.5 flex" data-kind="message">
-      <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-hairline bg-bg-raised px-s4 py-2.5">
-        <div className="text-micro mb-s1 text-ink-faint">agent</div>
-        <div className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-[1.65] text-ink-primary">
-          {body}
+    <div className="mb-2.5" data-kind="message" data-role={role}>
+      <div
+        className={cn(
+          "rounded-2xl rounded-tl-sm border px-s4 py-2.5",
+          isUser ? "border-green bg-bg-module" : "border-hairline bg-bg-raised",
+        )}
+      >
+        <div className={cn("text-micro mb-s1", isUser ? "text-green-bright" : "text-ink-faint")}>
+          {isUser ? "you" : "agent"}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/** The user's own message — right-aligned and filled, the mirror of Answer. */
-function UserBubble({ body }: { body: string }) {
-  return (
-    <div className="mb-2.5 flex justify-end" data-kind="message">
-      <div className="max-w-[80%] rounded-2xl rounded-tr-sm border border-blue bg-bg-module px-s4 py-2.5">
-        <div className="text-micro mb-s1 text-right text-ink-faint">you</div>
-        <div className="whitespace-pre-wrap break-words font-sans text-[13.5px] leading-[1.6] text-ink-primary">
-          {body}
-        </div>
+        <Markdown>{body}</Markdown>
       </div>
     </div>
   );
@@ -70,7 +66,7 @@ function Item({ item }: { item: StreamItem }) {
   // render, so fall back to the title rather than suppressing both.
   const body = isAnswer ? item.text || item.title : item.text;
   if (isAnswer) {
-    return item.role === "user" ? <UserBubble body={body} /> : <Answer body={body} />;
+    return <Bubble role={item.role === "user" ? "user" : "agent"} body={body} />;
   }
   return (
     <div className="mb-2.5 flex gap-2.5" data-kind={item.kind}>
@@ -129,7 +125,7 @@ export function EventStream({
       aria-relevant="additions"
       aria-label="agent event stream"
     >
-      {prompt && <UserBubble body={prompt} />}
+      {prompt && <Bubble role="user" body={prompt} />}
       {items.length === 0 && (
         <div className="px-s2 py-s4 font-mono text-[12px] text-ink-faint">
           no trace yet — the agent's first step lands here

@@ -149,7 +149,8 @@ export const useRuns = create<RunState>((set, get) => ({
     try {
       const run = await api.post<Run>("/runs", body);
       await get().loadRuns();
-      toast.success("run routed", { description: run.title });
+      // No success toast: the screen already swaps to the live session, so a
+      // popup only repeats what you can see — over the send button, no less.
       return run;
     } catch (err) {
       toast.error("couldn't start run", {

@@ -53,6 +53,10 @@ class ActionKind(str, Enum):
     MOVE_TO_DEVELOPMENT = "move_to_development"
     SWITCH_TO_AGENT_MODE = "switch_to_agent_mode"
     START_PLAN = "start_plan"
+    # mid-session mode switch — takes effect on the next send_message, not
+    # immediately: the current turn finishes undisturbed and the new
+    # blueprint runs (respawning the lane on the prior session volume).
+    SWITCH_MODE = "switch_mode"
     # run lifecycle
     STOP_RUN = "stop_run"
     ABANDON_RUN = "abandon_run"

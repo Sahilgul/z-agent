@@ -517,6 +517,30 @@ def test_post_intent_run_not_found(auth_client):
     assert r.status_code == 404
 
 
+def test_post_intent_switch_mode(auth_client, session, make_user):
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    session.add(run); session.commit()
+    r = client.post("/runs/r1/intent", json={
+        "intent": "switch_mode", "source": "chip",
+        "payload": {"mode": "plan"},
+    })
+    assert r.status_code == 200
+    assert r.json()["intent"] == "switch_mode"
+    assert r.json()["mode"] == "plan"
+    assert services["run_manager"].switched_modes == [("r1", "plan")]
+
+
+def test_post_intent_switch_mode_422_without_mode(auth_client, session, make_user):
+    client, _, _, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    session.add(run); session.commit()
+    r = client.post("/runs/r1/intent", json={
+        "intent": "switch_mode", "source": "chip", "payload": {},
+    })
+    assert r.status_code == 422
+
+
 def test_runs_require_auth(app_client):
     client, _, _ = app_client
     assert client.get("/runs").status_code == 401

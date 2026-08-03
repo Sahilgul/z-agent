@@ -33,6 +33,12 @@ class HeartbeatPersister:
         self._task: asyncio.Task | None = None
         # lane_id -> monotonic ts of last DB write, to avoid a write per beat.
         self._last_write: dict[str, float] = {}
+        # lane_id -> last status we persisted. A status CHANGE must always be
+        # written even inside the throttle window — the worker's running->idle
+        # transition beat is unscheduled and lands right after a periodic beat,
+        # so throttling it strands the row at "running" forever and the
+        # watchdog nags a finished lane.
+        self._last_status: dict[str, str | None] = {}
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._loop(), name="heartbeat-persister")
@@ -77,9 +83,16 @@ class HeartbeatPersister:
     def _persist(self, lane_id: str, status: str | None) -> None:
         now_mono = asyncio.get_event_loop().time()
         last = self._last_write.get(lane_id, 0.0)
-        if now_mono - last < _MIN_WRITE_INTERVAL_SECONDS:
+        # A status transition bypasses the throttle: the running->idle beat is
+        # the one that stops the watchdog from nagging a finished lane, and it
+        # is unscheduled so it is the beat most likely to land inside the
+        # window. Throttling is about write volume, not about losing state.
+        status_changed = status is not None and self._last_status.get(lane_id) != status
+        if not status_changed and now_mono - last < _MIN_WRITE_INTERVAL_SECONDS:
             return
         self._last_write[lane_id] = now_mono
+        if status is not None:
+            self._last_status[lane_id] = status
         session = get_session()
         try:
             lane = session.get(Lane, lane_id)

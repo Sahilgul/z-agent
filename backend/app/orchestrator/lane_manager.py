@@ -72,7 +72,8 @@ class LaneManager:
 
     async def spawn(self, run: Run, persona: str, prompt: str, persona_prompt: str,
                     writable_repo: Repo | None, context_repos: list[Repo],
-                    resume_session: bool = False) -> Lane:
+                    resume_session: bool = False,
+                    resume_from_lane_id: str | None = None) -> Lane:
         repo_name = writable_repo.name if writable_repo else None
         # Flywheel injection (plan §3 G-1 fix): pinned knowledge + the owner's
         # episodic recall join every lane's persona prompt. Cached per run, so
@@ -85,12 +86,30 @@ class LaneManager:
         if not ok:
             raise LaneSpawnError(reason)
 
+        # When resuming from a prior lane (mode switch or kill-replace),
+        # inherit its session_id so the SDK picks up the conversation. The
+        # container mounts the prior lane's session volume (wired in
+        # run_lane_container via resume_from_lane_id).
+        inherited_session_id: str | None = None
+        if resume_from_lane_id:
+            session = get_session()
+            try:
+                prior = session.get(Lane, resume_from_lane_id)
+                if prior is not None:
+                    inherited_session_id = prior.session_id
+            finally:
+                session.close()
+
         lane = Lane(
             id=str(uuid.uuid4()), run_id=run.id, persona=persona,
             repo_scope=repo_name,
             status="queued", budget_usd=self.settings.default_lane_budget_usd,
+            session_id=inherited_session_id,
             spawn_context={"prompt": prompt, "persona_prompt": persona_prompt,
-                           "resume_session": resume_session},
+                           "resume_session": resume_session,
+                           "mode": run.mode,
+                           **({"resume_from_lane_id": resume_from_lane_id}
+                              if resume_from_lane_id else {})},
         )
         session = get_session()
         try:
@@ -117,6 +136,7 @@ class LaneManager:
                 sandbox_manager.run_lane_container,
                 run, lane, prompt, persona_prompt, permission_mode,
                 writable_repo, context_repos,
+                resume_from_lane_id=resume_from_lane_id,
             )
         except Exception as exc:
             self._mark(lane.id, "failed")

@@ -38,7 +38,8 @@ class _FakeLaneMgr:
         self.session.commit()
         return lane
 
-    async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos):
+    async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                    resume_session=False, resume_from_lane_id=None):
         self.spawned.append({"persona": persona, "prompt": prompt,
                              "persona_prompt": persona_prompt})
         lane = self._lane(run.id, persona)

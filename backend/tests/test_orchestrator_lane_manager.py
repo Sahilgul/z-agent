@@ -106,6 +106,36 @@ async def test_spawn_container_failure_marks_lane_failed(session, make_user, mon
     assert session.query(Lane).first().status == "failed"
 
 
+async def test_spawn_resume_from_lane_inherits_session_id(session, make_user, monkeypatch):
+    """A mode-switch respawn must inherit the prior lane's session_id so the
+    SDK picks up the conversation, and mount the prior lane's session volume."""
+    run = _make_run(session, make_user)
+    prior = Lane(id="l-old", run_id=run.id, persona="researcher", status="completed",
+                 session_id="sess-prior-abc")
+    session.add(prior); session.commit()
+
+    ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway()
+    lm = LaneManager(ingest, relay, gw)
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
+
+    captured = {}
+    def fake_run_container(run, lane, prompt, persona_prompt, permission_mode,
+                            writable_repo, context_repos, resume_from_lane_id=None):
+        captured["resume_from_lane_id"] = resume_from_lane_id
+        captured["session_id"] = lane.session_id
+        return "container-new"
+    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container", fake_run_container)
+
+    lane = await lm.spawn(run, "researcher", "task", "persona", None, [],
+                          resume_from_lane_id="l-old")
+    assert lane.session_id == "sess-prior-abc"
+    assert captured["resume_from_lane_id"] == "l-old"
+    assert captured["session_id"] == "sess-prior-abc"
+
+
 async def test_settle_cost_updates_lane_and_run(session, make_user):
     run = _make_run(session, make_user)
     ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway(spend=2.25)

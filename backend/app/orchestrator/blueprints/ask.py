@@ -67,6 +67,7 @@ class AskBlueprint(Blueprint):
         lane = await lane_manager.spawn(
             ctx.run, persona="researcher", prompt=task, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=[repo],
+            resume_from_lane_id=ctx.artifacts.get("resume_from_lane_id"),
         )
         ctx.artifacts["lane_id"] = lane.id
         # Phase 1: block until the lane's turn ends (idle/completed/failed).

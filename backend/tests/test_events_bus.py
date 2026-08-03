@@ -64,6 +64,43 @@ async def test_process_advances_next_seq_only_when_higher(session, make_user, fa
     assert session.get(Lane, "l1").next_seq == 10  # 3 < 10, no advance
 
 
+async def test_process_captures_session_id_from_turn_complete(session, make_user, fake_redis):
+    u = make_user("a")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
+    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, lane])
+    session.commit()
+    c = _consumer(fake_redis)
+    ev = StepEvent(
+        run_id="r1", lane_id="l1", seq=0, kind=StepKind.STATUS, title="turn complete",
+        detail={"num_turns": 1, "duration_ms": 200, "is_error": False,
+                "session_id": "sess-abc-123", "usage": {}},
+        sdk_message_uuid="sdk-1",
+    )
+    await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
+    session.expire_all()
+    assert session.get(Lane, "l1").session_id == "sess-abc-123"
+
+
+async def test_process_ignores_session_id_on_non_turn_complete_events(session, make_user, fake_redis):
+    u = make_user("a")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
+    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, lane])
+    session.commit()
+    c = _consumer(fake_redis)
+    # A status event that isn't "turn complete" must not write session_id even
+    # if it happens to carry one — only the SDK's ResultMessage marks a turn
+    # boundary, and that is the only session_id worth persisting.
+    ev = StepEvent(
+        run_id="r1", lane_id="l1", seq=0, kind=StepKind.STATUS, title="session init",
+        detail={"session_id": "should-not-stick"},
+    )
+    await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
+    session.expire_all()
+    assert session.get(Lane, "l1").session_id is None
+
+
 async def test_process_deadletters_malformed_payload(session, make_user, fake_redis):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask")

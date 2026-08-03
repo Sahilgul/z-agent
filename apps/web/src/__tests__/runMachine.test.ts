@@ -100,4 +100,21 @@ describe("foldStream", () => {
     expect(items.map((i) => i.kind)).toEqual(["command", "thinking"]);
     expect(items[0].text).toBe("hit");
   });
+  it("gives distinct keys to user and agent messages sharing a seq", () => {
+    // The worker and the backend each allocate seq independently, so a user
+    // message and an agent message can land on the same (lane_id, seq). The
+    // key must distinguish them or React reconciles them onto one component
+    // and the agent's prose renders inside the user's bubble.
+    const items = foldStream(
+      [
+        { lane_id: "l1", kind: "message", title: "q", detail: { text: "my q", role: "user" }, seq: 0 },
+        { lane_id: "l1", kind: "message", title: "a", detail: { text: "my a", role: "agent" }, seq: 0 },
+      ],
+      [],
+    );
+    expect(items).toHaveLength(2);
+    expect(new Set(items.map((i) => i.key)).size).toBe(2);
+    expect(items[0].role).toBe("user");
+    expect(items[1].role).toBe("agent");
+  });
 });

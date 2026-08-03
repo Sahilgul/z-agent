@@ -371,13 +371,17 @@ class FakeLaneManager:
         self.released: list[str] = []
         self._spawn_count = 0
 
-    async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos):
+    async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                   resume_session=False, resume_from_lane_id=None):
         from app.db.models.lane import Lane
         self._spawn_count += 1
         lane = Lane(id=str(uuid.uuid4()), run_id=run.id, persona=persona,
                     repo_scope=writable_repo.name if writable_repo else None,
                     status="running")
-        self.spawned.append({"run_id": run.id, "persona": persona, "prompt": prompt})
+        self.spawned.append({
+            "run_id": run.id, "persona": persona, "prompt": prompt,
+            "resume_from_lane_id": resume_from_lane_id,
+        })
         return lane
 
     async def settle_cost(self, lane_id):
@@ -405,6 +409,7 @@ class FakeRunManager:
         self.prs_opened: list[str] = []
         self.prs_merged: list[tuple] = []
         self.started_plans: list[str] = []
+        self.switched_modes: list[tuple] = []
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
                          work_item_id=None, autonomy=None, fanout=None):
@@ -455,6 +460,9 @@ class FakeRunManager:
         self.replaced.append((run_id, lane_id))
         return Lane(id=f"replacement-{lane_id}", run_id=run_id, persona="explorer",
                     status="running")
+
+    async def switch_mode(self, run_id, mode_name):
+        self.switched_modes.append((run_id, mode_name))
 
     async def reconcile_on_boot(self):
         return 0

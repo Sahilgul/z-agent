@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ActionCard } from "../../components/ActionCard";
 import { ApprovalQueue } from "../../components/ApprovalQueue";
 import { EventStream } from "../../components/EventStream";
+import { LaneChips } from "../../components/LaneChips";
 import { PipelineBar } from "../../components/PipelineBar";
 import { SessionResume } from "../../components/SessionResume";
 import { SessionTabs } from "../../components/SessionTabs";
@@ -100,6 +101,9 @@ export function SessionsScreen() {
   const { overlays, pushOverlay, closedTabs, closeTab, reopenTab } = useUi();
   const [task, setTask] = useState("");
   const [mode, setMode] = useState<Mode>("ask");
+  // Mode to switch to on the next send while a run is open. Null = no switch
+  // pending; the chips follow current.mode until the user picks a new one.
+  const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [fanout, setFanout] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
   const [startingNew, setStartingNew] = useState(false);
@@ -108,6 +112,12 @@ export function SessionsScreen() {
   useEffect(() => {
     void loadRuns();
   }, [loadRuns]);
+
+  // Opening (or switching) a run resets the pending switch — the chips
+  // follow the run's own mode until the user explicitly picks a new one.
+  useEffect(() => {
+    setPendingMode(null);
+  }, [current?.id]);
 
   // Lane heartbeats age against wall time; re-render occasionally so stale
   // lanes surface without waiting for the next socket message. Refreshing the
@@ -149,6 +159,13 @@ export function SessionsScreen() {
     if (!task.trim()) return;
     setBusy(true);
     try {
+      // A mode switch takes effect on the next message, not immediately: the
+      // current turn finishes undisturbed, and this send runs the new
+      // blueprint (which respawns the lane on the prior session volume).
+      if (current && pendingMode && pendingMode !== current.mode) {
+        await sendIntent("switch_mode", { payload: { mode: pendingMode } });
+        setPendingMode(null);
+      }
       await sendIntent("send_message", { text: task.trim() });
       setTask("");
     } finally {
@@ -225,6 +242,7 @@ export function SessionsScreen() {
             <SwarmView
               lanes={lanes}
               now={now}
+              stage={current.stage}
               onOpenLane={(laneId) => pushOverlay({ kind: "lane", laneId })}
               onNudge={(laneId) => void sendIntent("nudge", { laneId, text: "status check — report progress" })}
               onLetItRun={(laneId) => void sendIntent("let_it_run", { laneId })}
@@ -340,22 +358,29 @@ export function SessionsScreen() {
             className="mb-s3 resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
           />
           <div className="flex flex-wrap items-center gap-s2">
-            {!current && (
-              <>
-                <FilterChips options={[...MODE_OPTIONS]} value={mode} onChange={(v) => setMode(v as Mode)} />
-                {mode === "agent-rnd" && (
-                  <Input
-                    type="number"
-                    min={1}
-                    placeholder="lanes"
-                    value={fanout}
-                    onChange={(e) => setFanout(e.target.value === "" ? "" : Number(e.target.value))}
-                    title="swarm width — the Lead still authors the slices"
-                    className="w-[84px] font-mono"
-                  />
-                )}
-              </>
-            )}
+            <FilterChips
+              options={[...MODE_OPTIONS]}
+              value={current ? (pendingMode ?? (current.mode as Mode)) : mode}
+              onChange={(v) => (current ? setPendingMode(v as Mode) : setMode(v as Mode))}
+              disabledValues={
+                current && !current.repo
+                  ? new Set<Mode>(["development"])
+                  : undefined
+              }
+            />
+            {current ? (
+              <LaneChips lanes={lanes} onOpen={(laneId) => pushOverlay({ kind: "lane", laneId })} />
+            ) : mode === "agent-rnd" ? (
+              <Input
+                type="number"
+                min={1}
+                placeholder="lanes"
+                value={fanout}
+                onChange={(e) => setFanout(e.target.value === "" ? "" : Number(e.target.value))}
+                title="swarm width — the Lead still authors the slices"
+                className="w-[84px] font-mono"
+              />
+            ) : null}
             <Button className="ml-auto font-mono" disabled={busy || !task.trim()} onClick={submit}>
               <span className="size-2 rounded-full bg-current shadow-[0_0_6px_1px_currentColor]" aria-hidden="true" />
               {current ? "send" : busy ? "routing…" : "route it"}

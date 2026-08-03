@@ -17,7 +17,7 @@ import json
 
 import redis.asyncio as redis
 from pydantic import ValidationError
-from zagent_contracts import StepEvent
+from zagent_contracts import StepEvent, StepKind
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -122,6 +122,18 @@ class IngestConsumer:
             lane = session.get(Lane, event.lane_id)
             if lane and event.seq >= lane.next_seq:
                 lane.next_seq = event.seq + 1
+            # The worker's "turn complete" status event carries the SDK
+            # session_id (worker/worker/normalize.py). Nothing else writes it,
+            # so without this capture the lane is never resumable — the
+            # replay-only banner on every session and kill_replace's claimed
+            # resume both depend on this single field.
+            if (
+                lane is not None
+                and event.kind == StepKind.STATUS
+                and event.title == "turn complete"
+                and event.detail.get("session_id")
+            ):
+                lane.session_id = str(event.detail["session_id"])
             run = session.get(Run, run_id)
             if run:
                 from datetime import datetime, timezone

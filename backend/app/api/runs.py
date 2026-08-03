@@ -244,7 +244,34 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind in (ActionKind.NUDGE, ActionKind.SEND_MESSAGE):
         lane_id = intent.lane_id or _lead_lane_id(run_id)
         if lane_id:
-            if intent.text:
+            # Mode switch takes effect here: if run.mode no longer matches the
+            # mode the current lane was spawned under, chain the new blueprint
+            # instead of nudging the old lane. The new lane resumes the prior
+            # session volume (resume_from_lane, wired in lane_manager.spawn).
+            session = get_session()
+            try:
+                lane = session.get(Lane, lane_id)
+                spawned_mode = (lane.spawn_context or {}).get("mode") if lane else None
+                run_mode = session.get(Run, run_id).mode if session.get(Run, run_id) else None
+            finally:
+                session.close()
+
+            if (
+                kind == ActionKind.SEND_MESSAGE
+                and spawned_mode
+                and run_mode
+                and spawned_mode != run_mode
+            ):
+                # The user's message is the task for the new blueprint's
+                # first lane; persist it as a user event so the transcript
+                # shows the question before the new mode's answer.
+                if intent.text:
+                    _persist_user_message(run_id, lane_id, intent.text)
+                extra = {"resume_from_lane_id": lane_id}
+                if intent.text:
+                    extra["task"] = intent.text
+                await run_manager._run_blueprint(run_id, run_mode, extra_artifacts=extra)
+            elif intent.text:
                 user_event = _persist_user_message(run_id, lane_id, intent.text)
                 # The persisted row bypasses the worker's Redis stream, so it
                 # never reaches an open browser on its own — push it over the
@@ -260,7 +287,9 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                         ))
                     except Exception:  # WS fanout is best-effort; the row is durable
                         pass
-            await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
+                await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
+            else:
+                await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
     elif kind == ActionKind.APPROVE_PLAN:
         try:
             plan = plan_service.approve_plan(run_id, user.id)
@@ -312,6 +341,15 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok", "intent": kind.value, "lane_id": intent.lane_id,
                 "replacement_lane_id": replacement.id}
+    elif kind == ActionKind.SWITCH_MODE:
+        mode_name = intent.payload.get("mode")
+        if not mode_name:
+            raise HTTPException(status_code=422, detail="switch_mode needs a mode in payload")
+        try:
+            await run_manager.switch_mode(run_id, str(mode_name))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"status": "ok", "intent": kind.value, "mode": mode_name}
     elif kind == ActionKind.LET_IT_RUN:
         # Watchdog card dismissal (§4): no lane action — the card clears and the
         # lane keeps working; recorded so the UI's dismissal is intentional.

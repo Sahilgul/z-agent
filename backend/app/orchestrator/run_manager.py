@@ -225,7 +225,9 @@ class RunManager:
         """Kill-and-replace (§4): the old lane dies; a FRESH lane spawns with the
         SAME spawn context (stored at spawn — never re-derived from the
         blueprint). The session volume survives the container, so the
-        replacement resumes where the killed lane left off."""
+        replacement resumes where the killed lane left off — now actually
+        true, because resume_from_lane_id mounts the old session volume and
+        inherits the old session_id."""
         session = get_session()
         try:
             lane = session.get(Lane, lane_id)
@@ -256,6 +258,7 @@ class RunManager:
             prompt=context.get("prompt", "Resume the lane's work."),
             persona_prompt=context.get("persona_prompt", ""),
             writable_repo=repo, context_repos=[repo] if repo else [],
+            resume_from_lane_id=lane_id,
         )
         await self.relay.publish_lane_status(run_id, replacement.id, "running")
         return replacement
@@ -312,6 +315,25 @@ class RunManager:
             artifacts={"task": task, "repo": repo, **(extra_artifacts or {})},
         )
         self._tasks[run_id] = asyncio.create_task(self._guarded_execute(run_id, ctx, blueprint))
+
+    async def switch_mode(self, run_id: str, mode_name: str) -> None:
+        """Mid-session mode switch (plan §6): validate the Mode row is
+        enabled, set run.mode, and relay. Deliberately does NOT touch
+        in-flight work — the switch takes effect on the next send_message,
+        which chains the new blueprint (respawning the lane on the prior
+        session volume) instead of nudging the old lane."""
+        session = get_session()
+        try:
+            mode = session.query(Mode).filter_by(name=mode_name, enabled=True).one_or_none()
+            if mode is None:
+                raise ValueError(f"unknown or disabled mode '{mode_name}'")
+            run = session.get(Run, run_id)
+            if run is None:
+                raise ValueError("run not found")
+            run.mode = mode_name
+            session.commit()
+        finally:
+            session.close()
 
     # ------------------------------------------------------------ delivery HITL
     async def create_pr(self, run_id: str) -> None:

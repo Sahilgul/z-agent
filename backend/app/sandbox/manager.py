@@ -143,13 +143,24 @@ class SandboxManager:
 
     def run_lane_container(self, run: Run, lane: Lane, prompt: str, persona_prompt: str,
                            permission_mode: str, writable_repo: Repo | None,
-                           context_repos: list[Repo]) -> str:
+                           context_repos: list[Repo],
+                           resume_from_lane_id: str | None = None) -> str:
         """Start the worker container. Phase 1 ladder: Ask = read-only golden
-        mounts only; writable clone stamps arrive with Phase 2 coding lanes."""
+        mounts only; writable clone stamps arrive with Phase 2 coding lanes.
+
+        When resume_from_lane_id is set, the new lane mounts the PREVIOUS
+        lane's session volume instead of a fresh one — the SDK's conversation
+        state lives there, so the replacement picks up the thread instead of
+        starting a stranger. The new lane's session_id is also set from the
+        old one (handled in lane_manager.spawn) so RESUME_SESSION_ID is wired."""
         client = _docker()
         volumes: dict[str, dict] = {}
 
-        session_path = session_subpath(run.id, lane.id)
+        # Mount the prior lane's session directory when resuming; otherwise the
+        # lane's own. session_subpath creates the dir if missing, so a fresh
+        # lane still gets a clean volume.
+        session_lane_id = resume_from_lane_id or lane.id
+        session_path = session_subpath(run.id, session_lane_id)
         volumes[str(session_path)] = {"bind": "/root/.claude", "mode": "rw"}
 
         if self.settings.package_proxy_url:

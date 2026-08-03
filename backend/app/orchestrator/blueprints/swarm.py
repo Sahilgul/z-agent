@@ -126,6 +126,7 @@ class SwarmBlueprint(Blueprint):
         lane = await lane_manager.spawn(
             ctx.run, persona="lead", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=ctx.artifacts["context_repos"],
+            resume_from_lane_id=ctx.artifacts.get("resume_from_lane_id"),
         )
         ctx.artifacts["decompose_lane_id"] = lane.id
         await _await_lane(lane.id)

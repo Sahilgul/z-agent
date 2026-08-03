@@ -198,6 +198,40 @@ async def test_execute_failure_path_marks_failed(session, make_user, monkeypatch
     assert relay.stages[-1][1] == RunStage.FAILED.value
 
 
+# --------------------------------------------------------------- switch_mode
+async def test_switch_mode_updates_run_mode(session, make_user):
+    u = make_user("a")
+    _seed_mode(session, name="ask")
+    _seed_mode(session, name="plan")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value, title="t")
+    session.add(run); session.commit()
+    await rm.switch_mode("r1", "plan")
+    session.expire_all()
+    assert session.get(Run, "r1").mode == "plan"
+
+
+async def test_switch_mode_rejects_unknown_mode(session, make_user):
+    u = make_user("a")
+    _seed_mode(session, name="ask")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value, title="t")
+    session.add(run); session.commit()
+    with pytest.raises(ValueError, match="unknown or disabled mode"):
+        await rm.switch_mode("r1", "ghost")
+
+
+async def test_switch_mode_rejects_disabled_mode(session, make_user):
+    u = make_user("a")
+    _seed_mode(session, name="ask")
+    _seed_mode(session, name="plan", enabled=False)
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value, title="t")
+    session.add(run); session.commit()
+    with pytest.raises(ValueError, match="unknown or disabled mode"):
+        await rm.switch_mode("r1", "plan")
+
+
 # --------------------------------------------------------------- plan HITL chains
 async def test_continue_to_development_runs_development_blueprint(session, make_user, monkeypatch):
     u = make_user("a")
@@ -364,9 +398,11 @@ async def test_kill_replace_respawns_with_original_context(session, make_user, m
     class _Replacement:
         id = "lane-new"
 
-    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos):
+    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                         resume_session=False, resume_from_lane_id=None):
         captured.update({"persona": persona, "prompt": prompt,
-                         "persona_prompt": persona_prompt})
+                         "persona_prompt": persona_prompt,
+                         "resume_from_lane_id": resume_from_lane_id})
         return _Replacement()
     rm.lane_manager.spawn = fake_spawn
 
@@ -377,6 +413,33 @@ async def test_kill_replace_respawns_with_original_context(session, make_user, m
     session.expire_all()
     assert session.get(Lane, "l1").status == "replaced"
     assert relay.lanes[-1] == ("r1", "lane-new", "running")
+
+
+async def test_kill_replace_passes_resume_from_lane_id(session, make_user, monkeypatch):
+    """kill_replace must mount the old lane's session volume and inherit its
+    session_id so the replacement actually resumes — the docstring's claim
+    that was not true before resume_from_lane_id existed."""
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    lane = Lane(id="l1", run_id="r1", persona="explorer", status="running",
+                session_id="sess-old-123",
+                spawn_context={"prompt": "trace the webhook leg", "persona_prompt": "be an explorer"})
+    session.add_all([run, lane]); session.commit()
+
+    captured = {}
+
+    class _Replacement:
+        id = "lane-new"
+
+    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                         resume_session=False, resume_from_lane_id=None):
+        captured["resume_from_lane_id"] = resume_from_lane_id
+        return _Replacement()
+    rm.lane_manager.spawn = fake_spawn
+
+    await rm.kill_replace_lane("r1", "l1")
+    assert captured["resume_from_lane_id"] == "l1"
 
 
 async def test_kill_replace_wrong_run_raises(session, make_user):
