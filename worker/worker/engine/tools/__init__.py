@@ -49,6 +49,14 @@ _TOOL_CAPABILITIES: dict[str, Capability] = {
     "update_tasks": Capability.READONLY,
     "compact": Capability.READONLY,
     "knowledge_draft": Capability.MUTATING,
+    # RD deferred set (Phase 10, R34). file_delete is DESTRUCTIVE: verbatim
+    # approval every time. mode_request is MUTATING (approval-routed §8 path).
+    "tool_search": Capability.READONLY,
+    "web_search": Capability.READONLY,
+    "file_delete": Capability.DESTRUCTIVE,
+    "terminal_await": Capability.READONLY,
+    "playbook_load": Capability.READONLY,
+    "mode_request": Capability.MUTATING,
 }
 
 
@@ -108,9 +116,11 @@ def _extra_tools() -> dict[str, Any]:
     from worker.engine.fanout import spawn_agent, spawn_swarm
     from worker.engine.goal_mode import ask_user
     from worker.engine.memory import memory_search
+    from worker.engine.tools.deferred import DEFERRED_TOOLS
+    from worker.engine.tools.discovery import tool_search
     from worker.engine.tools.extended import EXTENDED_TOOLS
     return {t.name: t for t in (memory_search, ask_user, spawn_agent, spawn_swarm,
-                                *EXTENDED_TOOLS)}
+                                tool_search, *EXTENDED_TOOLS, *DEFERRED_TOOLS)}
 
 
 # Every built tool, unique by name (the mutating terminal_exec wins over the
@@ -136,42 +146,70 @@ def resolve_tool_name(name: str) -> str:
     return _NAME_ALIASES.get(name, name)
 
 
-def tools_for_mode(mode: Any) -> list[Any]:
-    """Mode-aware interim full binding (RA). RD (Phase 10) replaces this with
-    the two-tier DEFAULT_TOOLS + tool_search discovery surface.
+# --- R34 two-tier surface ---
 
-    Tool filters (plan §8 — mode-gated additions):
-      ask/plan        -> read-only only (incl. the read-only terminal_exec)
-      development     -> + mutating writes + fan-out
-      debug           -> development surface (repro-first is prompt-enforced)
-      goal            -> + ask_user (the only human surface inside goal mode)
-    """
-    from worker.engine.fanout import spawn_agent, spawn_swarm
-    from worker.engine.goal_mode import ask_user
-    from worker.engine.memory import memory_search
-    from worker.engine.tools import mutating as _mut
-    from worker.engine.tools import readonly as _ro
-    from worker.engine.tools.extended import (
-        compact,
-        git_snapshot,
-        knowledge_draft,
-        update_tasks,
-        web_fetch,
-    )
+# Tier 0 — bound every turn (mode-intersected). Contract names; code_search
+# resolves to the file_search tool object.
+DEFAULT_TOOLS: list[str] = [
+    "file_read", "file_edit", "file_write", "terminal_exec",
+    "code_search", "file_glob", "update_tasks", "tool_search",
+]
 
+# §8 mode tool_filter (fail-closed: denied tools are absent from binding AND
+# from the tool_search index + D6 roster). "mcp__*" gates the MCP fold-in.
+_READ_SET = {
+    "file_read", "file_search", "file_glob", "terminal_exec", "update_tasks",
+    "compact", "web_fetch", "web_search", "git_snapshot", "memory_search",
+    "tool_search", "playbook_load", "mode_request", "mcp__*",
+}
+_DEV_SET = _READ_SET | {
+    "file_edit", "file_write", "file_delete", "terminal_await",
+    "knowledge_draft", "spawn_agent", "spawn_swarm",
+}
+MODE_ALLOWED: dict[str, set[str]] = {
+    "ask": set(_READ_SET),
+    "plan": set(_READ_SET),
+    "development": set(_DEV_SET),
+    "debug": set(_DEV_SET),
+    "goal": _DEV_SET | {"ask_user"},
+}
+
+
+def mode_allowed(name: str, mode: Any) -> bool:
+    """§8 tool_filter — the single fail-closed check used by binding, the
+    discovery index, and the roster."""
     mode_val = mode.value if hasattr(mode, "value") else str(mode)
-    core_read = [_ro.file_read, _ro.file_search, _ro.file_glob]
-    # RC extended read-only surface (§7) — available in every mode.
-    extended_read = [web_fetch, git_snapshot, update_tasks, compact]
-    if mode_val in ("ask", "plan"):
-        return [*core_read, _ro.terminal_exec, memory_search, *extended_read]
-    base = [*core_read, _mut.file_edit, _mut.file_write, _mut.terminal_exec, memory_search,
-            *extended_read, knowledge_draft]
-    if mode_val in ("development", "debug"):
-        return [*base, spawn_agent, spawn_swarm]
-    if mode_val == "goal":
-        return [*base, spawn_agent, spawn_swarm, ask_user]
-    return base
+    allowed = MODE_ALLOWED.get(mode_val, MODE_ALLOWED["ask"])
+    if name.startswith("mcp__"):
+        return "mcp__*" in allowed
+    return resolve_tool_name(name) in allowed
+
+
+# Mode-gated default additions (§8): fan-out in development/goal. ask_user is
+# DEFERRED (discoverable) so the goal default bind stays <=10 schemas (P10).
+_MODE_DEFAULT_ADDITIONS: dict[str, list[str]] = {
+    "development": ["spawn_agent", "spawn_swarm"],
+    "goal": ["spawn_agent", "spawn_swarm"],
+}
+
+
+def default_tool_names(mode: Any) -> list[str]:
+    """Tier-0 names for a mode: DEFAULT_TOOLS ∩ mode-allowed + additions."""
+    mode_val = mode.value if hasattr(mode, "value") else str(mode)
+    names = [n for n in DEFAULT_TOOLS if mode_allowed(n, mode)]
+    names += _MODE_DEFAULT_ADDITIONS.get(mode_val, [])
+    return names
+
+
+def tools_for_mode(mode: Any) -> list[Any]:
+    """R34 Tier-0 binding: DEFAULT_TOOLS(mode) + mode-gated additions — NEVER
+    the full registry. The agent node adds state.discovered_tools on top."""
+    tools: list[Any] = []
+    for name in default_tool_names(mode):
+        t = ALL_BUILT_TOOL_BY_NAME.get(resolve_tool_name(name))
+        if t is not None and t not in tools:
+            tools.append(t)
+    return tools
 
 
 async def call_any_tool(name: str, args: dict[str, Any],
@@ -205,9 +243,16 @@ async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name.startswith("mcp__"):
         from worker.engine.mcp import mcp_manager
         return await mcp_manager().call(name, args)
+    if name == "tool_search":
+        from worker.engine.tools.discovery import tool_search_async
+        return await tool_search_async(args, mode="development",
+                                       bound=default_tool_names("development"))
     from worker.engine.tools.extended import EXTENDED_TOOL_BY_NAME, call_extended_tool
     if name in EXTENDED_TOOL_BY_NAME:
         return await call_extended_tool(name, args)
+    from worker.engine.tools.deferred import DEFERRED_TOOL_BY_NAME, call_deferred_tool
+    if name in DEFERRED_TOOL_BY_NAME:
+        return await call_deferred_tool(name, args)
     if name in TOOL_BY_NAME:
         return await call_tool(name, args)
     if name in MUTATING_TOOL_BY_NAME:
@@ -253,6 +298,8 @@ __all__ = [
     "ALL_BUILT_TOOL_BY_NAME",
     "ALL_TOOLS",
     "ALL_TOOL_BY_NAME",
+    "DEFAULT_TOOLS",
+    "MODE_ALLOWED",
     "MUTATING_TOOLS",
     "MUTATING_TOOL_BY_NAME",
     "READONLY_TOOLS",
@@ -264,9 +311,11 @@ __all__ = [
     "call_tool_direct",
     "capability_of",
     "content_hash",
+    "default_tool_names",
     "idempotency_key",
     "is_destructive_command",
     "is_mutable_capability",
+    "mode_allowed",
     "needs_approval",
     "resolve_tool_name",
     "tools_for_mode",

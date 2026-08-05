@@ -13,22 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-from worker.engine.permissions import Effect, decision_for_call, evaluate
-from worker.engine.tools.extended import (
-    _ReadabilityLite,
-    apply_task_updates,
-    knowledge_draft,
-)
-from worker.engine.security import wrap_untrusted
-
+from langchain_core.messages import ToolMessage
 from test_spine_contract import (
     EventCollector,
     _ai,
@@ -36,6 +26,13 @@ from test_spine_contract import (
     _initial,
     _patch_llm,
     _tc,
+)
+
+from worker.engine.permissions import Effect, decision_for_call, evaluate
+from worker.engine.security import wrap_untrusted
+from worker.engine.tools.extended import (
+    _ReadabilityLite,
+    apply_task_updates,
 )
 
 
@@ -168,10 +165,10 @@ class TestWebFetch:
 class TestGitSnapshot:
     @pytest.mark.asyncio
     async def test_snapshot_captures_state(self, tmp_path: Path, monkeypatch):
-        subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=tmp_path, check=True)  # noqa: ASYNC221 — test setup
         (tmp_path / "a.txt").write_text("hello\n")
-        subprocess.run(["git", "add", "a.txt"], cwd=tmp_path, check=True)
-        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+        subprocess.run(["git", "add", "a.txt"], cwd=tmp_path, check=True)  # noqa: ASYNC221 — test setup
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",  # noqa: ASYNC221 — test setup
                         "commit", "-qm", "init"], cwd=tmp_path, check=True)
         (tmp_path / "a.txt").write_text("changed\n")
         (tmp_path / "new.txt").write_text("untracked\n")

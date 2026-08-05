@@ -149,6 +149,15 @@ def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMes
     if envelope_text:
         parts.append(f"<mode-envelope mode=\"{mode}\">\n{envelope_text}\n</mode-envelope>")
 
+    # D6 — deferred-tool roster fragment (R34): names + one-liners, <=0.5K
+    # tokens; bound and discovered tools are excluded.
+    from worker.engine.tools import default_tool_names
+    from worker.engine.tools.discovery import roster_fragment
+    bound = default_tool_names(mode) + list(state.get("discovered_tools", []) or [])
+    roster = roster_fragment(mode, bound=bound).strip()
+    if roster:
+        parts.append(roster)
+
     # Goal-stage envelope (the stage subgraph's per-turn fragment)
     if mode == Mode.GOAL.value or mode == "goal":
         stage_raw = state.get("stage_envelope")
@@ -165,6 +174,37 @@ def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMes
     return tag_message(msg, "envelope")  # type: ignore[arg-type]
 
 
+def _bound_tools(state: EngineState, mode: str) -> list[Any]:
+    """R34 two-tier binding: DEFAULT_TOOLS(mode) + discovered — NEVER the full
+    registry. Mode-gates are re-checked at bind time: a discovered tool that
+    became mode-denied drops out. MCP tools bind from the manager's live
+    catalog (only after discovery)."""
+    from worker.engine.tools import (
+        ALL_BUILT_TOOL_BY_NAME,
+        mode_allowed,
+        resolve_tool_name,
+    )
+    bound = tools_for_mode(mode)
+    bound_names = {t.name for t in bound}
+    for name in state.get("discovered_tools", []) or []:
+        if not mode_allowed(name, mode):
+            continue  # mode-denied discovered tools drop out at bind time
+        if name.startswith("mcp__"):
+            from worker.engine.mcp import mcp_manager
+            mgr = mcp_manager()
+            server = name.split("__", 2)[1] if len(name.split("__", 2)) == 3 else ""
+            tool_obj = (mgr.status.get(server) or None) and mgr.status[server].tools.get(name)
+            if tool_obj is not None and name not in bound_names:
+                bound.append(tool_obj)
+                bound_names.add(name)
+            continue
+        tool_obj = ALL_BUILT_TOOL_BY_NAME.get(resolve_tool_name(name))
+        if tool_obj is not None and tool_obj.name not in bound_names:
+            bound.append(tool_obj)
+            bound_names.add(tool_obj.name)
+    return bound
+
+
 # --- The agent node ---
 
 async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, Any]:
@@ -176,7 +216,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     delta_sink = config["configurable"].get("delta_sink")
 
     mode = _mode_of(state)
-    llm = make_llm(model, streaming=True, tools=tools_for_mode(mode))
+    llm = make_llm(model, streaming=True, tools=_bound_tools(state, mode))
     system = _build_system_message(model, mode)  # type: ignore[arg-type]
     messages = [system] + state.get("messages", [])
     envelope = _build_turn_envelope(state, config)
@@ -451,6 +491,32 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             out["force_compact"] = True
             result = {"kind": "success", "ok": True,
                       "output": "ok: compaction requested — the engine compacts at the next boundary"}
+        elif name == "tool_search":
+            # R34 discovery: matches merge into state.discovered_tools (the
+            # next LLM call binds them natively — checkpointed, session-scoped).
+            from worker.engine.tools import default_tool_names
+            from worker.engine.tools.discovery import tool_search_async
+            result = await tool_search_async(
+                (decision or {}).get("args", args),
+                mode=_mode_of(state),
+                bound=default_tool_names(_mode_of(state))
+                + list(state.get("discovered_tools", []) or []))
+            if result["ok"] and result.get("discovered"):
+                merged = sorted(set(state.get("discovered_tools", []) or [])
+                                | set(result["discovered"]))
+                out["discovered_tools"] = merged
+        elif name == "mode_request":
+            # R34: approval-routed §8 transition — reaching here means the
+            # gate approved (MUTATING capability); apply the mode change.
+            target = str(args.get("target_mode", ""))
+            valid = {m.value for m in Mode}
+            if target not in valid:
+                result = {"kind": "error", "ok": False,
+                          "output": f"error: unknown mode {target!r} (valid: {sorted(valid)})"}
+            else:
+                out["mode"] = Mode(target)
+                result = {"kind": "success", "ok": True,
+                          "output": f"ok: mode transition approved — now in {target} mode"}
         else:
             # §3: execute with the VERBATIM args recorded at the gate
             # (edit-and-resend args land here via decision["args"]).

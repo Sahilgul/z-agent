@@ -86,6 +86,10 @@ class EngineState(TypedDict, total=False):
     # RC T4 knowledge drafts staged by knowledge_draft (draft -> approve path)
     knowledge_drafts: list[dict[str, Any]]
 
+    # R34 discovered tools — session-scoped, checkpointed, survives compaction
+    # (it is STATE, not messages). Names the agent loaded via tool_search.
+    discovered_tools: list[str]
+
     # Goal-mode artifact (plan §8 goal mode)
     goal_artifact: dict[str, Any] | None
 
