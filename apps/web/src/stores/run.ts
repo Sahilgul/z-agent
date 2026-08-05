@@ -98,9 +98,22 @@ export const useRuns = create<RunState>((set, get) => ({
             // them appear (and vanish) immediately rather than on the next poll.
             void queryClient.invalidateQueries({ queryKey: [...qk.approvals, runId] });
           } else if (msg.type === "run_stage" && s.current) {
-            set({
-              current: { ...s.current, stage: msg.stage, available_actions: msg.available_actions },
-            });
+            // M-80: use the functional updater so we read the LATEST
+            // state.current, not the snapshot captured at the top of this
+            // onMessage (s.current). A concurrent sendIntent -> set({current:
+            // fresh}) in the same tick would otherwise be clobbered by
+            // ...s.current (stale) spread here, losing the fresh run data.
+            set((state) =>
+              state.current
+                ? {
+                    current: {
+                      ...state.current,
+                      stage: msg.stage,
+                      available_actions: msg.available_actions,
+                    },
+                  }
+                : {},
+            );
             // threads move with stage transitions — refresh silently
             void api.get<Thread[]>(`/runs/${runId}/threads`).then((threads) => {
               if (myGen === openRunGen) set({ threads });
@@ -158,7 +171,11 @@ export const useRuns = create<RunState>((set, get) => ({
         payload: opts.payload ?? {},
       });
       const fresh = await api.get<Run>(`/runs/${run.id}`);
-      set({ current: fresh });
+      // M-81: if the user switched runs while this intent was in flight,
+      // the fetched `fresh` belongs to the OLD run — writing it would
+      // clobber the new run's current with stale data. Only commit if
+      // we're still on the same run (mirrors the H-61 guard in refreshLanes).
+      if (get().current?.id === run.id) set({ current: fresh });
       return res;
     } catch (err) {
       toast.error(`${intent} failed`, {

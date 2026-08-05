@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHead } from "@/components/ui/page-head";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/sonner";
 import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
 
@@ -60,10 +61,19 @@ export function IdeasScreen() {
         `/ideas/${id}/${kind === "comment" ? "comments" : kind}`,
         kind === "comment" ? { body: comment } : {},
       ),
+    // M-84: only clear the comment on SUCCESS — the old onSettled ran on
+    // error too, so a failed POST silently wiped the user's text. Keep the
+    // invalidation in onSettled (refreshing on success or error is harmless)
+    // and surface the failure so the user knows their text was NOT sent.
+    onSuccess: () => setComment(""),
+    onError: (err) => {
+      toast.error("comment failed", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.ideas });
       if (openId !== null) void qc.invalidateQueries({ queryKey: qk.ideaThread(String(openId)) });
-      setComment("");
     },
   });
 

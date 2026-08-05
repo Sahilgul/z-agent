@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { useSession } from "../../stores/session";
 import { useAppTranslation } from "@/i18n";
 
-const schema = z.object({
-  username: z.string().min(1),
-  pin: z.string().min(1),
-  remember: z.boolean().optional(),
-});
-type FormValues = z.infer<typeof schema>;
+// M-83: the old module-scope schema used `pin: z.string().min(1)` but the
+// error string said "pin must be 4 digits" — the rule and the message
+// disagreed (a 1-char pin passed validation yet the message implied 4
+// digits). The schema is now built inside the component so it can use the
+// translated message AND align with the backend's real rule (4-6 digits,
+// digits only — see backend core/security.hash_pin).
+type FormValues = { username: string; pin: string; remember?: boolean };
 
 const labelClass = "font-mono text-[11px] uppercase tracking-[0.09em] text-ink-secondary";
 const inputClass =
@@ -24,6 +25,19 @@ export function LoginScreen() {
   const { t } = useAppTranslation();
   const [showPin, setShowPin] = useState(false);
   const [serverError, setServerError] = useState("");
+
+  // M-83: schema built here so the validation rule and the (translated)
+  // error message stay in sync. PIN must be 4-6 digits, matching the
+  // backend's hash_pin rule; the message says the same thing.
+  const schema = useMemo(
+    () =>
+      z.object({
+        username: z.string().min(1, t("login.errRequired")),
+        pin: z.string().regex(/^\d{4,6}$/, t("login.errPinLen")),
+        remember: z.boolean().optional(),
+      }),
+    [t],
+  );
 
   const {
     register,
@@ -37,7 +51,9 @@ export function LoginScreen() {
   const onSubmit = async (values: FormValues) => {
     setServerError("");
     try {
-      await login(values.username.trim(), values.pin);
+      // M-82: pass `remember` through so the checkbox actually controls
+      // cookie persistence (was collected by the form but never sent).
+      await login(values.username.trim(), values.pin, !!values.remember);
     } catch (err) {
       setServerError(err instanceof Error ? err.message : "login failed");
     }

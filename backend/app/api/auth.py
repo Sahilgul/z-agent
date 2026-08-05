@@ -22,6 +22,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class LoginBody(BaseModel):
     username: str
     pin: str
+    remember: bool = False
 
 
 class FirstLoginBody(BaseModel):
@@ -31,11 +32,18 @@ class FirstLoginBody(BaseModel):
     display_name: str | None = None
 
 
-def _set_cookie(response: Response, token: str) -> None:
+# M-82: "remember me" actually changes cookie persistence. When remember
+# is false the cookie is a session cookie (no max_age -> expires when the
+# browser closes); when true it persists for 14 days. The old code always
+# set max_age=14d, so the checkbox was dead.
+_REMEMBER_MAX_AGE = 60 * 60 * 24 * 14
+
+
+def _set_cookie(response: Response, token: str, remember: bool) -> None:
     response.set_cookie(
         "zagent_token", token, httponly=True, samesite="lax",
         secure=False,  # plain HTTP; flip once TLS terminates ahead
-        max_age=60 * 60 * 24 * 14,
+        max_age=_REMEMBER_MAX_AGE if remember else None,
     )
 
 
@@ -53,7 +61,7 @@ def login(body: LoginBody, response: Response):
         if user.status != "active":
             raise HTTPException(status_code=401, detail="account inactive")
         record_success(session, user)
-        _set_cookie(response, issue_token(user))
+        _set_cookie(response, issue_token(user), body.remember)
         return {"username": user.username, "display_name": user.display_name, "role": user.role}
     finally:
         session.close()
@@ -95,7 +103,9 @@ def first_login(body: FirstLoginBody, response: Response):
             session.commit()
         finally:
             session.close()
-    _set_cookie(response, issue_token(user))
+    # M-82: first-login has no "remember me" checkbox; preserve the old
+    # 14-day persistent cookie so initial setup behavior is unchanged.
+    _set_cookie(response, issue_token(user), remember=True)
     # The trust line renders on the client's next screen: "Your sessions are
     # private to you. Lessons you approve become shared team knowledge."
     return {"username": user.username, "first_run": True}

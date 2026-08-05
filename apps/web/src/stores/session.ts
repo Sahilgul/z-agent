@@ -7,7 +7,7 @@ interface SessionState {
   me: Me | null;
   booted: boolean;
   boot: () => Promise<void>;
-  login: (username: string, pin: string) => Promise<void>;
+  login: (username: string, pin: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -26,9 +26,11 @@ export const useSession = create<SessionState>((set, get) => ({
       set({ me: null, booted: true });
     }
   },
-  login: async (username, pin) => {
+  login: async (username, pin, remember) => {
     try {
-      await api.post("/auth/login", { username, pin });
+      // M-82: wire the "remember me" checkbox through to the backend so it
+      // actually changes cookie persistence (session vs 14-day). Was dead.
+      await api.post("/auth/login", { username, pin, remember });
       const me = await api.get<Me>("/auth/me");
       set({ me });
       toast.success(`welcome back, ${me.display_name || me.username}`);

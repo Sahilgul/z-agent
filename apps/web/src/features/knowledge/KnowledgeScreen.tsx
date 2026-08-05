@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { PageHead } from "@/components/ui/page-head";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/sonner";
 import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
 
@@ -36,6 +37,13 @@ function DraftCard({ entry }: { entry: KnowledgeEntry }) {
 
   const approve = useMutation({
     mutationFn: () => api.post(`/knowledge/${entry.id}/approve`, { scope, repo: scope === "repo" ? repo : null }),
+    // M-85: surface failures (was no error UI) so the user knows the
+    // approve didn't land and can retry instead of assuming it worked.
+    onError: (err) => {
+      toast.error("approve failed", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.knowledgeDrafts });
       void qc.invalidateQueries({ queryKey: qk.knowledge() });
@@ -76,8 +84,15 @@ function DraftCard({ entry }: { entry: KnowledgeEntry }) {
             aria-label="repo name"
           />
         )}
-        <Button size="sm" className="font-mono" disabled={scope === "repo" && !repo.trim()} onClick={() => approve.mutate()}>
-          approve
+        <Button
+          size="sm"
+          className="font-mono"
+          // M-85: guard against double-submit while the POST is in flight
+          // (was no isPending check, so a second click sent a duplicate).
+          disabled={(scope === "repo" && !repo.trim()) || approve.isPending}
+          onClick={() => approve.mutate()}
+        >
+          {approve.isPending ? "approving…" : "approve"}
         </Button>
       </div>
     </article>

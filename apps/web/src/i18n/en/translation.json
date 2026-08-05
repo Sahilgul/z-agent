@@ -31,7 +31,7 @@
     "hidePin": "hide pin",
     "errRequired": "required",
     "errUsernameMin": "at least 2 characters",
-    "errPinLen": "pin must be 4 digits",
+    "errPinLen": "pin must be 4-6 digits",
     "footerOrg": "© Zagent Harness AI"
   },
   "empty": {
