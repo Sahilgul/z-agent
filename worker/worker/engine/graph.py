@@ -59,6 +59,9 @@ from worker.engine.goal_mode import (
     stage_of,
 )
 from worker.engine.llm import estimate_cost, make_llm, with_gateway_retry
+from worker.engine.metrics import get_registry
+from worker.engine.permissions import Effect
+from worker.engine.permissions import evaluate as perms_evaluate
 from worker.engine.state import Budget, EngineState, Mode, tag_message
 from worker.engine.tools import call_tool_direct, needs_approval, tools_for_mode
 from worker.engine.watchdogs import CriticRubric
@@ -181,6 +184,8 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         messages = messages + [envelope]
 
     ai_message: AIMessage | None = None
+    metrics = get_registry(config)
+    llm_started = time.monotonic()
     try:
         # Gateway retry wraps the stream start; once streaming, retries are
         # not safe (partial deltas) — a mid-stream failure fails the turn.
@@ -208,6 +213,10 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
 
     if ai_message is None:
         return {"error": "no response from LLM", "done": True}
+
+    if metrics:
+        metrics.observe("llm_call_latency_s", time.monotonic() - llm_started)
+        metrics.increment("turns")
 
     events = emitter.from_assistant(ai_message, task_id)
     _publish_events(config, events)
@@ -300,6 +309,8 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
     """
     autonomy = _autonomy_of(state)
     broker = config["configurable"].get("approval_broker")
+    ruleset = config["configurable"].get("permissions")
+    metrics = get_registry(config)
     messages = state.get("messages", [])
     last = messages[-1] if messages else None
     tool_calls = getattr(last, "tool_calls", None) or []
@@ -313,6 +324,27 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
         args = tc.get("args", {}) or {}
         if tc_id in approved:
             continue
+        # RC: glob rulesets (findLast) — a deny rule short-circuits BEFORE the
+        # card (hard git policies §11 never reach a human); allow skips it.
+        effect = perms_evaluate(name, args, ruleset)
+        if effect is Effect.DENY:
+            approved[tc_id] = {"approved": False,
+                               "reason": "denied by permission rule (hard policy)"}
+            denial_streak += 1
+            if metrics:
+                metrics.increment("permission_rule_denies")
+            out: dict[str, Any] = {"approved_calls": approved, "denial_streak": denial_streak}
+            if denial_streak >= 3:
+                out["done"] = True
+                out["blocked_reason"] = "3 consecutive denials — blocked-escalation"
+            return out
+        if effect is Effect.ALLOW:
+            approved[tc_id] = {"approved": True, "via": "ruleset_allow", "args": args}
+            continue
+        # T4 contract: knowledge_draft scope=user is auto-approved.
+        if name == "knowledge_draft" and args.get("scope") == "user":
+            approved[tc_id] = {"approved": True, "via": "scope_user_auto", "args": args}
+            continue
         if not needs_approval(name, autonomy):
             approved[tc_id] = {"approved": True, "via": "not_required"}
             continue
@@ -323,16 +355,23 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
             broker.card_payload(name, args, tc_id) if broker is not None
             else {"type": "approval_request", "tool": name, "args": args, "tool_call_id": tc_id}
         )
+        if metrics:
+            metrics.increment("approvals_requested")
         decision = interrupt(payload)
         verdict = decision.get("decision", "deny")
-        if verdict in ("allow", "allow_once", "always_allow"):
-            approved[tc_id] = {"approved": True, "via": verdict, "args": args}
+        if verdict in ("allow", "allow_once", "always_allow", "edited_allow"):
+            # Edit-and-resend: the human may EDIT the verbatim args before
+            # approving — the edited args are what executes (still verbatim).
+            exec_args = decision.get("edited_args", args)
+            approved[tc_id] = {"approved": True, "via": verdict, "args": exec_args}
             denial_streak = 0
             if verdict == "always_allow" and broker is not None:
                 await broker.persist_always_allow(name)
         else:
             approved[tc_id] = {"approved": False, "reason": decision.get("reason", "denied by user")}
             denial_streak += 1
+            if metrics:
+                metrics.increment("approvals_denied")
         # ONE interrupt per execution — return now; the self-loop re-enters
         # for any remaining undecided calls.
         out: dict[str, Any] = {"approved_calls": approved, "denial_streak": denial_streak}
@@ -381,6 +420,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     streaks = dict(state.get("tool_streak", {}))
     new_messages = list(messages)
     out: dict[str, Any] = {}
+    metrics = get_registry(config)
 
     for tc in tool_calls:
         tc_id = tc.get("id", "")
@@ -392,15 +432,55 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             # Denied at the gate — the agent sees the reason, nothing executes.
             result = {"kind": "error", "ok": False,
                       "output": f"error: denied — {decision.get('reason', 'denied by user')}"}
+        elif name == "update_tasks":
+            # RC two-artifact model: the reducer owns state; every mutation is
+            # a durable event (R31 recovery reconstructs from the event log).
+            from worker.engine.tools.extended import apply_task_updates
+            new_tasks, err = apply_task_updates(state.get("tasks"), args.get("updates", []))
+            if err:
+                result = {"kind": "error", "ok": False, "output": err}
+            else:
+                out["tasks"] = new_tasks
+                result = {"kind": "success", "ok": True,
+                          "output": f"tasks updated: {len(new_tasks['artifact'])} planned, "
+                                    f"{sum(1 for s in new_tasks['tracker'].values() if s == 'completed')} completed",
+                          "detail_tasks": new_tasks}
+        elif name == "compact":
+            # RC agent-triggerable compaction (§7): force the next compaction
+            # point regardless of the token threshold.
+            out["force_compact"] = True
+            result = {"kind": "success", "ok": True,
+                      "output": "ok: compaction requested — the engine compacts at the next boundary"}
         else:
-            # §3: execute with the VERBATIM args recorded at the gate.
+            # §3: execute with the VERBATIM args recorded at the gate
+            # (edit-and-resend args land here via decision["args"]).
             exec_args = (decision or {}).get("args", args)
+            started = time.monotonic()
             result = await call_tool_direct(name, exec_args)
+            if metrics:
+                metrics.observe("tool_call_latency_s", time.monotonic() - started)
+                metrics.increment("tool_calls_total")
+                if not result["ok"]:
+                    metrics.increment("tool_calls_failed")
 
+        # RC knowledge_draft: stage the draft (scope=user lands directly;
+        # repo|global staged for the human-gated T4 approve path).
+        if name == "knowledge_draft" and result["ok"]:
+            drafts = list(state.get("knowledge_drafts", []))
+            drafts.append({
+                "scope": args.get("scope"), "title": args.get("title"),
+                "content": args.get("content"), "provenance": args.get("provenance", ""),
+                "status": "auto_approved" if args.get("scope") == "user" else "pending_approval",
+            })
+            out["knowledge_drafts"] = drafts
+
+        detail: dict[str, Any] = {"tool": name, "input": args, "output": result["output"],
+                                  "ok": result["ok"]}
+        if result.get("detail_tasks") is not None:
+            detail["tasks"] = result["detail_tasks"]
+            detail["kind"] = "todo-checklist"
         event = emitter._next(
-            _tool_kind(name), _tool_title(name, args),
-            {"tool": name, "input": args, "output": result["output"], "ok": result["ok"]},
-            task_id, None,
+            _tool_kind(name), _tool_title(name, args), detail, task_id, None,
         )
         _publish_events(config, [event])
         new_messages.append(tag_message(ToolMessage(
@@ -427,6 +507,14 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                     out["done"] = True
                     out["blocked_reason"] = f"stuck loop: same failing call {count}x — force-stop"
                     out["error"] = out["blocked_reason"]
+                if metrics:
+                    metrics.increment("stuck_loop_triggers")
+
+    # R24#1: background terminal completion/watch notifies at turn end.
+    from worker.engine.tools.background import terminal_manager
+    for note in terminal_manager().completed_notifications():
+        new_messages.append(tag_message(HumanMessage(
+            content=f"[background terminal] {note}"), "nudge"))  # type: ignore[arg-type]
 
     out["messages"] = new_messages
     out["tool_streak"] = streaks
@@ -529,6 +617,10 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
         out["messages"] = new_messages
         out["last_compaction_at"] = time.time()
         out["compaction_count"] = state.get("compaction_count", 0) + 1
+        metrics = get_registry(config)
+        if metrics:
+            metrics.increment("compactions")
+            metrics.observe("checkpoint_size_messages", len(new_messages))
         if result.rolled_back:
             event = emitter._next(
                 StepKind.STATUS, "⚠ compaction rolled back",

@@ -80,6 +80,11 @@ class EngineState(TypedDict, total=False):
     # The frozen plan artifact + live execution tracker (plan §7 update_tasks)
     plan_artifact: dict[str, Any] | None
     task_tracker: list[dict[str, Any]] | None
+    # RC two-artifact task model (R24-amends-R23):
+    # {"artifact": [{id, content, scope, acceptance}], "tracker": {id: status}}
+    tasks: dict[str, Any]
+    # RC T4 knowledge drafts staged by knowledge_draft (draft -> approve path)
+    knowledge_drafts: list[dict[str, Any]]
 
     # Goal-mode artifact (plan §8 goal mode)
     goal_artifact: dict[str, Any] | None

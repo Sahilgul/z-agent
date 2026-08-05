@@ -52,6 +52,21 @@ from worker.engine.state import Autonomy, Budget, EngineState, Mode, tag_message
 from worker.forwarder import Forwarder
 
 
+def _permissions_from_env() -> list[dict[str, Any]]:
+    """Team/repo permission rulesets (RC §7): JSON list in ZAGENT_PERMISSIONS,
+    e.g. [{"effect":"deny","tool":"terminal_exec","args":{"command":"git push *"}}].
+    Malformed config fails closed to an empty ruleset (capability map only)."""
+    import json
+    raw = os.environ.get("ZAGENT_PERMISSIONS", "").strip()
+    if not raw:
+        return []
+    try:
+        rules = json.loads(raw)
+        return rules if isinstance(rules, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
 class EngineRunner:
     """One thread = one graph + one checkpointer + one emitter + one forwarder."""
 
@@ -129,6 +144,8 @@ class EngineRunner:
         async def _delta_sink(delta) -> None:
             await self.forwarder.publish_deltas([delta])
 
+        from worker.engine.metrics import MetricsRegistry
+        self.metrics = MetricsRegistry(self.run_id, self.thread_id)
         return {
             "configurable": {
                 "thread_id": self.context_id,  # LangGraph checkpointer key
@@ -140,6 +157,8 @@ class EngineRunner:
                 "workspace": str(self.workspace),
                 "event_sink": _event_sink,
                 "delta_sink": _delta_sink,
+                "metrics": self.metrics,
+                "permissions": _permissions_from_env(),
             },
             "recursion_limit": 80,
         }
@@ -226,7 +245,7 @@ class EngineRunner:
                 while not self._stop.is_set():
                     try:
                         nudge = await asyncio.wait_for(self._pending_nudges.get(), timeout=5.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         continue
                     await self._inject_and_run(graph, config, nudge, episodic)
         except Exception as exc:  # noqa: BLE001

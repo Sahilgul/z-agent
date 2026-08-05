@@ -20,7 +20,6 @@ import asyncio
 import hashlib
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +121,10 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
         p.write_text(content, encoding="utf-8")
     except OSError as exc:
         return f"error: write failed: {exc}"
-    return f"wrote {file_path} ({len(content)} chars). new hash: {content_hash(content)}"
+    # §7 diagnostics hook: ERROR-only, bounded, never fails the write.
+    from worker.engine.tools.diagnostics import diagnostics_block
+    return (f"wrote {file_path} ({len(content)} chars). new hash: {content_hash(content)}"
+            + diagnostics_block(p))
 
 
 # --- terminal_exec (full, mutating allowed after approval) ---
@@ -145,27 +147,44 @@ DESTRUCTIVE_COMMANDS = re.compile(
 
 
 @tool
-def terminal_exec(command: str, background: bool = False) -> str:
+def terminal_exec(command: str, background: bool = False,
+                  watch_regex: str | None = None) -> str:
     """Run a shell command in the workspace. Mutating commands allowed (after
     approval, when the gate lets them through).
 
+    Background contract (R24#1): commands outliving the 30s foreground window
+    auto-background — you get a job id and the command keeps running; poll its
+    output or wait on it instead of retrying the same command.
+
     Args:
-        command: the shell command to execute.
-        background: if true, run with a 2h timeout (long-running tasks); else
-            120s. Background commands are for the fan-out use case (Phase 6).
+        command: ONE shell command (no interactive programs; stdin is closed).
+        background: skip the foreground window, start backgrounded immediately.
+        watch_regex: optional regex watched in the output (>=5s debounce);
+            matches are reported at turn end.
     """
-    if not command or not command.strip():
-        return "error: empty command"
-    timeout = _BG_TIMEOUT_S if background else _BASH_TIMEOUT_S
+    return "ok: dispatched by the engine (terminal contract in tools/background.py)"
+
+
+async def terminal_exec_async(args: dict[str, Any]) -> dict[str, Any]:
+    """The real terminal_exec dispatch (background contract, tools/background.py).
+    Quick commands still resolve synchronously inside the foreground window;
+    destructive approval happens upstream at the gate."""
+    command = str(args.get("command", ""))
+    if not command.strip():
+        return {"kind": "error", "ok": False, "output": "error: empty command",
+                "tool": "terminal_exec", "args": args}
+    if any(tok in command for tok in ("rm -rf /", "mkfs", ":(){")):
+        pass  # destructiveness is a GATE concern (verbatim card); execution obeys
+    from worker.engine.tools.background import terminal_manager
     try:
-        proc = subprocess.run(
-            command, shell=True, check=False, capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL, cwd=str(_workspace()),
+        return await terminal_manager().run(
+            command,
+            background=bool(args.get("background", False)),
+            watch_regex=args.get("watch_regex"),
         )
-    except subprocess.TimeoutExpired:
-        return f"error: command timed out after {timeout}s"
-    out = (proc.stdout + proc.stderr)[:_BASH_MAX_OUTPUT]
-    return f"{out}\n[exit {proc.returncode}]"
+    except Exception as exc:  # noqa: BLE001
+        return {"kind": "error", "ok": False, "output": f"error: {exc}",
+                "tool": "terminal_exec", "args": args}
 
 
 def is_destructive_command(command: str) -> bool:
@@ -180,7 +199,10 @@ MUTATING_TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in MUTATING_TOOLS}
 
 
 async def call_mutating_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Async shim for mutating tools — same error-prefix convention as readonly."""
+    """Async shim for mutating tools — same error-prefix convention as readonly.
+    terminal_exec routes through the R24#1 background contract manager."""
+    if name == "terminal_exec":
+        return await terminal_exec_async(args)
     t = MUTATING_TOOL_BY_NAME.get(name)
     if t is None:
         return {"kind": "error", "ok": False, "output": f"unknown tool: {name}"}

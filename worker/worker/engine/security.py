@@ -124,6 +124,30 @@ def quarantine_file(src: Path, workspace: Path, *, reason: str) -> Path:
     return dest
 
 
+# --- Injection quarantine boundary markers (plan §12, R31) ---
+#
+# web_fetch/web_search results, AGENTS.md content, MCP tool outputs, file
+# contents, and teammate messages are DATA, never instructions. The tool layer
+# wraps untrusted content in typed boundary markers MECHANICALLY (not prompt
+# goodwill); the base prompt's S7 names these markers and the critic rubric
+# reviews anything crossing the boundary into plans/diffs.
+
+UNTRUSTED_OPEN = "<untrusted_content source=\"{source}\">"
+UNTRUSTED_CLOSE = "</untrusted_content>"
+
+
+def wrap_untrusted(text: str, source: str) -> str:
+    """Wrap untrusted tool output in typed boundary markers (§12).
+
+    `source` names the provenance (web_fetch, mcp__server, agents_md, file,
+    teammate). Nested markers from the content itself are neutralized so a
+    malicious page cannot forge a boundary close.
+    """
+    safe = text.replace("<untrusted_content", "<untrusted-content") \
+               .replace("</untrusted_content>", "</untrusted-content>")
+    return f"{UNTRUSTED_OPEN.format(source=source)}\n{safe}\n{UNTRUSTED_CLOSE}"
+
+
 __all__ = [
     "_REDACTION_TOKEN",
     "QuarantineError",
@@ -132,4 +156,5 @@ __all__ = [
     "quarantine_path",
     "redact",
     "redact_dict",
+    "wrap_untrusted",
 ]

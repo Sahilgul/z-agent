@@ -18,7 +18,11 @@ Layout (plan §6):
 from __future__ import annotations
 
 from worker.engine.approvals import ApprovalBroker, ApprovalGate
-from worker.engine.checkpointer import DeltaChannel, make_checkpointer, open_checkpointer
+from worker.engine.checkpointer import (
+    DeltaChannel,
+    make_checkpointer,
+    open_checkpointer,
+)
 from worker.engine.compaction import (
     CompactionPolicy,
     CompactionResult,
@@ -28,12 +32,15 @@ from worker.engine.compaction import (
 from worker.engine.events import EventEmitter
 from worker.engine.graph import build_graph
 from worker.engine.llm import estimate_cost, get_capabilities, make_llm, suffix_for
+from worker.engine.mcp import MCPManager, mcp_manager
 from worker.engine.memory import (
     EpisodicMemory,
     memory_search,
     read_handoff,
     set_episodic_memory,
 )
+from worker.engine.metrics import MetricsRegistry
+from worker.engine.permissions import Effect
 from worker.engine.state import (
     Autonomy,
     Budget,
@@ -42,7 +49,7 @@ from worker.engine.state import (
     PromptOrigin,
     tag_message,
 )
-from worker.engine.tools import tools_for_mode
+from worker.engine.tools import resolve_tool_name, tools_for_mode
 
 __all__ = [
     "ApprovalBroker",
@@ -53,9 +60,12 @@ __all__ = [
     "CompactionResult",
     "Compactor",
     "DeltaChannel",
+    "Effect",
     "EngineState",
     "EpisodicMemory",
     "EventEmitter",
+    "MCPManager",
+    "MetricsRegistry",
     "Mode",
     "PromptOrigin",
     "SelfTuningLimit",
@@ -64,9 +74,11 @@ __all__ = [
     "get_capabilities",
     "make_checkpointer",
     "make_llm",
+    "mcp_manager",
     "memory_search",
     "open_checkpointer",
     "read_handoff",
+    "resolve_tool_name",
     "set_episodic_memory",
     "suffix_for",
     "tag_message",

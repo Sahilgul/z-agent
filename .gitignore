@@ -22,3 +22,6 @@ dist/
 out.txt
 team_fail.txt
 CompetitorReposAnalysis/
+
+# RG spike run artifacts (recorded workspaces contain cloned repo copies)
+worker/spike-results/

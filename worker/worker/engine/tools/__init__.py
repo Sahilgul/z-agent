@@ -42,6 +42,13 @@ _TOOL_CAPABILITIES: dict[str, Capability] = {
     "ask_user": Capability.READONLY,
     "spawn_agent": Capability.MUTATING,
     "spawn_swarm": Capability.MUTATING,
+    # RC extended set (§7). knowledge_draft is MUTATING (repo|global scopes are
+    # human-gated); the gate auto-allows scope=user per the T4 contract.
+    "web_fetch": Capability.READONLY,
+    "git_snapshot": Capability.READONLY,
+    "update_tasks": Capability.READONLY,
+    "compact": Capability.READONLY,
+    "knowledge_draft": Capability.MUTATING,
 }
 
 
@@ -62,17 +69,31 @@ def is_mutable_capability(tool_name: str, args: dict[str, Any] | None = None) ->
     return cap in (Capability.MUTATING, Capability.DESTRUCTIVE)
 
 
-def needs_approval(tool_name: str, autonomy: str) -> bool:
+def needs_approval(tool_name: str, autonomy: str,
+                   args: dict[str, Any] | None = None,
+                   ruleset: list[dict[str, Any]] | None = None) -> bool:
     """Whether a tool call needs human approval given the autonomy level.
 
     SUPERVISED/GATED: mutating/destructive need approval; readonly never does.
     AUTONOMOUS: nothing is bridged (bypassPermissions) — the gateway per-key
     budget is the only backstop.
+
+    RC: glob rulesets (permissions.py, findLast precedence) refine the
+    capability default per-call — an explicit allow rule bypasses the card,
+    an ask rule forces one, deny never reaches this function (the gate
+    rejects it first).
     """
     if autonomy == "autonomous":
         return False
-    cap = capability_of(tool_name)
-    return cap in (Capability.MUTATING, Capability.DESTRUCTIVE)
+    cap_default = capability_of(tool_name) in (Capability.MUTATING, Capability.DESTRUCTIVE)
+    if ruleset:
+        from worker.engine.permissions import Effect, decision_for_call
+        _effect, needs = decision_for_call(tool_name, args, ruleset,
+                                           capability_default_needs_approval=cap_default)
+        if _effect is Effect.DENY:
+            return False  # denied outright — the gate short-circuits before approval
+        return needs
+    return cap_default
 
 
 # --- The unified tool registry (read-only + mutating) ---
@@ -82,12 +103,14 @@ ALL_TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in ALL_TOOLS}
 
 
 def _extra_tools() -> dict[str, Any]:
-    """Tools built outside tools/ (memory, goal, fan-out) — imported lazily to
-    avoid a circular import (those modules import nothing from tools/)."""
+    """Tools built outside tools/ (memory, goal, fan-out, extended RC set) —
+    imported lazily to avoid a circular import."""
     from worker.engine.fanout import spawn_agent, spawn_swarm
     from worker.engine.goal_mode import ask_user
     from worker.engine.memory import memory_search
-    return {t.name: t for t in (memory_search, ask_user, spawn_agent, spawn_swarm)}
+    from worker.engine.tools.extended import EXTENDED_TOOLS
+    return {t.name: t for t in (memory_search, ask_user, spawn_agent, spawn_swarm,
+                                *EXTENDED_TOOLS)}
 
 
 # Every built tool, unique by name (the mutating terminal_exec wins over the
@@ -103,6 +126,15 @@ def _dedupe_by_name(tools: list[Any]) -> list[Any]:
 ALL_BUILT_TOOLS: list[Any] = _dedupe_by_name(ALL_TOOLS + list(_extra_tools().values()))
 ALL_BUILT_TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in ALL_BUILT_TOOLS}
 
+# §7/RD Tier-0 name parity: the ripgrep search tool is named `code_search` in
+# the plan contracts; the langchain tool object is `file_search`. Alias at the
+# registry level so either name resolves (RD's DEFAULT_TOOLS uses code_search).
+_NAME_ALIASES = {"code_search": "file_search"}
+
+
+def resolve_tool_name(name: str) -> str:
+    return _NAME_ALIASES.get(name, name)
+
 
 def tools_for_mode(mode: Any) -> list[Any]:
     """Mode-aware interim full binding (RA). RD (Phase 10) replaces this with
@@ -117,14 +149,24 @@ def tools_for_mode(mode: Any) -> list[Any]:
     from worker.engine.fanout import spawn_agent, spawn_swarm
     from worker.engine.goal_mode import ask_user
     from worker.engine.memory import memory_search
-    from worker.engine.tools import readonly as _ro
     from worker.engine.tools import mutating as _mut
+    from worker.engine.tools import readonly as _ro
+    from worker.engine.tools.extended import (
+        compact,
+        git_snapshot,
+        knowledge_draft,
+        update_tasks,
+        web_fetch,
+    )
 
     mode_val = mode.value if hasattr(mode, "value") else str(mode)
     core_read = [_ro.file_read, _ro.file_search, _ro.file_glob]
+    # RC extended read-only surface (§7) — available in every mode.
+    extended_read = [web_fetch, git_snapshot, update_tasks, compact]
     if mode_val in ("ask", "plan"):
-        return [*core_read, _ro.terminal_exec, memory_search]
-    base = [*core_read, _mut.file_edit, _mut.file_write, _mut.terminal_exec, memory_search]
+        return [*core_read, _ro.terminal_exec, memory_search, *extended_read]
+    base = [*core_read, _mut.file_edit, _mut.file_write, _mut.terminal_exec, memory_search,
+            *extended_read, knowledge_draft]
     if mode_val in ("development", "debug"):
         return [*base, spawn_agent, spawn_swarm]
     if mode_val == "goal":
@@ -156,7 +198,16 @@ async def call_any_tool(name: str, args: dict[str, Any],
 
 async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Dispatch WITHOUT the approval gate — the graph's gate node has already
-    decided (RA). Mutating tools execute with the gate's verbatim args."""
+    decided (RA). Mutating tools execute with the gate's verbatim args.
+    mcp__* routes to the MCP manager (R24#7 per-server isolation); the RC
+    extended set routes through its async-aware shim (web_fetch is a coroutine)."""
+    name = resolve_tool_name(name)
+    if name.startswith("mcp__"):
+        from worker.engine.mcp import mcp_manager
+        return await mcp_manager().call(name, args)
+    from worker.engine.tools.extended import EXTENDED_TOOL_BY_NAME, call_extended_tool
+    if name in EXTENDED_TOOL_BY_NAME:
+        return await call_extended_tool(name, args)
     if name in TOOL_BY_NAME:
         return await call_tool(name, args)
     if name in MUTATING_TOOL_BY_NAME:
@@ -217,5 +268,6 @@ __all__ = [
     "is_destructive_command",
     "is_mutable_capability",
     "needs_approval",
+    "resolve_tool_name",
     "tools_for_mode",
 ]
