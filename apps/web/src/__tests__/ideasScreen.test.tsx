@@ -10,7 +10,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 const threadList = [{
-  id: 5, title: "Ship the fleet graph to lanes?", body: "", created_by: 1,
+  id: 5, title: "Ship the fleet graph to threads?", body: "", created_by: 1,
   status: "open", summary: null, promoted_run_id: null, comment_count: 2,
   created_at: "2026-08-01T00:00:00Z",
 }];
@@ -38,13 +38,13 @@ beforeEach(() => {
 describe("IdeasScreen", () => {
   it("lists threads with voice counts", async () => {
     renderScreen(<IdeasScreen />);
-    expect(await screen.findByText("Ship the fleet graph to lanes?")).toBeInTheDocument();
+    expect(await screen.findByText("Ship the fleet graph to threads?")).toBeInTheDocument();
     expect(screen.getByText(/2 voices · open/)).toBeInTheDocument();
   });
 
   it("thread view pins the Lead synthesis above raw voices", async () => {
     renderScreen(<IdeasScreen />);
-    fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
+    fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
     expect(await screen.findByText(/lead synthesis · all voices/)).toBeInTheDocument();
     expect(screen.getByText(/worth doing/)).toBeInTheDocument();
     expect(screen.getByText("strong yes")).toBeInTheDocument();
@@ -52,28 +52,28 @@ describe("IdeasScreen", () => {
 
   it("Counsel's comment wears the 11th-member badge and voice", async () => {
     renderScreen(<IdeasScreen />);
-    fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
+    fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
     expect(await screen.findByText("counsel · 11th member")).toBeInTheDocument();
     expect(screen.getByText("wait for the flywheel")).toBeInTheDocument();
   });
 
   it("ask counsel posts to the endpoint", async () => {
     renderScreen(<IdeasScreen />);
-    fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
+    fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
     fireEvent.click(await screen.findByRole("button", { name: "ask counsel" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/ideas/5/ask-counsel", {}));
   });
 
   it("promote to plan posts and disables after promotion", async () => {
     renderScreen(<IdeasScreen />);
-    fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
+    fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
     fireEvent.click(await screen.findByRole("button", { name: "promote to plan" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/ideas/5/promote", {}));
   });
 
   it("comment composer refuses empty voices", async () => {
     renderScreen(<IdeasScreen />);
-    fireEvent.click(await screen.findByText("Ship the fleet graph to lanes?"));
+    fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
     const btn = await screen.findByRole("button", { name: "comment" });
     expect(btn).toBeDisabled();
   });

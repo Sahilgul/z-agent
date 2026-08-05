@@ -95,15 +95,15 @@ export function EventStream({
   prompt,
 }: {
   events: StepEvent[];
-  deltas: { lane_id: string; kind: string; text: string }[];
+  deltas: { thread_id: string; kind: string; text: string }[];
   laneFilter?: string;
   /** What the user asked — a transcript that opens with the agent's reply reads
    *  like an answer to a question nobody can see. */
   prompt?: string;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
-  const filtered = laneFilter ? events.filter((e) => e.lane_id === laneFilter) : events;
-  const filteredDeltas = laneFilter ? deltas.filter((d) => d.lane_id === laneFilter) : deltas;
+  const filtered = laneFilter ? events.filter((e) => e.thread_id === laneFilter) : events;
+  const filteredDeltas = laneFilter ? deltas.filter((d) => d.thread_id === laneFilter) : deltas;
   const items = foldStream(filtered, filteredDeltas);
 
   // scrollIntoView walks up and scrolls every ancestor — including the

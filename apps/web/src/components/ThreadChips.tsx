@@ -1,10 +1,10 @@
 import { cn } from "@/lib/utils";
-import type { Lane, LaneStatus } from "../types";
+import type { Thread, LaneStatus } from "../types";
 
-/** Compact lane chip for the composer row — the per-lane affordance that
+/** Compact thread chip for the composer row — the per-thread affordance that
  *  replaces the always-on swarm strip for genuine swarms. One chip per
- *  worker lane, opening the existing LaneOverlay on click. Hidden entirely
- *  for a single-lane ask run (see SwarmView). */
+ *  worker thread, opening the existing ThreadOverlay on click. Hidden entirely
+ *  for a single-thread ask run (see SwarmView). */
 const LED: Record<LaneStatus, string> = {
   running: "led",
   queued: "led led--blue",
@@ -17,21 +17,21 @@ const LED: Record<LaneStatus, string> = {
   pinned: "led led--blue",
 };
 
-export function LaneChips({
-  lanes,
+export function ThreadChips({
+  threads,
   onOpen,
 }: {
-  lanes: Lane[];
-  onOpen: (laneId: string) => void;
+  threads: Thread[];
+  onOpen: (threadId: string) => void;
 }) {
-  const lead = lanes.find((l) => l.persona === "lead");
-  const workers = lanes.filter((l) => l !== lead);
+  const lead = threads.find((l) => l.persona === "lead");
+  const workers = threads.filter((l) => l !== lead);
   // Same gate as SwarmView: only a real swarm gets chips.
   const isSwarm = workers.length > 1 || lead !== undefined;
   if (!isSwarm) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-s2" data-testid="lane-chips">
+    <div className="flex flex-wrap items-center gap-s2" data-testid="thread-chips">
       {lead && (
         <button
           type="button"

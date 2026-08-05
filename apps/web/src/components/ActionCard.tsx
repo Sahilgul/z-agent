@@ -29,7 +29,7 @@ const LABELS: Record<string, string> = {
   move_to_development: "Move to development",
   switch_to_agent_mode: "Switch to agent mode",
   review_evidence: "Review evidence",
-  stop_lane: "Stop lane",
+  stop_thread: "Stop thread",
   kill_replace: "Kill & replace",
   let_it_run: "Let it run",
   nudge: "Nudge",

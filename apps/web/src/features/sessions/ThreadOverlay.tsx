@@ -3,27 +3,27 @@ import { EventStream } from "../../components/EventStream";
 import { OverlayShell } from "../../components/OverlayShell";
 import { useRuns } from "../../stores/run";
 
-/** Lane trace overlay: the subagent's full glass-box trace at 80%, with its
- *  lane controls — stop, pin a finding, kill & replace. The run's session
+/** Thread trace overlay: the subagent's full glass-box trace at 80%, with its
+ *  thread controls — stop, pin a finding, kill & replace. The run's session
  *  keeps streaming underneath. */
-export function LaneOverlay({ laneId }: { laneId: string }) {
-  const { events, deltas, lanes, sendIntent } = useRuns();
-  const lane = lanes.find((l) => l.id === laneId);
-  const live = lane && ["running", "queued", "idle"].includes(lane.status);
+export function ThreadOverlay({ threadId }: { threadId: string }) {
+  const { events, deltas, threads, sendIntent } = useRuns();
+  const thread = threads.find((l) => l.id === threadId);
+  const live = thread && ["running", "queued", "idle"].includes(thread.status);
 
   return (
-    <OverlayShell title={`lane · ${lane?.persona ?? laneId.slice(0, 8)} · ${lane?.status ?? ""}`}>
+    <OverlayShell title={`thread · ${thread?.persona ?? threadId.slice(0, 8)} · ${thread?.status ?? ""}`}>
       <div className="mb-s3 flex gap-s2">
         {live && (
-          <Button variant="outline" size="sm" className="font-mono" onClick={() => void sendIntent("stop_lane", { laneId })}>
-            stop lane
+          <Button variant="outline" size="sm" className="font-mono" onClick={() => void sendIntent("stop_thread", { threadId })}>
+            stop thread
           </Button>
         )}
         <Button
           variant="outline"
           size="sm"
           className="font-mono"
-          onClick={() => void sendIntent("pin_finding", { laneId, payload: { note: "pinned from lane overlay" } })}
+          onClick={() => void sendIntent("pin_finding", { threadId, payload: { note: "pinned from thread overlay" } })}
         >
           pin finding
         </Button>
@@ -32,13 +32,13 @@ export function LaneOverlay({ laneId }: { laneId: string }) {
             variant="destructive"
             size="sm"
             className="font-mono"
-            onClick={() => void sendIntent("kill_replace", { laneId, confirmed: true })}
+            onClick={() => void sendIntent("kill_replace", { threadId, confirmed: true })}
           >
             kill & replace
           </Button>
         )}
       </div>
-      <EventStream events={events} deltas={deltas} laneFilter={laneId} />
+      <EventStream events={events} deltas={deltas} laneFilter={threadId} />
     </OverlayShell>
   );
 }

@@ -3,9 +3,9 @@ import { DownloadIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "../lib/api";
 import { qk } from "../lib/queryKeys";
-import type { ResumableLane, Run } from "../types";
+import type { ResumableThread, Run } from "../types";
 
-/** Continue a past session. The backend keeps each lane's SDK session volume
+/** Continue a past session. The backend keeps each thread's SDK session volume
  *  for 30 days; after that the run is replay-only, so the button appears only
  *  while `resumable` is true. Resume restores the CONVERSATION — un-pushed
  *  file changes are gone by design (workspaces are shredded). */
@@ -20,12 +20,12 @@ export function SessionResume({
 }) {
   const { data } = useQuery({
     queryKey: qk.resumable(run.id),
-    queryFn: () => api.get<{ lanes: ResumableLane[] }>(`/sessions/${run.id}/resumable`),
+    queryFn: () => api.get<{ threads: ResumableThread[] }>(`/sessions/${run.id}/resumable`),
     enabled: !working,
     retry: false,
   });
 
-  const resumable = (data?.lanes ?? []).some((l) => l.resumable);
+  const resumable = (data?.threads ?? []).some((l) => l.resumable);
 
   const resume = async () => {
     const res = await api.post<{ run_id: string }>(`/sessions/${run.id}/resume`, {});

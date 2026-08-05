@@ -25,7 +25,7 @@ export type LaneStatus =
   | "queued" | "running" | "idle" | "interrupted" | "completed"
   | "failed" | "stopped" | "replaced" | "pinned";
 
-export interface Lane {
+export interface Thread {
   id: string;
   persona: string;
   repo_scope: string | null;
@@ -48,7 +48,7 @@ export interface StepEvent {
   /** Present on the live WS payload; replay rows are serialized without it. */
   schema_version?: number;
   run_id: string;
-  lane_id: string;
+  thread_id: string;
   seq: number;
   ts: string;
   kind: StepKind;
@@ -59,13 +59,13 @@ export interface StepEvent {
 
 export type WsMessage =
   | { type: "step"; event: StepEvent }
-  | { type: "lane_status"; lane_id: string; status: string }
+  | { type: "thread_status"; thread_id: string; status: string }
   | { type: "run_stage"; stage: RunStage; available_actions: string[] }
   // The relay wraps typing deltas in an envelope; the payload is one level down.
-  | { type: "delta"; delta: { run_id: string; lane_id: string; kind: StepKind; text: string } }
+  | { type: "delta"; delta: { run_id: string; thread_id: string; kind: StepKind; text: string } }
   | {
       type: "approval_card";
-      approval: { id: string; kind: string; payload: Record<string, unknown>; lane_id: string | null };
+      approval: { id: string; kind: string; payload: Record<string, unknown>; thread_id: string | null };
     }
   | { type: "approval_resolved"; approval_id: string; decision: string };
 
@@ -94,7 +94,7 @@ export interface PlanPayload {
 export interface Approval {
   id: string;
   run_id: string;
-  lane_id: string | null;
+  thread_id: string | null;
   kind: string;
   payload: Record<string, unknown>;
   created_at: string | null;
@@ -102,8 +102,8 @@ export interface Approval {
   expires_at?: string | null;
 }
 
-export interface ResumableLane {
-  lane_id: string;
+export interface ResumableThread {
+  thread_id: string;
   persona: string;
   resumable: boolean;
 }

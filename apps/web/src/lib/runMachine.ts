@@ -2,7 +2,7 @@
  *  session: stage presentation, live-state interaction rules (§1a), watchdog
  *  detection, and the swarm critical path. No React imports. */
 
-import type { Lane, RunStage } from "../types";
+import type { Thread, RunStage } from "../types";
 
 export interface StageMeta {
   label: string;
@@ -55,42 +55,42 @@ export function agentWorking(stage: RunStage): boolean {
 // ------------------------------------------------------------------ watchdog
 export const WATCHDOG_STALE_MS = 3 * 60 * 1000;
 
-/** Run stages where no lane is doing anything — a finished run must never
- *  nag the user to nudge a lane, even if a beat was lost and the row is
+/** Run stages where no thread is doing anything — a finished run must never
+ *  nag the user to nudge a thread, even if a beat was lost and the row is
  *  stranded at "running". The backend's heartbeat fix keeps the row honest,
  *  but the UI must be correct even when a beat slips through. */
 const TERMINAL_STAGES = new Set([
   "completed", "failed", "abandoned", "interrupted",
 ]);
 
-/** A lane is a watchdog candidate when it claims to be active but its
+/** A thread is a watchdog candidate when it claims to be active but its
  *  heartbeat has gone stale — the UI shows "nudge / let it run" (§4). */
-export function isStaleLane(lane: Lane, now: number): boolean {
-  if (lane.status !== "running" && lane.status !== "queued") return false;
-  if (!lane.heartbeat_at) return lane.status === "running";
-  return now - Date.parse(lane.heartbeat_at) > WATCHDOG_STALE_MS;
+export function isStaleThread(thread: Thread, now: number): boolean {
+  if (thread.status !== "running" && thread.status !== "queued") return false;
+  if (!thread.heartbeat_at) return thread.status === "running";
+  return now - Date.parse(thread.heartbeat_at) > WATCHDOG_STALE_MS;
 }
 
-/** Stale lanes for a run, suppressing the watchdog once the run is terminal.
+/** Stale threads for a run, suppressing the watchdog once the run is terminal.
  *  A completed run with a row stranded at "running" (a lost status-change
  *  beat) would otherwise show "heartbeat stale — nudge" forever. */
-export function staleLanes(
-  lanes: Lane[], now: number, stage: string,
-): Lane[] {
+export function staleThreads(
+  threads: Thread[], now: number, stage: string,
+): Thread[] {
   if (TERMINAL_STAGES.has(stage)) return [];
-  return lanes.filter((l) => isStaleLane(l, now));
+  return threads.filter((l) => isStaleThread(l, now));
 }
 
 // ------------------------------------------------------------- critical path
 /** Critical path (§4 swarm view): the chain whose completion gates the run.
- *  v1 heuristic — among ACTIVE lanes, the one carrying the most work (steps)
- *  is the head of the critical path; ties break by oldest lane. Terminal lanes
+ *  v1 heuristic — among ACTIVE threads, the one carrying the most work (steps)
+ *  is the head of the critical path; ties break by oldest thread. Terminal threads
  *  are never on it. */
-export function criticalLaneIds(lanes: Lane[]): Set<string> {
-  const active = lanes.filter(
+export function criticalThreadIds(threads: Thread[]): Set<string> {
+  const active = threads.filter(
     (l) => l.status === "running" || l.status === "queued" || l.status === "idle",
   );
-  if (active.length < 2) return new Set(); // a single lane is just "the lane"
+  if (active.length < 2) return new Set(); // a single thread is just "the thread"
   const head = [...active].sort(
     (a, b) => b.steps - a.steps || (a.created_at ?? "").localeCompare(b.created_at ?? ""),
   )[0];
@@ -103,7 +103,7 @@ export interface StreamItem {
   kind: string;
   title: string;
   text: string;
-  laneId: string;
+  threadId: string;
   ok: boolean | null;
   /** Still streaming — drives the open/closed state of collapsible sections. */
   live: boolean;
@@ -120,32 +120,32 @@ function isPlumbing(e: { kind: string }): boolean {
 }
 
 /** Fold WS typing deltas + stored events into display items. Deltas for the
- *  same (lane, kind) collapse into one growing bubble; stored events pass
+ *  same (thread, kind) collapse into one growing bubble; stored events pass
  *  through untouched. Pure — tested without React. */
 export function foldStream(
-  events: { lane_id: string; kind: string; title: string; detail: Record<string, unknown>; seq: number }[],
-  deltas: { lane_id: string; kind: string; text: string }[],
+  events: { thread_id: string; kind: string; title: string; detail: Record<string, unknown>; seq: number }[],
+  deltas: { thread_id: string; kind: string; text: string }[],
 ): StreamItem[] {
   // The key must distinguish a user-authored message from an agent-authored
-  // one even when they share (lane_id, seq) — which happens today because the
+  // one even when they share (thread_id, seq) — which happens today because the
   // worker and the backend each run their own seq allocator (worker/worker/
   // normalize.py and backend/app/api/runs.py:_persist_user_message). Without
   // the role in the key, two messages on the same seq collapse into one
   // React component instance and the agent's prose renders inside the
   // user's green bubble.
   const items: StreamItem[] = events.filter((e) => !isPlumbing(e)).map((e) => ({
-    key: `e-${e.lane_id}-${e.seq}-${e.detail.role ?? "agent"}`,
+    key: `e-${e.thread_id}-${e.seq}-${e.detail.role ?? "agent"}`,
     kind: e.kind,
     title: e.title,
     text: String(e.detail.text ?? e.detail.output ?? ""),
-    laneId: e.lane_id,
+    threadId: e.thread_id,
     ok: typeof e.detail.ok === "boolean" ? (e.detail.ok as boolean) : null,
     live: false,
     role: e.detail.role === "user" ? "user" : e.detail.role === "agent" ? "agent" : null,
   }));
   const live = new Map<string, StreamItem>();
   for (const d of deltas) {
-    const k = `${d.lane_id}:${d.kind}`;
+    const k = `${d.thread_id}:${d.kind}`;
     const existing = live.get(k);
     if (existing) {
       existing.text += d.text ?? "";
@@ -155,7 +155,7 @@ export function foldStream(
         kind: d.kind,
         title: d.kind === "thinking" ? "thinking…" : "typing…",
         text: d.text ?? "",
-        laneId: d.lane_id,
+        threadId: d.thread_id,
         ok: null,
         live: true,
         role: null,

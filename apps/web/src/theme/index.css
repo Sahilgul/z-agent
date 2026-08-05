@@ -259,7 +259,7 @@
     animation: none;
   }
 
-  /* lane river (monitor signature) — streaming channel per lane */
+  /* thread river (monitor signature) — streaming channel per thread */
   .river-track {
     position: relative;
     height: 2px;

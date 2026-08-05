@@ -1,48 +1,48 @@
 import { Button } from "@/components/ui/button";
-import { criticalLaneIds, staleLanes } from "../../lib/runMachine";
-import { LaneTile } from "../../components/LaneTile";
-import type { Lane, RunStage } from "../../types";
+import { criticalThreadIds, staleThreads } from "../../lib/runMachine";
+import { ThreadTile } from "../../components/ThreadTile";
+import type { Thread, RunStage } from "../../types";
 
 /** Swarm strip (monitor v2.3): the lead chip plus one compact tile per
- *  worker in a horizontal scroll row — the stream gets the space, lanes
+ *  worker in a horizontal scroll row — the stream gets the space, threads
  *  stay glanceable. Watchdog alerts pin below the strip.
  *
- * Hidden for a single-lane run (ask mode): one researcher IS the chat
- * partner, so a "swarm of one" plus its destructive lane controls is dead
- * weight above the conversation. The main stream already is that lane's
+ * Hidden for a single-thread run (ask mode): one researcher IS the chat
+ * partner, so a "swarm of one" plus its destructive thread controls is dead
+ * weight above the conversation. The main stream already is that thread's
  * trace, so nothing becomes unreachable. */
 export function SwarmView({
-  lanes,
+  threads,
   now,
   stage,
-  onOpenLane,
+  onOpenThread,
   onNudge,
   onLetItRun,
 }: {
-  lanes: Lane[];
+  threads: Thread[];
   now: number;
   stage: RunStage;
-  onOpenLane: (laneId: string) => void;
-  onNudge: (laneId: string) => void;
-  onLetItRun: (laneId: string) => void;
+  onOpenThread: (threadId: string) => void;
+  onNudge: (threadId: string) => void;
+  onLetItRun: (threadId: string) => void;
 }) {
-  const lead = lanes.find((l) => l.persona === "lead");
-  const workers = lanes.filter((l) => l !== lead);
+  const lead = threads.find((l) => l.persona === "lead");
+  const workers = threads.filter((l) => l !== lead);
 
-  // A real swarm is more than one worker lane, or any lead lane (the lead
+  // A real swarm is more than one worker thread, or any lead thread (the lead
   // orchestrates a fan-out and is never the sole voice in an ask chat).
   const isSwarm = workers.length > 1 || lead !== undefined;
   if (!isSwarm) return null;
 
-  const critical = criticalLaneIds(lanes);
+  const critical = criticalThreadIds(threads);
   // Terminal runs never nag: a finished run with a row stranded at "running"
   // (a lost status-change beat) would otherwise show "heartbeat stale"
   // forever. The backend's heartbeat fix keeps the row honest; this keeps
   // the UI correct even when a beat slips through.
-  const stale = staleLanes(lanes, now, stage);
+  const stale = staleThreads(threads, now, stage);
 
   return (
-    <section aria-label="swarm lanes" data-testid="swarm-view" className="flex-none border-b border-hairline">
+    <section aria-label="swarm threads" data-testid="swarm-view" className="flex-none border-b border-hairline">
       <div className="flex items-stretch gap-s2 overflow-x-auto p-s3">
         {lead && (
           <div className="inline-flex flex-none items-center gap-s2 self-center rounded-md border border-blue px-s3 py-2 font-mono text-[11px] font-semibold text-ink-primary">
@@ -55,12 +55,12 @@ export function SwarmView({
         <div className="flex max-h-[180px] min-w-0 flex-1 flex-wrap content-start gap-s2 overflow-y-auto">
           {workers.map((l) => (
             <div key={l.id} className="w-[240px] flex-none">
-              <LaneTile lane={l} critical={critical.has(l.id)} stale={stale.includes(l)} onOpen={onOpenLane} />
+              <ThreadTile thread={l} critical={critical.has(l.id)} stale={stale.includes(l)} onOpen={onOpenThread} />
             </div>
           ))}
         </div>
       </div>
-      {/* One banner for every stale lane — a row each would overflow the page. */}
+      {/* One banner for every stale thread — a row each would overflow the page. */}
       {stale.length > 0 && (
         <div
           data-testid="watchdog-banner"

@@ -38,7 +38,7 @@ function PushOptIn() {
 }
 
 /** Tool-permission asks for the open run, docked in the session above the
- *  composer: gated autonomy stops the lane until you allow or deny, so the
+ *  composer: gated autonomy stops the thread until you allow or deny, so the
  *  decision belongs where you are already watching. Optimistic w/ rollback. */
 /** Minutes left before the worker denies on its own — the card is not an open
  *  invitation, so say so rather than letting it silently stop working. */
@@ -89,7 +89,7 @@ export function ApprovalQueue({ runId }: { runId: string }) {
           <div className="mb-s2 flex items-center justify-between">
             <span className="font-mono text-[12.5px] font-semibold text-blue-bright">{a.kind}</span>
             <span className="font-mono text-[10.5px] text-ink-faint">
-              {a.lane_id ? `lane ${a.lane_id.slice(0, 8)}` : "run"}
+              {a.thread_id ? `thread ${a.thread_id.slice(0, 8)}` : "run"}
               {expiryLabel(a.expires_at) ? ` · ${expiryLabel(a.expires_at)}` : ""}
             </span>
           </div>

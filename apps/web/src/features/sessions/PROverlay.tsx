@@ -10,7 +10,7 @@ import { useRuns } from "../../stores/run";
 interface EvidencePackage {
   plan_title: string;
   plan_steps: { index: number; title: string; status: string }[];
-  lanes: { persona: string; status: string; cost_usd: number }[];
+  threads: { persona: string; status: string; cost_usd: number }[];
   test_signals: { title: string; ts: string }[];
   total_cost_usd: number;
   total_tokens: number;
@@ -64,7 +64,7 @@ export function PROverlay() {
               <b className="tabular">{pkg.plan_steps.length}</b> plan steps
             </div>
             <div>
-              <b className="tabular">{pkg.lanes.length}</b> lanes
+              <b className="tabular">{pkg.threads.length}</b> threads
             </div>
             <div>
               <b className="tabular">{pkg.test_signals.length}</b> test signals

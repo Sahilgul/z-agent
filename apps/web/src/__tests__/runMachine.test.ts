@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   agentWorking,
-  criticalLaneIds,
+  criticalThreadIds,
   foldStream,
-  isStaleLane,
+  isStaleThread,
   stageMeta,
   visibleActions,
   WATCHDOG_STALE_MS,
 } from "../lib/runMachine";
-import type { Lane } from "../types";
+import type { Thread } from "../types";
 
 describe("stageMeta", () => {
   it("maps rail stages to indexes", () => {
@@ -41,52 +41,52 @@ describe("visibleActions (§1a live-state rules)", () => {
   });
 });
 
-describe("isStaleLane (watchdog)", () => {
-  const base: Lane = {
+describe("isStaleThread (watchdog)", () => {
+  const base: Thread = {
     id: "l1", persona: "explorer", repo_scope: null, status: "running",
     cost_usd: 0, budget_usd: 5, steps: 3, forked_from_session_id: null,
     heartbeat_at: null, has_container: true, created_at: null, finished_at: null,
   };
-  it("flags a running lane with no heartbeat at all", () => {
-    expect(isStaleLane(base, Date.now())).toBe(true);
+  it("flags a running thread with no heartbeat at all", () => {
+    expect(isStaleThread(base, Date.now())).toBe(true);
   });
   it("flags a heartbeat older than the stale window", () => {
     const now = Date.now();
-    const lane = { ...base, heartbeat_at: new Date(now - WATCHDOG_STALE_MS - 1000).toISOString() };
-    expect(isStaleLane(lane, now)).toBe(true);
+    const thread = { ...base, heartbeat_at: new Date(now - WATCHDOG_STALE_MS - 1000).toISOString() };
+    expect(isStaleThread(thread, now)).toBe(true);
   });
-  it("never flags terminal or fresh lanes", () => {
+  it("never flags terminal or fresh threads", () => {
     const now = Date.now();
-    expect(isStaleLane({ ...base, status: "completed" }, now)).toBe(false);
-    expect(isStaleLane({ ...base, heartbeat_at: new Date(now).toISOString() }, now)).toBe(false);
+    expect(isStaleThread({ ...base, status: "completed" }, now)).toBe(false);
+    expect(isStaleThread({ ...base, heartbeat_at: new Date(now).toISOString() }, now)).toBe(false);
   });
 });
 
-describe("criticalLaneIds", () => {
-  const lane = (id: string, steps: number, status: Lane["status"] = "running"): Lane => ({
+describe("criticalThreadIds", () => {
+  const thread = (id: string, steps: number, status: Thread["status"] = "running"): Thread => ({
     id, persona: "explorer", repo_scope: null, status, cost_usd: 0, budget_usd: 5,
     steps, forked_from_session_id: null, heartbeat_at: null, has_container: true,
     created_at: null, finished_at: null,
   });
-  it("picks the busiest active lane", () => {
-    const ids = criticalLaneIds([lane("a", 3), lane("b", 9), lane("c", 1)]);
+  it("picks the busiest active thread", () => {
+    const ids = criticalThreadIds([thread("a", 3), thread("b", 9), thread("c", 1)]);
     expect([...ids]).toEqual(["b"]);
   });
-  it("ignores terminal lanes even when they have more steps", () => {
-    const ids = criticalLaneIds([lane("a", 3), lane("b", 99, "completed")]);
-    expect(ids.size).toBe(0); // only one active lane left → just "the lane"
+  it("ignores terminal threads even when they have more steps", () => {
+    const ids = criticalThreadIds([thread("a", 3), thread("b", 99, "completed")]);
+    expect(ids.size).toBe(0); // only one active thread left → just "the thread"
   });
-  it("empty for a single lane", () => {
-    expect(criticalLaneIds([lane("a", 5)]).size).toBe(0);
+  it("empty for a single thread", () => {
+    expect(criticalThreadIds([thread("a", 5)]).size).toBe(0);
   });
 });
 
 describe("foldStream", () => {
-  it("collapses deltas by lane+kind into one growing bubble", () => {
+  it("collapses deltas by thread+kind into one growing bubble", () => {
     const items = foldStream([], [
-      { lane_id: "l1", kind: "thinking", text: "let me " },
-      { lane_id: "l1", kind: "thinking", text: "check" },
-      { lane_id: "l1", kind: "message", text: "answer" },
+      { thread_id: "l1", kind: "thinking", text: "let me " },
+      { thread_id: "l1", kind: "thinking", text: "check" },
+      { thread_id: "l1", kind: "message", text: "answer" },
     ]);
     expect(items).toHaveLength(2);
     expect(items[0].text).toBe("let me check");
@@ -94,21 +94,21 @@ describe("foldStream", () => {
   });
   it("keeps stored events in order before live bubbles", () => {
     const items = foldStream(
-      [{ lane_id: "l1", kind: "command", title: "grep x", detail: { output: "hit" }, seq: 0 }],
-      [{ lane_id: "l1", kind: "thinking", text: "…" }],
+      [{ thread_id: "l1", kind: "command", title: "grep x", detail: { output: "hit" }, seq: 0 }],
+      [{ thread_id: "l1", kind: "thinking", text: "…" }],
     );
     expect(items.map((i) => i.kind)).toEqual(["command", "thinking"]);
     expect(items[0].text).toBe("hit");
   });
   it("gives distinct keys to user and agent messages sharing a seq", () => {
     // The worker and the backend each allocate seq independently, so a user
-    // message and an agent message can land on the same (lane_id, seq). The
+    // message and an agent message can land on the same (thread_id, seq). The
     // key must distinguish them or React reconciles them onto one component
     // and the agent's prose renders inside the user's bubble.
     const items = foldStream(
       [
-        { lane_id: "l1", kind: "message", title: "q", detail: { text: "my q", role: "user" }, seq: 0 },
-        { lane_id: "l1", kind: "message", title: "a", detail: { text: "my a", role: "agent" }, seq: 0 },
+        { thread_id: "l1", kind: "message", title: "q", detail: { text: "my q", role: "user" }, seq: 0 },
+        { thread_id: "l1", kind: "message", title: "a", detail: { text: "my a", role: "agent" }, seq: 0 },
       ],
       [],
     );

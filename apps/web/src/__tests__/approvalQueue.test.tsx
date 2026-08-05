@@ -18,7 +18,7 @@ vi.mock("../lib/push", () => ({
 }));
 
 const card = {
-  id: "a-1", run_id: "run-1234567890", lane_id: "lane-abcdef123456",
+  id: "a-1", run_id: "run-1234567890", thread_id: "thread-abcdef123456",
   kind: "Bash", payload: { cmd: "npm test" },
 };
 

@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ActionCard } from "../../components/ActionCard";
 import { ApprovalQueue } from "../../components/ApprovalQueue";
 import { EventStream } from "../../components/EventStream";
-import { LaneChips } from "../../components/LaneChips";
+import { ThreadChips } from "../../components/ThreadChips";
 import { PipelineBar } from "../../components/PipelineBar";
 import { SessionResume } from "../../components/SessionResume";
 import { SessionTabs } from "../../components/SessionTabs";
@@ -21,7 +21,7 @@ import { qk } from "../../lib/queryKeys";
 import { useRuns } from "../../stores/run";
 import { useUi } from "../../stores/ui";
 import { SwarmView } from "../swarm/SwarmView";
-import { LaneOverlay } from "./LaneOverlay";
+import { ThreadOverlay } from "./ThreadOverlay";
 import { PlanOverlay } from "./PlanOverlay";
 import { PROverlay } from "./PROverlay";
 import type { Run } from "../../types";
@@ -92,7 +92,7 @@ export function SessionsScreen() {
     refreshLanes,
     createRun,
     current,
-    lanes,
+    threads,
     events,
     deltas,
     socketConnected,
@@ -119,9 +119,9 @@ export function SessionsScreen() {
     setPendingMode(null);
   }, [current?.id]);
 
-  // Lane heartbeats age against wall time; re-render occasionally so stale
-  // lanes surface without waiting for the next socket message. Refreshing the
-  // lanes themselves on the same tick keeps heartbeat_at current — otherwise
+  // Thread heartbeats age against wall time; re-render occasionally so stale
+  // threads surface without waiting for the next socket message. Refreshing the
+  // threads themselves on the same tick keeps heartbeat_at current — otherwise
   // the watchdog judges liveness from the snapshot taken when the run opened.
   useEffect(() => {
     if (!current) return;
@@ -161,7 +161,7 @@ export function SessionsScreen() {
     try {
       // A mode switch takes effect on the next message, not immediately: the
       // current turn finishes undisturbed, and this send runs the new
-      // blueprint (which respawns the lane on the prior session volume).
+      // blueprint (which respawns the thread on the prior session volume).
       if (current && pendingMode && pendingMode !== current.mode) {
         await sendIntent("switch_mode", { payload: { mode: pendingMode } });
         setPendingMode(null);
@@ -240,12 +240,12 @@ export function SessionsScreen() {
 
           <div className="flex min-h-0 flex-1 flex-col px-s5">
             <SwarmView
-              lanes={lanes}
+              threads={threads}
               now={now}
               stage={current.stage}
-              onOpenLane={(laneId) => pushOverlay({ kind: "lane", laneId })}
-              onNudge={(laneId) => void sendIntent("nudge", { laneId, text: "status check — report progress" })}
-              onLetItRun={(laneId) => void sendIntent("let_it_run", { laneId })}
+              onOpenThread={(threadId) => pushOverlay({ kind: "thread", threadId })}
+              onNudge={(threadId) => void sendIntent("nudge", { threadId, text: "status check — report progress" })}
+              onLetItRun={(threadId) => void sendIntent("let_it_run", { threadId })}
             />
 
             {current.auto_summary && (
@@ -369,12 +369,12 @@ export function SessionsScreen() {
               }
             />
             {current ? (
-              <LaneChips lanes={lanes} onOpen={(laneId) => pushOverlay({ kind: "lane", laneId })} />
+              <ThreadChips threads={threads} onOpen={(threadId) => pushOverlay({ kind: "thread", threadId })} />
             ) : mode === "agent-rnd" ? (
               <Input
                 type="number"
                 min={1}
-                placeholder="lanes"
+                placeholder="threads"
                 value={fanout}
                 onChange={(e) => setFanout(e.target.value === "" ? "" : Number(e.target.value))}
                 title="swarm width — the Lead still authors the slices"
@@ -390,8 +390,8 @@ export function SessionsScreen() {
       </section>
 
       {overlays.map((o, i) =>
-        o.kind === "lane" ? (
-          <LaneOverlay key={`lane-${o.laneId}-${i}`} laneId={o.laneId} />
+        o.kind === "thread" ? (
+          <ThreadOverlay key={`thread-${o.threadId}-${i}`} threadId={o.threadId} />
         ) : o.kind === "plan" ? (
           <PlanOverlay key={`plan-${i}`} />
         ) : (

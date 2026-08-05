@@ -1,30 +1,30 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { LaneChips } from "../components/LaneChips";
-import type { Lane } from "../types";
+import { ThreadChips } from "../components/ThreadChips";
+import type { Thread } from "../types";
 
-const lane = (
+const thread = (
   id: string,
   persona = "explorer",
-  status: Lane["status"] = "running",
-): Lane => ({
+  status: Thread["status"] = "running",
+): Thread => ({
   id, persona, repo_scope: null, status, cost_usd: 0, budget_usd: 5,
   steps: 3, forked_from_session_id: null, heartbeat_at: null,
   has_container: true, created_at: null, finished_at: null,
 });
 
-describe("LaneChips", () => {
-  it("hides for a single worker lane (ask mode)", () => {
+describe("ThreadChips", () => {
+  it("hides for a single worker thread (ask mode)", () => {
     const { container } = render(
-      <LaneChips lanes={[lane("l1", "researcher")]} onOpen={() => {}} />,
+      <ThreadChips threads={[thread("l1", "researcher")]} onOpen={() => {}} />,
     );
-    expect(container.querySelector("[data-testid='lane-chips']")).toBeNull();
+    expect(container.querySelector("[data-testid='thread-chips']")).toBeNull();
   });
 
-  it("renders one chip per worker lane for a real swarm", () => {
+  it("renders one chip per worker thread for a real swarm", () => {
     render(
-      <LaneChips
-        lanes={[lane("l1", "explorer"), lane("l2", "researcher")]}
+      <ThreadChips
+        threads={[thread("l1", "explorer"), thread("l2", "researcher")]}
         onOpen={() => {}}
       />,
     );
@@ -32,10 +32,10 @@ describe("LaneChips", () => {
     expect(screen.getByText("researcher")).toBeInTheDocument();
   });
 
-  it("renders a lead chip when a lead lane is present", () => {
+  it("renders a lead chip when a lead thread is present", () => {
     render(
-      <LaneChips
-        lanes={[lane("lead", "lead"), lane("l1", "researcher")]}
+      <ThreadChips
+        threads={[thread("lead", "lead"), thread("l1", "researcher")]}
         onOpen={() => {}}
       />,
     );

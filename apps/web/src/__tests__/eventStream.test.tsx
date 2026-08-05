@@ -6,7 +6,7 @@ import type { StepEvent } from "../types";
 const ev = (seq: number, kind: StepEvent["kind"], title: string, detail: Record<string, unknown> = {}): StepEvent => ({
   schema_version: 1,
   run_id: "r1",
-  lane_id: "l1",
+  thread_id: "l1",
   seq,
   ts: "2026-08-01T00:00:00Z",
   kind,
@@ -32,11 +32,11 @@ describe("EventStream", () => {
     expect(screen.getByText(/no trace yet/)).toBeInTheDocument();
   });
 
-  it("filters to one lane in overlay mode", () => {
-    const other = { ...ev(0, "command", "other lane cmd"), lane_id: "l2" };
+  it("filters to one thread in overlay mode", () => {
+    const other = { ...ev(0, "command", "other thread cmd"), thread_id: "l2" };
     render(<EventStream events={[ev(0, "command", "my cmd"), other]} deltas={[]} laneFilter="l1" />);
     expect(screen.getByText("my cmd")).toBeInTheDocument();
-    expect(screen.queryByText("other lane cmd")).not.toBeInTheDocument();
+    expect(screen.queryByText("other thread cmd")).not.toBeInTheDocument();
   });
 
   it("renders markdown in messages instead of printing it raw", () => {
@@ -52,12 +52,12 @@ describe("EventStream", () => {
   });
 
   it("renders GFM tables into a scrollable frame", () => {
-    const table = ["| lane | cost |", "| --- | --- |", "| researcher | $0.02 |"].join("\n");
+    const table = ["| thread | cost |", "| --- | --- |", "| researcher | $0.02 |"].join("\n");
     const { container } = render(
       <EventStream events={[ev(0, "message", "costs", { text: table })]} deltas={[]} />,
     );
     expect(container.querySelector("table")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "lane" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "thread" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "researcher" })).toBeInTheDocument();
     // Wide tables must scroll in their own frame; the stream pane clips X.
     expect(container.querySelector(".md-scroll > table")).toBeInTheDocument();

@@ -4,10 +4,10 @@ import { api } from "../lib/api";
 import { qk } from "../lib/queryKeys";
 import { queryClient } from "../lib/queryClient";
 import { RunSocket } from "../lib/ws";
-import type { Lane, Run, StepEvent, WsMessage } from "../types";
+import type { Thread, Run, StepEvent, WsMessage } from "../types";
 
 interface Delta {
-  lane_id: string;
+  thread_id: string;
   kind: string;
   text: string;
 }
@@ -16,7 +16,7 @@ interface RunState {
   runs: Run[];
   runsLoaded: boolean;
   current: Run | null;
-  lanes: Lane[];
+  threads: Thread[];
   events: StepEvent[];
   deltas: Delta[];
   socketConnected: boolean;
@@ -24,7 +24,7 @@ interface RunState {
   openRun: (runId: string) => Promise<void>;
   closeRun: () => void;
   refreshLanes: () => Promise<void>;
-  sendIntent: (intent: string, opts?: { laneId?: string; text?: string; confirmed?: boolean; payload?: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+  sendIntent: (intent: string, opts?: { threadId?: string; text?: string; confirmed?: boolean; payload?: Record<string, unknown> }) => Promise<Record<string, unknown>>;
   createRun: (body: { mode: string; task: string; repo?: string; fanout?: number }) => Promise<Run>;
 }
 
@@ -34,7 +34,7 @@ export const useRuns = create<RunState>((set, get) => ({
   runs: [],
   runsLoaded: false,
   current: null,
-  lanes: [],
+  threads: [],
   events: [],
   deltas: [],
   socketConnected: false,
@@ -51,12 +51,12 @@ export const useRuns = create<RunState>((set, get) => ({
   openRun: async (runId) => {
     socket?.close();
     try {
-      const [run, lanes, events] = await Promise.all([
+      const [run, threads, events] = await Promise.all([
         api.get<Run>(`/runs/${runId}`),
-        api.get<Lane[]>(`/runs/${runId}/lanes`),
+        api.get<Thread[]>(`/runs/${runId}/threads`),
         api.get<StepEvent[]>(`/runs/${runId}/events`),
       ]);
-      set({ current: run, lanes, events, deltas: [] });
+      set({ current: run, threads, events, deltas: [] });
 
       socket = new RunSocket(
         runId,
@@ -69,15 +69,15 @@ export const useRuns = create<RunState>((set, get) => ({
             set({
               events: [...s.events, msg.event],
               deltas: s.deltas.filter(
-                (d) => !(d.lane_id === msg.event.lane_id && d.kind === msg.event.kind),
+                (d) => !(d.thread_id === msg.event.thread_id && d.kind === msg.event.kind),
               ),
             });
           } else if (msg.type === "delta") {
             set({ deltas: [...s.deltas, msg.delta] });
-          } else if (msg.type === "lane_status") {
+          } else if (msg.type === "thread_status") {
             set({
-              lanes: s.lanes.map((l) =>
-                l.id === msg.lane_id ? { ...l, status: msg.status as Lane["status"] } : l,
+              threads: s.threads.map((l) =>
+                l.id === msg.thread_id ? { ...l, status: msg.status as Thread["status"] } : l,
               ),
             });
           } else if (msg.type === "approval_card" || msg.type === "approval_resolved") {
@@ -88,8 +88,8 @@ export const useRuns = create<RunState>((set, get) => ({
             set({
               current: { ...s.current, stage: msg.stage, available_actions: msg.available_actions },
             });
-            // lanes move with stage transitions — refresh silently
-            void api.get<Lane[]>(`/runs/${runId}/lanes`).then((lanes) => set({ lanes }));
+            // threads move with stage transitions — refresh silently
+            void api.get<Thread[]>(`/runs/${runId}/threads`).then((threads) => set({ threads }));
           }
         },
         (connected) => set({ socketConnected: connected }),
@@ -106,7 +106,7 @@ export const useRuns = create<RunState>((set, get) => ({
   closeRun: () => {
     socket?.close();
     socket = null;
-    set({ current: null, lanes: [], events: [], deltas: [], socketConnected: false });
+    set({ current: null, threads: [], events: [], deltas: [], socketConnected: false });
   },
 
   // Lanes carry heartbeat_at, which the watchdog reads against wall time —
@@ -115,8 +115,8 @@ export const useRuns = create<RunState>((set, get) => ({
     const run = get().current;
     if (!run) return;
     try {
-      const lanes = await api.get<Lane[]>(`/runs/${run.id}/lanes`);
-      set({ lanes });
+      const threads = await api.get<Thread[]>(`/runs/${run.id}/threads`);
+      set({ threads });
     } catch {
       /* a failed poll just leaves the previous snapshot in place */
     }
@@ -129,7 +129,7 @@ export const useRuns = create<RunState>((set, get) => ({
       const res = await api.post<Record<string, unknown>>(`/runs/${run.id}/intent`, {
         intent,
         source: opts.text ? "text" : "button",
-        lane_id: opts.laneId ?? null,
+        thread_id: opts.threadId ?? null,
         text: opts.text ?? null,
         confirmed: opts.confirmed ?? false,
         payload: opts.payload ?? {},

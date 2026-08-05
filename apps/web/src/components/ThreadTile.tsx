@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
-import type { Lane, LaneStatus } from "../types";
+import type { Thread, LaneStatus } from "../types";
 
-/** Lane river row (monitor signature): each lane is a streaming channel —
+/** Thread river row (monitor signature): each thread is a streaming channel —
  *  identity on the left, the river track in the middle with an activity
  *  pulse flowing left→right while it works, step/cost readout on the right.
  *  critical = on the swarm's critical path; stale = heartbeat lost. */
@@ -23,24 +23,24 @@ const PULSE: Partial<Record<LaneStatus, string>> = {
   idle: "text-blue-bright",
 };
 
-export function LaneTile({
-  lane,
+export function ThreadTile({
+  thread,
   critical,
   stale,
   onOpen,
 }: {
-  lane: Lane;
+  thread: Thread;
   critical?: boolean;
   stale?: boolean;
-  onOpen: (laneId: string) => void;
+  onOpen: (threadId: string) => void;
 }) {
-  const pulse = PULSE[lane.status];
+  const pulse = PULSE[thread.status];
   return (
     <button
       type="button"
-      onClick={() => onOpen(lane.id)}
-      data-testid={`lane-tile-${lane.id}`}
-      title={`open ${lane.persona} trace`}
+      onClick={() => onOpen(thread.id)}
+      data-testid={`thread-tile-${thread.id}`}
+      title={`open ${thread.persona} trace`}
       className={cn(
         "grid w-full grid-cols-[minmax(120px,180px)_1fr_auto] items-center gap-s4 rounded-md border border-hairline bg-bg-module px-s4 py-2.5 text-left transition-colors duration-fast hover:border-blue-bright",
         critical && "border-green shadow-[0_0_10px_color-mix(in_srgb,var(--color-green)_30%,transparent)]",
@@ -48,18 +48,18 @@ export function LaneTile({
       )}
     >
       <span className="flex min-w-0 items-center gap-s2">
-        <span className={LED[lane.status] ?? "led led--off"} aria-hidden="true" />
+        <span className={LED[thread.status] ?? "led led--off"} aria-hidden="true" />
         <span className="min-w-0">
-          <span className="block truncate font-mono text-[12px] font-semibold text-ink-primary">{lane.persona}</span>
-          <span className="block truncate text-[11px] text-ink-faint">{lane.repo_scope ?? "read-only"}</span>
+          <span className="block truncate font-mono text-[12px] font-semibold text-ink-primary">{thread.persona}</span>
+          <span className="block truncate text-[11px] text-ink-faint">{thread.repo_scope ?? "read-only"}</span>
         </span>
       </span>
       <span className="river-track" aria-hidden="true">
         {pulse && <span className={cn("river-pulse", pulse)} />}
       </span>
       <span className="flex items-center gap-s3 font-mono text-[10.5px] tabular text-ink-faint">
-        <span>{lane.steps} steps</span>
-        <span>${lane.cost_usd.toFixed(2)}</span>
+        <span>{thread.steps} steps</span>
+        <span>${thread.cost_usd.toFixed(2)}</span>
       </span>
     </button>
   );
