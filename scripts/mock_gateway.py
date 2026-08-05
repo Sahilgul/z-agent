@@ -83,25 +83,50 @@ def _has_tool_result(body: dict) -> bool:
     return any(m.get("role") == "tool" for m in body.get("messages", []))
 
 
-def _wants_tool_call(body: dict) -> bool:
-    return bool(body.get("tools")) and "tools" in _last_user_text(body).lower() \
-        and not _has_tool_result(body)
+def _wanted_tool(body: dict) -> tuple[str, dict] | None:
+    """Pick a canned tool call from the engine's REAL roster (RG validation).
+
+    file_read  -> read-only investigation prompts (ask mode surface)
+    file_write -> mutating prompts (drives the approval gate interrupt)
+    """
+    if not body.get("tools") or _has_tool_result(body):
+        return None
+    text = _last_user_text(body).lower()
+    available = {t.get("function", {}).get("name") for t in body.get("tools", [])}
+    if any(k in text for k in ("append", "edit", "write", "modify")) and "file_write" in available:
+        return "file_write", {"file_path": "README.md",
+                              "content": "# stamped workspace\n# engine gate probe\n"}
+    if any(k in text for k in ("tools", "find the code", "read it", "investigation",
+                               "deep read-only")) and "file_read" in available:
+        return "file_read", {"file_path": "README.md"}
+    return None
+
+
+def _reply_text(body: dict) -> str:
+    """The canned answer; echo the nudge canary when present (g check)."""
+    all_text = json.dumps(body.get("messages", []))
+    if "PANGOLIN" in all_text:
+        return CANSWER + " Steering nudge acknowledged: PANGOLIN."
+    if body.get("response_format", {}).get("type") == "json_schema":
+        return json.dumps({"goal": "mock plan", "steps": [{"step": 1, "action": "mock"}]})
+    return CANSWER
 
 
 def _reply_plan(body: dict) -> tuple[list[dict], str | None]:
     """(deltas, finish): what to stream for this request."""
-    if _wants_tool_call(body):
+    wanted = _wanted_tool(body)
+    if wanted:
+        name, args = wanted
         return [
             {"role": "assistant", "content": ""},
             {"tool_calls": [{
                 "index": 0,
                 "id": f"call_{uuid.uuid4().hex[:8]}",
                 "type": "function",
-                "function": {"name": "code_search",
-                             "arguments": json.dumps({"pattern": "mock", "path": "."})},
+                "function": {"name": name, "arguments": json.dumps(args)},
             }]},
         ], "tool_calls"
-    return [{"role": "assistant", "content": CANSWER}], "stop"
+    return [{"role": "assistant", "content": _reply_text(body)}], "stop"
 
 
 class Handler(BaseHTTPRequestHandler):
