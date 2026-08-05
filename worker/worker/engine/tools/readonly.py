@@ -1,0 +1,205 @@
+"""Read-only tools (plan §6 tools/, Phase 2 scope).
+
+Phase 2 ships ONLY read-only tools — writes (file_edit, file_write,
+terminal_exec mutating) arrive in Phase 3 with the approval + verbatim
+contracts. This keeps the ask-mode loop safe to run while the approval
+architecture is still being built.
+
+Every tool returns a dict shaped for the event emitter:
+  {kind: "success"|"error", ok: bool, output: str, ...}
+The redactor (security.redact) is applied at the event-emission boundary,
+NOT inside tools, so raw outputs remain available to the agent for reasoning.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import fnmatch
+import os
+import re
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from langchain_core.tools import tool
+
+_BASH_TIMEOUT_S = 30.0
+_BASH_MAX_OUTPUT = 16 * 1024
+_MAX_READ_LINES = 2000
+
+
+def _workspace() -> Path:
+    return Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
+
+
+# --- file_read ---
+
+@tool
+def file_read(file_path: str, offset: int = 1, limit: int = _MAX_READ_LINES) -> str:
+    """Read a file from the workspace. Returns line-numbered text (1-indexed).
+
+    Args:
+        file_path: path relative to the workspace root, or absolute.
+        offset: 1-indexed line to start reading from.
+        limit: max number of lines to return.
+    """
+    p = _resolve(file_path)
+    if not p.exists():
+        return f"error: file not found: {file_path}"
+    if p.is_dir():
+        return f"error: {file_path} is a directory"
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"error: {exc}"
+    lines = text.splitlines()
+    start = max(0, offset - 1)
+    end = start + limit
+    slice_ = lines[start:end]
+    numbered = [f"{i + start + 1:6}|{line}" for i, line in enumerate(slice_)]
+    footer = f"\n[{len(numbered)} lines; {len(lines)} total]"
+    return "\n".join(numbered) + footer
+
+
+# --- file_search (ripgrep-backed, read-only) ---
+
+@tool
+def file_search(pattern: str, glob: str | None = None, max_results: int = 200) -> str:
+    """Search file contents with a regex (ripgrep-backed). Read-only.
+
+    Args:
+        pattern: regular expression to search for.
+        glob: optional file glob to limit search (e.g. "*.py").
+        max_results: max number of matches to return.
+    """
+    ws = _workspace()
+    cmd = ["rg", "--no-heading", "-n", "--max-count", str(max_results)]
+    if glob:
+        cmd += ["-g", glob]
+    cmd += [pattern, str(ws)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
+    except FileNotFoundError:
+        # ripgrep missing — fall back to grep
+        cmd = ["grep", "-rn", "-E", pattern]
+        if glob:
+            cmd += ["--include", glob]
+        cmd += [str(ws)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+    out = proc.stdout[:_BASH_MAX_OUTPUT]
+    if not out:
+        return "no matches"
+    return out + f"\n[{out.count(chr(10))} matches]"
+
+
+# --- file_glob ---
+
+@tool
+def file_glob(pattern: str) -> str:
+    """Find files by glob pattern (e.g. "**/*.py"). Returns paths relative to workspace."""
+    ws = _workspace()
+    matches: list[str] = []
+    for root, _dirs, files in os.walk(ws):
+        for name in files:
+            if fnmatch.fnmatch(name, pattern.split("/")[-1] if "/" in pattern else pattern):
+                full = Path(root) / name
+                rel = full.relative_to(ws)
+                matches.append(str(rel))
+                if len(matches) >= 500:
+                    break
+        if len(matches) >= 500:
+            break
+    if not matches:
+        return "no files matched"
+    return "\n".join(sorted(matches)) + f"\n[{len(matches)} files]"
+
+
+# --- terminal_exec (read-only commands only in Phase 2) ---
+
+# Commands that mutate state — blocked in Phase 2 (writes arrive in Phase 3).
+_BLOCKED_COMMANDS = re.compile(
+    r"\b(rm|mv|cp|mkdir|rmdir|chmod|chown|git\s+(commit|push|merge|rebase|reset|"
+    r"checkout|branch|tag|stash)|pip\s+install|npm\s+install|yarn\s+add|"
+    r"pnpm\s+add|curl|wget|scp|rsync|dd|mkfs|fdisk|kill|killall|pkill)\b"
+)
+
+# Commands that are explicitly read-only and always allowed
+_READONLY_COMMANDS = re.compile(
+    r"^\s*(ls|cat|head|tail|wc|grep|rg|find|git\s+(status|log|diff|show|blame|"
+    r"ls-files|rev-parse|remote|branch|stash\s+list)|pwd|echo|env|whoami|"
+    r"python\s+--version|node\s+--version|npm\s+--version|test)\b"
+)
+
+
+@tool
+def terminal_exec(command: str) -> str:
+    """Run a shell command in the workspace. Phase 2: read-only commands only.
+
+    Mutating commands (rm, git commit, pip install, etc.) are blocked until
+    Phase 3 ships the approval contract. Read-only commands (ls, cat, git
+    status, grep, rg, find) run directly.
+    """
+    if not command or not command.strip():
+        return "error: empty command"
+    if _BLOCKED_COMMANDS.search(command) and not _READONLY_COMMANDS.match(command.strip()):
+        return ("error: mutating command blocked in Phase 2 (read-only mode). "
+                "Writes arrive in Phase 3 with the approval contract.")
+    try:
+        proc = subprocess.run(
+            command, shell=True, check=False, capture_output=True, text=True,
+            timeout=_BASH_TIMEOUT_S, stdin=subprocess.DEVNULL, cwd=str(_workspace()),
+        )
+    except subprocess.TimeoutExpired:
+        return f"error: command timed out after {_BASH_TIMEOUT_S}s"
+    out = (proc.stdout + proc.stderr)[:_BASH_MAX_OUTPUT]
+    return f"{out}\n[exit {proc.returncode}]"
+
+
+def _resolve(file_path: str) -> Path:
+    p = Path(file_path)
+    if p.is_absolute():
+        return p
+    return _workspace() / p
+
+
+# --- Registry ---
+
+READONLY_TOOLS = [file_read, file_search, file_glob, terminal_exec]
+TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in READONLY_TOOLS}
+
+
+async def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Async shim that invokes a tool and returns a normalized result dict.
+
+    Tools return strings; an "error:" prefix indicates a logical error (the
+    tool ran without raising but the operation failed). This matches the
+    Phase 0 spike ToolResult taxonomy so the EventEmitter pairs correctly.
+    """
+    t = TOOL_BY_NAME.get(name)
+    if t is None:
+        return {"kind": "error", "ok": False, "output": f"unknown tool: {name}"}
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, lambda: t.invoke(args))
+        output = str(result)
+        is_error = output.startswith("error:")
+        return {
+            "kind": "error" if is_error else "success",
+            "ok": not is_error,
+            "output": output,
+            "tool": name,
+            "args": args,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
+
+
+__all__ = [
+    "READONLY_TOOLS",
+    "TOOL_BY_NAME",
+    "call_tool",
+    "file_glob",
+    "file_read",
+    "file_search",
+    "terminal_exec",
+]
