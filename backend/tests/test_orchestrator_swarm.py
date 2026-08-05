@@ -12,8 +12,9 @@ from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import BlueprintContext
-from app.orchestrator.blueprints.swarm import SwarmBlueprint
+from app.orchestrator.blueprints.swarm import SwarmBlueprint, _await_thread
 from app.orchestrator.mode_engine import blueprint_for
+from app.db.base import get_session
 
 pytestmark = pytest.mark.asyncio
 
@@ -310,3 +311,40 @@ async def test_execute_full_blueprint(session, make_user):
     assert "two legs" in done.auto_summary
     # Lead decompose + Lead synthesize + 2 explorers = 4 threads
     assert session.query(Thread).filter_by(run_id="r1").count() == 4
+
+
+# --------------------------------------------------------------- await polling
+async def test_await_thread_polls_until_settled(session, make_user):
+    """H-51: the fake spawn always returned a terminal `idle` status, so
+    _await_thread's polling loop (running -> completed) was never exercised
+    — a regression that made it return on the first poll would still pass.
+    Drive the loop for real: start the thread `running`, flip it to
+    `completed` from a side task, and assert _await_thread actually waited."""
+    import asyncio
+    run = _seed(session, make_user)
+    session.add(Thread(id="e0", run_id=run.id, persona="explorer", status="running"))
+    session.commit()
+
+    async def settle():
+        await asyncio.sleep(0.05)
+        s = get_session()
+        try:
+            t = s.get(Thread, "e0")
+            t.status = "completed"
+            s.commit()
+        finally:
+            s.close()
+
+    asyncio.create_task(settle())
+    # poll_seconds=0.01 so the loop spins several times before the flip lands.
+    await _await_thread("e0", poll_seconds=0.01)
+    session.expire_all()
+    assert session.get(Thread, "e0").status == "completed"
+
+
+async def test_await_thread_missing_thread_is_failed(session, make_user):
+    """H-51: a missing thread must read as `failed` (swarm.py:259), not hang
+    the poll loop forever waiting for a row that will never exist."""
+    run = _seed(session, make_user)
+    # No Thread row for "ghost" — _await_thread must treat it as failed/terminal.
+    await _await_thread("ghost", poll_seconds=0.01)

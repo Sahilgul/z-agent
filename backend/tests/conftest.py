@@ -212,6 +212,7 @@ class FakeRedis:
         self.groups: dict[str, set[str]] = {}  # stream -> group names
         self.pel: dict[str, dict[str, dict]] = {}  # stream -> {msg_id -> fields}
         self.delivered: dict[str, set[str]] = {}  # stream -> msg_ids ever delivered to group
+        self.acked: dict[str, set[str]] = {}  # stream -> acked msg_ids (H-52)
         self.published: list[tuple[str, str]] = []
 
     def _next_id(self) -> str:
@@ -229,14 +230,21 @@ class FakeRedis:
         pel = self.pel.get(stream, {})
         for mid in msg_ids:
             pel.pop(mid, None)
+        # H-52: record acks so the durability contract (a processed message
+        # is acked, not just persisted) is observable in tests.
+        self.acked.setdefault(stream, set()).update(msg_ids)
         return len(msg_ids)
 
     async def xgroup_create(self, stream: str, group: str, id: str = "0", mkstream: bool = False) -> None:
         await asyncio.sleep(0)
         self.streams.setdefault(stream, [])
+        # H-54: only raise BUSYGROUP when the group ALREADY exists — the old
+        # fake raised unconditionally, so the group-create SUCCESS path was
+        # dead under test and _ensure_group's first-call branch was untested.
+        if group in self.groups.get(stream, set()):
+            raise __import__("redis").ResponseError("BUSYGROUP Consumer Group name already exists")
         self.groups.setdefault(stream, set()).add(group)
         self.pel.setdefault(stream, {})
-        raise __import__("redis").ResponseError("BUSYGROUP Consumer Group name already exists")
 
     async def xreadgroup(self, group: str, consumer: str, streams: dict, count: int = 100, block: int = 0):
         await asyncio.sleep(0)
@@ -456,6 +464,7 @@ class FakeRunManager:
 
     async def merge_pr(self, run_id, user_id):
         self.prs_merged.append((run_id, user_id))
+        return f"https://ado/merge/{run_id}"
 
     async def start_plan(self, run_id):
         self.started_plans.append(run_id)

@@ -13,13 +13,24 @@ from app.orchestrator.blueprints.debug import DebugBlueprint
 
 
 class _FakeLaneManager:
-    def __init__(self, thread):
-        self._thread = thread
+    # H-49: accept either a single thread (legacy single-phase tests) or a
+    # {persona: thread} map. The full execute test spawns TWO threads
+    # (debugger + fixer); a shared thread conflated the diagnose and propose
+    # event streams — _last_message_text read the proposal as the diagnosis.
+    def __init__(self, thread_or_map):
+        if isinstance(thread_or_map, dict):
+            self._by_persona = thread_or_map
+            self._thread = None
+        else:
+            self._by_persona = None
+            self._thread = thread_or_map
         self.spawned = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
                     resume_session=False, resume_from_thread_id=None):
         self.spawned.append({"persona": persona, "prompt": prompt, "writable": writable_repo})
+        if self._by_persona is not None:
+            return self._by_persona[persona]
         return self._thread
 
 
@@ -210,18 +221,22 @@ async def test_present_raises_when_no_proposal(session, make_user):
 # --------------------------------------------------------------- full execute
 async def test_execute_full_blueprint(session, make_user, monkeypatch):
     run, repo, u = _seed(session, make_user)
-    thread = Thread(id="l1", run_id="r1", persona="debugger", status="completed", next_seq=0)
-    session.add(thread); session.commit()
-    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="d",
+    # H-49: diagnose and propose run on SEPARATE threads so each phase reads
+    # its own event stream. The old test used one shared fake thread, so
+    # _last_message_text("l1") returned the PROPOSAL as the diagnosis.
+    diag_thread = Thread(id="diag", run_id="r1", persona="debugger", status="completed", next_seq=0)
+    fix_thread = Thread(id="fix", run_id="r1", persona="fixer", status="completed", next_seq=0)
+    session.add_all([diag_thread, fix_thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="diag", seq=0, type="message", title="d",
                       payload={"text": "rc"}))
-    session.add(Event(run_id="r1", thread_id="l1", seq=1, type="message", title="p",
+    session.add(Event(run_id="r1", thread_id="fix", seq=0, type="message", title="p",
                       payload={"text": json.dumps(PROPOSAL)}))
     session.commit()
     from app.services import evidence as evidence_mod
     monkeypatch.setattr(evidence_mod, "run_test_commands",
                         lambda ws, repo, commands=None: _async({"passed": False, "returncode": 1,
                                                                  "stdout": "", "stderr": ""}))
-    lm = _FakeLaneManager(thread)
+    lm = _FakeLaneManager({"debugger": diag_thread, "fixer": fix_thread})
     bp = DebugBlueprint()
     ctx = _ctx(run, services={"thread_manager": lm})
     await bp.execute(ctx)
@@ -232,3 +247,9 @@ async def test_execute_full_blueprint(session, make_user, monkeypatch):
     # C5: repro event + handoff summary persisted through the full chain.
     assert session.query(Event).filter_by(run_id="r1", type="test_run").count() == 1
     assert session.get(Run, "r1").auto_summary
+    # H-49: the two phases used distinct threads and read their OWN streams —
+    # the diagnosis is "rc" (not the proposal) and the threads differ.
+    assert ctx.artifacts["diagnose_thread_id"] == "diag"
+    assert ctx.artifacts["propose_thread_id"] == "fix"
+    assert ctx.artifacts["diagnosis"] == "rc"
+    assert ctx.artifacts["proposal_text"] == json.dumps(PROPOSAL)

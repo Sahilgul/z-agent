@@ -244,13 +244,19 @@ class RunManager:
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
-            if thread is not None and thread.status not in ACTIVE_STATUSES:
+            if thread is None:
+                # H-50: a missing thread has no worker to interrupt — nudging it
+                # publishes a "running" status for a thread that doesn't exist
+                # (ghost thread) and writes a control message that goes nowhere.
+                log.warning("nudge refused — thread not found",
+                            run_id=run_id, thread_id=thread_id)
+                return
+            if thread.status not in ACTIVE_STATUSES:
                 log.warning("nudge refused — thread terminal",
                             run_id=run_id, thread_id=thread_id, status=thread.status)
                 return  # do NOT nudge or flip a dead thread back to "running"
-            if thread is not None:
-                thread.status = "running"
-                session.commit()
+            thread.status = "running"
+            session.commit()
         finally:
             session.close()
         await self.control.nudge(thread_id, text)

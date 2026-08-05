@@ -167,7 +167,10 @@ async def test_nudge_thread_missing_thread_is_noop(session, make_user):
     run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
     session.add(run); session.commit()
     await rm.nudge_thread("r1", "ghost", "x")
-    assert control.nudged == [("ghost", "x")]
+    # H-50: a missing thread has no worker — the nudge must be a true no-op,
+    # not publish a "running" status for a ghost thread. The old test
+    # asserted control.nudged == [("ghost", "x")] and codified the bug.
+    assert control.nudged == []
 
 
 async def test_nudge_thread_refuses_to_resurrect_terminal_thread(session, make_user):

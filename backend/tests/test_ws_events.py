@@ -135,6 +135,7 @@ async def test_ws_close_run_owned_by_other(session, make_user):
 
 async def test_ws_accepts_and_forwards_messages(session, make_user):
     import asyncio
+    import json
     from app.ws.events import run_events_ws
     from tests.conftest import FakeRelay
     from app.db.models.run import Run
@@ -144,25 +145,34 @@ async def test_ws_accepts_and_forwards_messages(session, make_user):
     token = issue_token(u)
     relay = FakeRelay()
     ws = _FakeWebSocket(cookies={"zagent_token": token}, relay=relay, run_id="r1")
-    ws._disconnect_after = 1  # raise WebSocketDisconnect after 1st message
+    ws._disconnect_after = 2  # raise WebSocketDisconnect after 2nd message
 
     task = asyncio.create_task(run_events_ws(ws, "r1"))
-    # Wait for the endpoint to subscribe, then push a message into its queue.
+    # Wait for the endpoint to subscribe, then push messages into its queue.
     for _ in range(50):
         await asyncio.sleep(0)
         if "r1" in relay.subscribers and relay.subscribers["r1"]:
             break
     queue = next(iter(relay.subscribers["r1"]))
-    await queue.put({"type": "step", "event": "hello"})
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    # H-53: push TWO messages and assert PAYLOAD + ORDER. The old test pushed
+    # one message and only checked `len(ws.sent) == 1` and the top-level
+    # `type`, so a forwarder that dropped the payload body or reordered
+    # messages still passed.
+    await queue.put({"type": "step", "event": "first"})
+    await queue.put({"type": "delta", "delta": "second"})
+    for _ in range(200):
+        await asyncio.sleep(0)
+        if len(ws.sent) >= 2:
+            break
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
     assert ws.accepted
-    assert len(ws.sent) == 1
-    import json
-    assert json.loads(ws.sent[0])["type"] == "step"
+    assert len(ws.sent) == 2
+    first = json.loads(ws.sent[0])
+    second = json.loads(ws.sent[1])
+    assert first["type"] == "step" and first["event"] == "first"
+    assert second["type"] == "delta" and second["delta"] == "second"
     assert "r1" not in relay.subscribers or not relay.subscribers.get("r1")

@@ -508,7 +508,10 @@ def test_post_intent_text_message(auth_client, session, make_user):
     r = client.post("/runs/r1/intent", json={"text": "hurry up", "source": "text"})
     assert r.status_code == 200
     assert r.json()["intent"] == "send_message"
-    assert services["run_manager"].nudged
+    # H-47: the old `assert services["run_manager"].nudged` only checked
+    # truthiness — a nudge to the wrong thread or with empty/lost text still
+    # passed. Assert the full payload: lead thread l1 received "hurry up".
+    assert services["run_manager"].nudged == [("r1", "l1", "hurry up")]
 
 
 def test_post_intent_run_not_found(auth_client):
@@ -914,6 +917,10 @@ def test_post_intent_merge_pr_confirmed(auth_client, session, make_user):
     assert r.status_code == 200
     assert r.json()["intent"] == "merge_pr"
     assert services["run_manager"].prs_merged == [("r1", user.id)]
+    # H-48: the response carries the merge handoff_url (deep-link to the ADO
+    # merge UI under merge_native_ui); the old test never inspected it, so a
+    # handler that dropped the url still passed.
+    assert r.json()["handoff_url"] == f"https://ado/merge/r1"
 
 
 # --------------------------------------------------------------- thread controls

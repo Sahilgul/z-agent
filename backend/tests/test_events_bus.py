@@ -49,6 +49,10 @@ async def test_process_persists_event_and_acks(session, make_user, fake_redis):
     run_row = session.get(Run, "r1")
     assert run_row.last_active_at is not None
     assert any(m[0] == "r1" and m[1].get("type") == "step" for m in relay.published)
+    # H-52: a processed message must be ACKed (consumer-group durability) —
+    # the old test never asserted xack, so a regression that dropped the ack
+    # (re-processing every message on restart) still passed.
+    assert "1-0" in fake_redis.acked.get("events:r1", set())
 
 
 async def test_process_advances_next_seq_only_when_higher(session, make_user, fake_redis):
@@ -154,9 +158,14 @@ async def test_start_stop_lifecycle(fake_redis):
 
 async def test_ensure_group_creates_then_busygroup(fake_redis):
     c = _consumer(fake_redis)
+    # H-54: the first call must actually CREATE the group (success path) —
+    # the old fake raised BUSYGROUP unconditionally, so this branch was dead.
     await c._ensure_group("events:r1")
     assert "events:r1" in fake_redis.streams
-    await c._ensure_group("events:r1")  # idempotent
+    assert bus_mod.GROUP in fake_redis.groups.get("events:r1", set())
+    # Second call is idempotent: BUSYGROUP is swallowed by _ensure_group.
+    await c._ensure_group("events:r1")
+    assert bus_mod.GROUP in fake_redis.groups.get("events:r1", set())
 
 
 async def test_loop_processes_registered_stream(session, make_user, fake_redis):
