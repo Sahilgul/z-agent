@@ -96,6 +96,11 @@ services:
       ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
       ZAGENT_BOOTSTRAP_ADMIN_USERNAME: ${ZAGENT_BOOTSTRAP_ADMIN_USERNAME:-sahil}
       ZAGENT_BOOTSTRAP_ADMIN_PIN: ${ZAGENT_BOOTSTRAP_ADMIN_PIN:?set in .env}
+      # C-13/H-44 strict validation runs at Settings() instantiation, which
+      # app.db.base triggers on import — so migrate needs the same secrets as
+      # backend or it refuses to boot before alembic even runs.
+      ZAGENT_JWT_SECRET: ${ZAGENT_JWT_SECRET:?set in .env}
+      ZAGENT_BYO_PAT_ENCRYPTION_KEY: ${ZAGENT_BYO_PAT_ENCRYPTION_KEY:?set in .env}
     depends_on:
       db:
         condition: service_healthy
