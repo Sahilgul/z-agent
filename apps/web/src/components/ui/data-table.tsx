@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   flexRender,
   getCoreRowModel,
@@ -83,6 +83,9 @@ export function DataTable<T>({
                   if (el) el.indeterminate = table.getIsSomeRowsSelected();
                 }}
                 onChange={table.getToggleAllRowsSelectedHandler()}
+                // M-74: stop the checkbox click from bubbling to the row
+                // onClick (double action: toggle + row click).
+                onClick={(e) => e.stopPropagation()}
                 className="size-3.5 accent-[var(--color-green)]"
               />
             ),
@@ -92,6 +95,9 @@ export function DataTable<T>({
                 aria-label="select row"
                 checked={row.getIsSelected()}
                 onChange={row.getToggleSelectedHandler()}
+                // M-74: stop the checkbox click from bubbling to the row
+                // onClick (double action: toggle + row click).
+                onClick={(e) => e.stopPropagation()}
                 className="size-3.5 accent-[var(--color-green)]"
               />
             ),
@@ -137,10 +143,17 @@ export function DataTable<T>({
 
   // Surface selection changes to the consumer as the underlying rows.
   const rowSelection = table.getState().rowSelection;
+  // M-73: an unmemoized onSelectionChange (new ref every render) made the
+  // effect below fire every render -> parent setState -> re-render -> loop.
+  // Store the callback in a ref and drop it from the dep array so the
+  // effect fires only on actual selection changes (rowSelection), not on
+  // callback identity churn.
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
   useEffect(() => {
-    if (!enableRowSelection || !onSelectionChange) return;
-    onSelectionChange(table.getSelectedRowModel().rows.map((r) => r.original));
-  }, [rowSelection, enableRowSelection, onSelectionChange, table]);
+    if (!enableRowSelection || !onSelectionChangeRef.current) return;
+    onSelectionChangeRef.current(table.getSelectedRowModel().rows.map((r) => r.original));
+  }, [rowSelection, enableRowSelection, table]);
 
   if (!loading && rows.length === 0 && empty) return <>{empty}</>;
 
@@ -259,10 +272,30 @@ function ColumnVisibilityMenu<T>({
   table: TanstackTable<T>;
 }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const columns = table.getAllLeafColumns().filter((c) => c.id !== "__select");
+  // M-75: close the menu on outside click or Escape — the old menu only
+  // closed on toggling the button, so it stayed open over the table.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
   if (columns.length === 0) return null;
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <Button
         type="button"
         variant="outline"
@@ -295,7 +328,12 @@ function ColumnVisibilityMenu<T>({
                   table,
                   header: c.columnDef,
                   column: c,
-                } as Parameters<typeof flexRender>[1])}
+                // M-75 (hardening): the column def's header is typed as
+                // `object` (unknown renderable); flexRender's context type
+                // is HeaderContext<T, unknown> which the loose cast didn't
+                // satisfy. Cast to any to bridge the unknown header type.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } as any)}
               </span>
             </label>
           ))}

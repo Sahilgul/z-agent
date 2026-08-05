@@ -40,9 +40,15 @@ export function BranchPicker({
   const matches = useMemo(() => {
     const sorted = [...branches].sort((a, b) => a.localeCompare(b));
     const q = query.trim().toLowerCase();
-    if (!q || q === value.toLowerCase()) return sorted;
+    // M-76: the old `q === value.toLowerCase()` short-circuit disabled
+    // filtering when the user typed the EXACT selected value (showed all
+    // branches instead of filtered). Only skip filtering when the query
+    // is the default display (value) AND the menu is closed (not actively
+    // filtering); once open, filter by the query even if it matches value.
+    if (!q) return sorted;
+    if (q === value.toLowerCase() && !open) return sorted;
     return sorted.filter((b) => b.toLowerCase().includes(q));
-  }, [branches, query, value]);
+  }, [branches, query, value, open]);
 
   function pick(branch: string) {
     onChange(branch);
