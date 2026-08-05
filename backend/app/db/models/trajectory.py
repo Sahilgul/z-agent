@@ -24,7 +24,7 @@ class TrajectorySummary(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)
     thread_id: Mapped[str | None] = mapped_column(nullable=True)
-    user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id"))
+    user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id"), index=True)
     summary: Mapped[str] = mapped_column(sa.Text)
     key_decisions: Mapped[list] = mapped_column(sa.JSON, default=list)
     lessons: Mapped[list] = mapped_column(sa.JSON, default=list)

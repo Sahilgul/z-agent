@@ -207,7 +207,11 @@ class SandboxManager:
             volumes=volumes,
             network=self.settings.worker_network,
             detach=True,
-            name=f"zagent-thread-{thread.id[:8]}",
+            # M-54: the container name used to be truncated to thread.id[:8]
+            # (8 hex chars) — birthday-paradox collision at ~65k threads meant
+            # Docker refused a duplicate name and thread spawn failed. Use
+            # the full UUID (unique by construction) as the name suffix.
+            name=f"zagent-thread-{thread.id}",
             remove=False,
         )
         log.info("thread container started", thread_id=thread.id, container=container.short_id)

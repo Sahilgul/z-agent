@@ -124,6 +124,10 @@ class RunManager:
         session = get_session()
         try:
             run = session.get(Run, run_id)
+            # M-49: expunge run so it's detached with loaded column attrs
+            # intact (no commit here, so no expiry — but be explicit so a
+            # later commit in this scope can't expire it before close).
+            session.expunge(run)
         finally:
             session.close()
         blueprint = blueprint_for(run.mode)
@@ -285,11 +289,19 @@ class RunManager:
         knowledge flywheel's approval inbox picks up as a candidate."""
         session = get_session()
         try:
-            thread = session.get(Thread, thread_id)
-            if thread is None or thread.run_id != run_id:
+            # M-32: lock the thread row so concurrent next_seq bumps
+            # serialize (no duplicate seqs across concurrent pins/messages).
+            thread = (session.query(Thread)
+                      .filter_by(id=thread_id).with_for_update().one())
+            if thread.run_id != run_id:
                 raise ValueError("thread not found in this run")
+            seq = thread.next_seq
+            # M-44: pin_finding used thread.next_seq but never incremented it,
+            # so every pin landed on the SAME seq (colliding with the next
+            # message and each other). Bump it like _persist_user_message.
+            thread.next_seq = seq + 1
             session.add(Event(
-                run_id=run_id, thread_id=thread_id, seq=thread.next_seq,
+                run_id=run_id, thread_id=thread_id, seq=seq,
                 type="pin", title=note[:200] or f"pinned finding from {thread.persona}",
                 payload={"persona": thread.persona, "note": note},
             ))

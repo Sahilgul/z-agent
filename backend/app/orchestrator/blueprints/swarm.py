@@ -248,6 +248,15 @@ class SwarmBlueprint(Blueprint):
             session.close()
         for lid in thread_ids:
             await thread_manager.settle_cost(lid)
+        # M-47: the decompose (Lead) and synthesis threads were never
+        # cost-settled — their gateway keys and spend leaked (never
+        # released/folded into the run). Settle them alongside explorers.
+        decompose_id = ctx.artifacts.get("decompose_thread_id")
+        if decompose_id:
+            await thread_manager.settle_cost(decompose_id)
+        synthesis_id = ctx.artifacts.get("synthesis_thread_id")
+        if synthesis_id:
+            await thread_manager.settle_cost(synthesis_id)
 
 
 # ------------------------------------------------------------------- helpers

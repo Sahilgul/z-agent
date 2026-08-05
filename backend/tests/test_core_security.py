@@ -67,8 +67,16 @@ def test_record_failed_attempt_lockout_threshold(session, make_user):
     assert u.failed_pin_attempts == security.MAX_FAILED_ATTEMPTS - 1
     assert u.locked_until is None
     security.record_failed_attempt(session, u)
-    assert u.failed_pin_attempts == 0
+    # M-55: the counter no longer resets on lockout — it stays at MAX so the
+    # next failed attempt (after the lockout expires) immediately re-locks.
+    # Only a successful login clears the counter (test_record_success_resets).
+    assert u.failed_pin_attempts == security.MAX_FAILED_ATTEMPTS
     assert u.locked_until is not None
+    # M-69: verify the lockout duration is LOCKOUT_MINUTES (15), not just
+    # "not None" — a regression that changed the window would otherwise pass.
+    expected = datetime.now(timezone.utc) + timedelta(minutes=security.LOCKOUT_MINUTES)
+    delta = abs((u.locked_until - expected).total_seconds())
+    assert delta < 5, f"lockout duration off by {delta}s (expected {security.LOCKOUT_MINUTES}m)"
 
 
 def test_record_success_resets(session, make_user):

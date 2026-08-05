@@ -181,10 +181,23 @@ class PlanBlueprint(Blueprint):
         structured["blast_radius"] = ctx.artifacts.get("blast_radius", structured.get("blast_radius", []))
         if lint_report:
             structured["citation_lint"] = lint_report
-        if ctx.artifacts.get("critique_notes"):
+        # M-45: replan injects the prior plan's rejection history as
+        # ctx.artifacts["critic_notes"] (a str), while _critique sets
+        # ctx.artifacts["critique_notes"] (this round's critic thread text).
+        # _present used to read ONLY critique_notes, so the replan-injected
+        # rejection history was silently dropped. Merge both (replan history
+        # first, then this round's critic) into the persistent list field.
+        notes: list[str] = []
+        replan_notes = ctx.artifacts.get("critic_notes")
+        if replan_notes:
+            notes.append(replan_notes)
+        critique_notes = ctx.artifacts.get("critique_notes")
+        if critique_notes:
+            notes.append(critique_notes)
+        if notes:
             # Always a LIST: reject_plan appends per rejection round, and the UI
             # reads one shape (C1 — never str-here/list-there again).
-            structured["critic_notes"] = [ctx.artifacts["critique_notes"]]
+            structured["critic_notes"] = notes
 
         session = get_session()
         try:
@@ -288,10 +301,14 @@ class PlanBlueprint(Blueprint):
             return None
         try:
             from app.core.config import get_settings
-            from zagent_maps.lint import lint
             repo_root = get_settings().golden_dir / repo_name
+            # Check the golden dir BEFORE importing zagent_maps — the skip
+            # path (golden repo not on disk) must not depend on the maps
+            # package being installed, and the heavy import shouldn't run
+            # when there's nothing to lint against.
             if not repo_root.exists():
                 return {"repo": repo_name, "skipped": "golden repo not on disk", "total": len(citations)}
+            from zagent_maps.lint import lint
             report = lint(str(repo_root), citations)
             return report.as_dict()
         except Exception as exc:

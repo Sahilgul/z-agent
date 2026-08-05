@@ -16,6 +16,13 @@ from zagent_contracts import StepEvent
 
 from app.core.redis_factory import in_memory, make_redis
 
+# M-53: sentinel pushed onto a slow consumer's queue when the relay evicts
+# it. Without this the consumer's queue.get() blocked forever (the queue was
+# discarded from subscribers but never signaled), so the WS socket hung.
+# The consumer sees the sentinel and closes cleanly (client resyncs on
+# reconnect; steps are durable in the DB).
+DROP_SENTINEL = object()
+
 
 class Relay:
     def __init__(self) -> None:
@@ -56,7 +63,22 @@ class Relay:
             except asyncio.QueueFull:
                 # Slow consumer: drop transient headroom by evicting nothing —
                 # steps are durable in the DB; the client resyncs on reconnect.
+                # M-53: ALSO push a sentinel so the consumer's queue.get()
+                # unblocks and the WS closes cleanly — the old code only
+                # discarded the queue, leaving the socket hanging forever.
                 self.subscribers.get(run_id, set()).discard(queue)
+                self._send_drop_sentinel(queue)
+
+    @staticmethod
+    def _send_drop_sentinel(queue: asyncio.Queue) -> None:
+        try:
+            queue.get_nowait()  # make room (drop the oldest buffered message)
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(DROP_SENTINEL)
+        except asyncio.QueueFull:
+            pass  # couldn't make room; consumer will time out on its own
 
     async def _delta_loop(self, run_id: str) -> None:
         pubsub = self.redis.pubsub()

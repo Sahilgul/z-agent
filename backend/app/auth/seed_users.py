@@ -90,9 +90,15 @@ def seed() -> None:
         # system user (autonomous runs carry created_by=system — keeps the
         # MANDATORY owner field honest)
         if session.query(User).filter_by(username="system").one_or_none() is None:
+            # M-56: the system user is a service account (autonomous runs carry
+            # created_by=system). It must NEVER log in. pin_hash="!locked"
+            # used to crash the login path (bcrypt raised ValueError on the
+            # invalid salt -> 500). Use None so the login route's
+            # `pin_hash is None` guard returns a clean 401 (and verify_pin now
+            # also guards against malformed hashes).
             session.add(User(username="system", display_name="Zagent system",
                              role="member", status="active",
-                             pin_hash="!locked"))
+                             pin_hash=None))
             session.commit()
 
         # First-admin bootstrap (chicken-and-egg, local-dev path):

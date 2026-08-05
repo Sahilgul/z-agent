@@ -30,7 +30,14 @@ def hash_pin(pin: str) -> str:
 
 
 def verify_pin(pin: str, pin_hash: str) -> bool:
-    return bcrypt.checkpw(pin.encode(), pin_hash.encode())
+    try:
+        return bcrypt.checkpw(pin.encode(), pin_hash.encode())
+    except (ValueError, TypeError):
+        # M-56: an invalid/non-bcrypt pin_hash (e.g. a corrupted row or a
+        # legacy sentinel) used to raise ValueError("Invalid salt") out of
+        # the login path as a 500. Treat a malformed hash as "no match" so
+        # the caller returns a clean 401.
+        return False
 
 
 def issue_token(user: User) -> str:
@@ -60,7 +67,11 @@ def record_failed_attempt(session: Session, user: User) -> None:
     user.failed_pin_attempts += 1
     if user.failed_pin_attempts >= MAX_FAILED_ATTEMPTS:
         user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
-        user.failed_pin_attempts = 0
+        # M-55: do NOT reset the counter on lockout. Resetting meant that
+        # after each lockout expired the attacker got a FRESH full set of
+        # attempts (staying at 4/window, never escalating). Leave the counter
+        # high so the next failed attempt after a lockout immediately
+        # re-locks — only a successful login (record_success) clears it.
     session.commit()
 
 

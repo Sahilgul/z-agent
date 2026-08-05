@@ -39,6 +39,10 @@ from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
 from app.services import delivery, evidence
 
+from app.core.logging import get_logger
+
+log = get_logger(service="blueprint_development")
+
 
 class DevelopmentBlueprint(Blueprint):
     name = "development"
@@ -156,7 +160,16 @@ class DevelopmentBlueprint(Blueprint):
         on step failure; rolling them here would erase its verdict."""
         workspace = ctx.artifacts.get("workspace") or ""
         repo: Repo = ctx.artifacts["repo_row"]
-        develop_thread_id = ctx.artifacts.get("develop_thread_id") or ctx.run.id
+        develop_thread_id = ctx.artifacts.get("develop_thread_id")
+        if not develop_thread_id:
+            # M-48: _stamp used to fall back to ctx.run.id as the thread_id,
+            # mis-attributing test_run/screenshot events to the run (or to a
+            # wrong thread sharing the run's id). Use the control-plane
+            # pseudo-thread (same as merge handoff) so the event trail stays
+            # honest.
+            log.warning("stamp: no develop_thread_id — attributing to control-plane",
+                        run_id=ctx.run.id)
+            develop_thread_id = "control-plane"
         test_cmds = ctx.artifacts.get("test_cmds")
         test_signal = await evidence.run_test_commands(workspace, repo.name, test_cmds)
         screenshots = await evidence.stamp_screenshots(
@@ -271,7 +284,17 @@ class DevelopmentBlueprint(Blueprint):
         if not notes:
             return
         parsed = self._parse_json(notes)
-        if not parsed or parsed.get("verdict") == "pass":
+        if parsed is None:
+            # M-46: an unparseable evaluator verdict used to hit the
+            # `if not parsed` branch and silently return — treated as a PASS,
+            # so steps the evaluator text described as failed were never
+            # marked failed. Surface it (log + artifact) so the unparseable
+            # verdict is visible instead of silently swallowed.
+            log.warning("evaluator verdict unparseable — not applying step failures",
+                        run_id=ctx.run.id, notes_preview=notes[:200])
+            ctx.artifacts["evaluator_parse_error"] = True
+            return
+        if parsed.get("verdict") == "pass":
             return
         plan_id = ctx.artifacts.get("plan_row_id")
         if plan_id is None:
@@ -295,7 +318,13 @@ class DevelopmentBlueprint(Blueprint):
         """The run's trajectory summary rides the evaluator's verdict (it runs
         last, so the summary reflects the final state of the evidence)."""
         repo: Repo = ctx.artifacts["repo_row"]
-        develop_thread_id = ctx.artifacts.get("develop_thread_id") or ctx.run.id
+        develop_thread_id = ctx.artifacts.get("develop_thread_id")
+        if not develop_thread_id:
+            # M-48: don't fall back to ctx.run.id (mis-attributes the trajectory
+            # to the run / a wrong thread). Use the control-plane pseudo-thread.
+            log.warning("persist_trajectory: no develop_thread_id — attributing to control-plane",
+                        run_id=ctx.run.id)
+            develop_thread_id = "control-plane"
         session = get_session()
         try:
             run = session.get(Run, ctx.run.id)

@@ -56,6 +56,14 @@ class Blueprint(abc.ABC):
                     run = session.get(Run, ctx.run.id)
                     transition(run, node.stage)
                     session.commit()
+                    # M-49: commit expires run's attributes (expire_on_commit
+                    # is on by default); close() then detaches it, so reading
+                    # ctx.run.available_actions below used to hit a
+                    # DetachedInstanceError on the expired+detached instance.
+                    # Refresh (reload attrs) then expunge (detach with attrs
+                    # intact) so ctx.run is safe to read after close.
+                    session.refresh(run)
+                    session.expunge(run)
                     ctx.run = run
                 finally:
                     session.close()

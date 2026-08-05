@@ -82,11 +82,16 @@ class GatewayClient:
 
 async def retry_with_backoff(fn, attempts: int = 5, base_delay: float = 1.0):
     """Worker-side gateway failure story: bounded backoff on
-    429/5xx/timeout, then the thread FAILS SAFE (stage=failed, resumable)."""
+    429/5xx/timeout/transport-blip, then the thread FAILS SAFE (stage=failed,
+    resumable)."""
     for attempt in range(attempts):
         try:
             return await fn()
-        except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
+        # M-52: TransportError (connection refused / network blip / DNS) used
+        # to NOT be caught here, so a transient connection blip aborted the
+        # thread immediately with no retry. Retry transport errors too.
+        except (httpx.HTTPStatusError, httpx.TimeoutException,
+                httpx.TransportError) as exc:
             if attempt == attempts - 1:
                 raise
             await asyncio.sleep(base_delay * (2 ** attempt))

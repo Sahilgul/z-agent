@@ -14,6 +14,7 @@ from app.core.security import decode_token
 from app.db.base import get_session
 from app.db.models.run import Run
 from app.db.models.user import User
+from app.events.relay import DROP_SENTINEL
 
 router = APIRouter()
 
@@ -57,6 +58,11 @@ async def run_events_ws(websocket: WebSocket, run_id: str):
     try:
         while True:
             message = await queue.get()
+            # M-53: the relay pushes DROP_SENTINEL when it evicts a slow
+            # consumer — close cleanly so the socket doesn't hang on
+            # queue.get() forever (the client resyncs on reconnect).
+            if message is DROP_SENTINEL:
+                break
             await websocket.send_text(json.dumps(message))
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass

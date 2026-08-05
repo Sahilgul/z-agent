@@ -4,6 +4,7 @@ all domain logic lives in services/ and orchestrator/ (no FastAPI imports there)
 
 from __future__ import annotations
 
+import inspect
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,6 +20,7 @@ from app.orchestrator.run_manager import RunManager
 from app.sandbox.fetcher import start_fetch_loop
 from app.services.approvals import ApprovalService
 from app.services.heartbeats import HeartbeatPersister
+from app.services.hydration import PrewarmPool
 
 log = get_logger(service="main")
 
@@ -45,7 +47,11 @@ async def lifespan(app: FastAPI):
     app.state.thread_manager = thread_manager
     app.state.run_manager = run_manager
     app.state.approval_service = approval_service
-    app.state.prewarm_pool = __import__("app.services.hydration", fromlist=["PrewarmPool"]).PrewarmPool()
+    # M-57: PrewarmPool was instantiated via a __import__ hack and never
+    # started or closed. Import cleanly and wire a guarded close in
+    # teardown (the stub has no lifecycle, but the real pool will).
+    prewarm_pool = PrewarmPool()
+    app.state.prewarm_pool = prewarm_pool
 
     await ingest.start()
     await approval_service.start()
@@ -65,6 +71,13 @@ async def lifespan(app: FastAPI):
     stop_fetch_loop()
     await relay.close()
     await control.close()
+    # M-57: close the prewarm pool if it owns resources (no-op for the stub).
+    close = getattr(prewarm_pool, "close", None)
+    if close is not None:
+        if inspect.iscoroutinefunction(close):
+            await close()
+        else:
+            close()
 
 
 def create_app() -> FastAPI:
