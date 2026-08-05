@@ -29,24 +29,49 @@ class ControlListener:
         self.queue: asyncio.Queue[ControlMessage] = asyncio.Queue()
 
     async def listen(self) -> None:
-        pubsub = self.redis.pubsub()
-        await pubsub.subscribe(self.channel)
-        try:
-            async for raw in pubsub.listen():
-                if raw.get("type") != "message":
-                    continue
+        """Subscribe and feed the queue — forever, across reconnects.
+
+        pubsub.listen() raises ConnectionError when Redis drops the
+        connection (blip, restart, keepalive timeout). Without a reconnect
+        loop the listener task dies silently while consumers keep blocking
+        on the queue — the thread becomes permanently unresponsive to
+        kill/nudge. Treat a dropped connection as transient: clean up, back
+        off, resubscribe. Only cancellation stops the loop."""
+        backoff = 0.5
+        while True:
+            pubsub = self.redis.pubsub()
+            try:
+                await pubsub.subscribe(self.channel)
+                async for raw in pubsub.listen():
+                    if raw.get("type") != "message":
+                        continue
+                    try:
+                        data = json.loads(raw["data"])
+                        await self.queue.put(ControlMessage(
+                            type=data.get("type", ""),
+                            text=data.get("text", ""),
+                            mode=data.get("mode", ""),
+                        ))
+                        backoff = 0.5  # healthy message flow resets the backoff
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Transient Redis failure — back off and resubscribe.
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)
+            finally:
+                # Each cleanup step guarded so a failure in one never skips
+                # the other (and a re-delivered cancel can't leak the pubsub).
                 try:
-                    data = json.loads(raw["data"])
-                    await self.queue.put(ControlMessage(
-                        type=data.get("type", ""),
-                        text=data.get("text", ""),
-                        mode=data.get("mode", ""),
-                    ))
-                except (json.JSONDecodeError, TypeError):
-                    continue
-        finally:
-            await pubsub.unsubscribe(self.channel)
-            await pubsub.aclose()
+                    await pubsub.unsubscribe(self.channel)
+                except Exception:
+                    pass
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
     async def close(self) -> None:
         await self.redis.aclose()

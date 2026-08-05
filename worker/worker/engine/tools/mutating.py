@@ -35,8 +35,16 @@ def _workspace() -> Path:
 
 
 def _resolve(file_path: str) -> Path:
+    """Resolve a path inside the workspace. Mutating tools MUST NOT touch
+    anything outside WORKSPACE_DIR — absolute paths and `..` escapes are
+    refused (raises ValueError; callers convert to an error string)."""
     p = Path(file_path)
-    return p if p.is_absolute() else _workspace() / p
+    p = p if p.is_absolute() else _workspace() / p
+    resolved = p.resolve()
+    root = _workspace().resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"path escapes the workspace: {file_path}")
+    return resolved
 
 
 def content_hash(text: str) -> str:
@@ -59,7 +67,10 @@ def file_edit(file_path: str, old_string: str, new_string: str,
             provided and the file's current hash differs, the edit is REFUSED
             and the current content is returned so the caller re-reads first.
     """
-    p = _resolve(file_path)
+    try:
+        p = _resolve(file_path)
+    except ValueError as exc:
+        return f"error: {exc}"
     if not p.exists() or p.is_dir():
         return f"error: file not found or is a directory: {file_path}"
     try:
@@ -100,7 +111,10 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
         expected_hash: read-before-edit guard. If null, the file must NOT exist (create-new).
             If provided, the file must exist with that hash (overwrite).
     """
-    p = _resolve(file_path)
+    try:
+        p = _resolve(file_path)
+    except ValueError as exc:
+        return f"error: {exc}"
     p.parent.mkdir(parents=True, exist_ok=True)
 
     if p.exists():

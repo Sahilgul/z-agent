@@ -56,14 +56,24 @@ class ApprovalBridge:
             "requested_at": str(time.time()),
         })
         decision_key = f"approval:{approval_id}:decision"
-        result = await self.redis.blpop(decision_key, timeout=self.timeout_seconds)
+        try:
+            result = await self.redis.blpop(decision_key, timeout=self.timeout_seconds)
+        except redis.RedisError:
+            # A dropped connection must not crash the can_use_tool callback
+            # into the SDK — deterministic deny, same contract as timeout.
+            return PermissionResultDeny(message="approval channel error — denied deterministically")
         if result is None:
             if DENY_ON_TIMEOUT:
                 return PermissionResultDeny(message="approval timed out — denied deterministically")
             return PermissionResultAllow(updated_input=tool_input)
 
         _, raw = result
-        decision = json.loads(raw)
+        try:
+            decision = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return PermissionResultDeny(message="malformed decision payload — denied")
+        if not isinstance(decision, dict):
+            return PermissionResultDeny(message="malformed decision payload — denied")
         if decision.get("decision") == "always_allow":
             self.always_allowed.add(tool_name)
             return PermissionResultAllow(updated_input=tool_input)

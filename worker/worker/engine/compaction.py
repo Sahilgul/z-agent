@@ -42,6 +42,58 @@ _PROTECTED_ORIGINS = frozenset({
 _PRUNE_ORDER = [PromptOrigin.TOOL, PromptOrigin.ENVELOPE, PromptOrigin.MEMORY, PromptOrigin.ASSISTANT]
 
 
+def _repair_tool_pairs(msgs: list[BaseMessage]) -> list[BaseMessage]:
+    """Restore tool-call/tool-result pairing after pruning.
+
+    The origin-bucket prune can split a pair: an AIMessage(tool_calls) is
+    pruned (ASSISTANT origin) while its ToolMessage survives in the recent
+    window (or vice versa via floor restoration). OpenAI-compatible gateways
+    REJECT a ToolMessage whose tool_call_id has no matching tool_call, and
+    an AIMessage carrying tool_calls with no ToolMessage responses — both
+    surface as a 400 that does NOT match the context-overflow signatures,
+    terminally failing the run. Repair both directions:
+      1. drop ToolMessages whose issuing AIMessage is gone;
+      2. strip tool_calls from AIMessages whose ToolMessages are gone.
+    Only TOOL/ASSISTANT-origin messages are touched, never protected ones.
+    """
+    from langchain_core.messages import ToolMessage
+
+    call_ids: set[str] = set()
+    for m in msgs:
+        for tc in getattr(m, "tool_calls", None) or []:
+            cid = tc.get("id")
+            if cid:
+                call_ids.add(cid)
+
+    if not call_ids:
+        # No tool calls anywhere in the kept list — there is nothing to pair
+        # against (e.g. synthetic/prune-only conversations). Enforcing here
+        # would drop every ToolMessage and break the output floor; leave
+        # the list untouched.
+        return msgs
+
+    answered: set[str] = set()
+    kept: list[BaseMessage] = []
+    for m in msgs:
+        if isinstance(m, ToolMessage):
+            if m.tool_call_id and m.tool_call_id not in call_ids:
+                continue  # orphaned result — the issuing AIMessage was pruned
+            if m.tool_call_id:
+                answered.add(m.tool_call_id)
+        kept.append(m)
+
+    final: list[BaseMessage] = []
+    for m in kept:
+        tcs = getattr(m, "tool_calls", None) or []
+        if tcs and any(tc.get("id") not in answered for tc in tcs):
+            live = [tc for tc in tcs if tc.get("id") in answered]
+            # Unanswered calls are stripped (their results were pruned); the
+            # message keeps its content so the conversation still reads.
+            m = m.model_copy(update={"tool_calls": live})
+        final.append(m)
+    return final
+
+
 @dataclass
 class CompactionResult:
     """The outcome of one compaction pass — emitted as a compaction-card event."""
@@ -140,6 +192,12 @@ class Compactor:
         # 1. PRUNE — identify the prunable span (everything outside the recent
         # window, by origin, in prune order).
         recent_start = max(0, len(messages) - self.policy.recent_window)
+        # Never open the recent window with ToolMessage(s): their issuing
+        # AIMessage would sit in the prunable span and the pair would be
+        # split (orphaned tool result -> gateway 400 on the next turn).
+        from langchain_core.messages import ToolMessage as _ToolMessage
+        while recent_start > 0 and isinstance(messages[recent_start], _ToolMessage):
+            recent_start -= 1
         span = messages[:recent_start]
         recent = messages[recent_start:]
 
@@ -205,6 +263,8 @@ class Compactor:
         summary_msg = AIMessage(content=summary_text)
         summary_msg.additional_kwargs = {"prompt_origin": PromptOrigin.MEMORY.value}
         new_messages = [m for _, m in kept_in_span] + [summary_msg] + recent
+        new_messages = _repair_tool_pairs(new_messages)
+        result.kept_count = len(new_messages) - 1  # exclude the summary message
         result.after_tokens = self._estimate_tokens(new_messages)
         result.summarized_count = 1
 

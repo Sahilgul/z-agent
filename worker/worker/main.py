@@ -113,16 +113,32 @@ class ThreadRuntime:
                 while not self._stop.is_set():
                     if control.done():
                         break
-                    if self._pump_task.done() and (exc := self._pump_task.exception()):
-                        # Gateway-down failure story: thread FAILS SAFE — the session
-                        # volume makes it resumable.
-                        self.status = "failed"
-                        await self.forwarder.heartbeat(self.status)
-                        raise exc
+                    if self._pump_task.done():
+                        exc = self._pump_task.exception()
+                        if exc:
+                            # Gateway-down failure story: thread FAILS SAFE — the session
+                            # volume makes it resumable.
+                            self.status = "failed"
+                            await self.forwarder.heartbeat(self.status)
+                            raise exc
+                        if self.status == "failed":
+                            # The SDK delivered an is_error ResultMessage
+                            # (budget exhausted, upstream error): the pump
+                            # ended NORMALLY, so there is no exception to
+                            # surface. Without this check the thread hung in
+                            # "failed" forever — the idle watchdog only ever
+                            # completes "idle" threads.
+                            await self.forwarder.heartbeat(self.status)
+                            return 1
                     await asyncio.sleep(0.25)
             finally:
-                for task in (self._pump_task, control, heartbeat, watchdog):
+                tasks = (self._pump_task, control, heartbeat, watchdog)
+                for task in tasks:
                     task.cancel()
+                # Cancellation is cooperative — gather BEFORE the client
+                # context (and later runtime.close()) tears down the
+                # connections those tasks' cleanup blocks still need.
+                await asyncio.gather(*tasks, return_exceptions=True)
         return 0 if self.status != "failed" else 1
 
     # ---------------------------------------------------------- task 1: pump
@@ -176,6 +192,15 @@ class ThreadRuntime:
                         raise exc
                     if old is not None and not old.done():
                         old.cancel()
+                        # Await the old pump BEFORE re-arming: until it
+                        # observes the CancelledError it is still inside
+                        # receive_messages(), and two concurrent iterators
+                        # on the same SDK client can drop/duplicate the new
+                        # turn's early messages.
+                        try:
+                            await old
+                        except asyncio.CancelledError:
+                            pass
                     self._pump_done.clear()
                     self._pump_task = asyncio.create_task(self._pump(client), name="event-pump")
                     await client.query(msg.text)
@@ -189,6 +214,9 @@ class ThreadRuntime:
                 await self.forwarder.heartbeat(self.status)
         finally:
             listener.cancel()
+            # Await the listener so its pubsub cleanup (unsubscribe/aclose)
+            # completes before the control-loop task itself is gathered.
+            await asyncio.gather(listener, return_exceptions=True)
 
     # ------------------------------------------------------ task 3: heartbeat
 

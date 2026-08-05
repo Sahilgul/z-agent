@@ -72,7 +72,13 @@ class ApprovalGate:
         await self._emit_approval_card(approval_id, tool_name, args, verbatim_preview, is_destructive)
 
         decision_key = f"approval:{approval_id}:decision"
-        result = await self.redis.blpop(decision_key, timeout=self.timeout_s)
+        try:
+            result = await self.redis.blpop(decision_key, timeout=self.timeout_s)
+        except redis.RedisError as exc:
+            # A dropped connection during the wait must not kill the run —
+            # deterministic deny, same contract as a timeout.
+            return {"approved": False, "args": args,
+                    "reason": f"approval channel error — denied ({type(exc).__name__})"}
         if result is None:
             # Timeout = DENY deterministically
             if DENY_ON_TIMEOUT:
@@ -80,7 +86,12 @@ class ApprovalGate:
             return {"approved": True, "args": args, "verbatim": True, "via": "timeout"}
 
         _, raw = result
-        decision = json.loads(raw)
+        try:
+            decision = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"approved": False, "args": args, "reason": "malformed decision payload — denied"}
+        if not isinstance(decision, dict):
+            return {"approved": False, "args": args, "reason": "malformed decision payload — denied"}
         dec = decision.get("decision")
         if dec == "always_allow":
             # Persist the tool CLASS, not the specific target — but only for
@@ -174,8 +185,16 @@ class ApprovalBroker:
         await self.redis.sadd(f"always_allow:{self.run_id}", tool_name)
 
     async def wait_decision(self, approval_id: str) -> dict[str, Any]:
-        """Block for the human's decision. Timeout = DENY deterministically."""
-        result = await self.redis.blpop(f"approval:{approval_id}:decision", timeout=self.timeout_s)
+        """Block for the human's decision. Timeout = DENY deterministically.
+
+        A Redis connection error during the (potentially 15-min) BLPOP is a
+        transient failure, not a run-killer: deny deterministically, matching
+        the timeout contract, instead of propagating and failing the run."""
+        try:
+            result = await self.redis.blpop(f"approval:{approval_id}:decision", timeout=self.timeout_s)
+        except redis.RedisError as exc:
+            return {"decision": "deny",
+                    "reason": f"approval channel error — denied ({type(exc).__name__})"}
         if result is None:
             return {"decision": "deny", "reason": "approval timed out — denied"}
         _, raw = result

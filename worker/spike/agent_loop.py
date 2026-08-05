@@ -196,7 +196,13 @@ async def run_agent_loop(
                 if hasattr(msg, "content") and msg.content and first_delta_this_turn:
                     recorder.record_delta()
                     first_delta_this_turn = False
-                ai_message = msg
+                # Under stream_mode="messages" each yield is a DELTA
+                # AIMessageChunk — content AND tool-call args stream across
+                # many chunks. Overwriting keeps only the last delta (empty
+                # content, partial/empty tool_calls), so the ReAct loop could
+                # never execute a tool against a real streaming gateway.
+                # Accumulate the chunks into the complete message.
+                ai_message = msg if ai_message is None else ai_message + msg
         except Exception as exc:  # noqa: BLE001
             recorder.record_turn(None, is_error=True)
             recorder.events.append({"kind": "error", "error": str(exc)})
@@ -219,11 +225,21 @@ async def run_agent_loop(
             break
 
         for tc in tool_calls:
-            name = tc["name"]
+            name = tc.get("name")
+            tc_id = tc.get("id")
+            if not name or not tc_id:
+                # A malformed tool_call must not crash the run with KeyError —
+                # answer it with an error ToolMessage so the call/result
+                # pairing (and the next turn) stays intact.
+                recorder.events.append({"kind": "error", "error": f"malformed tool_call: {tc!r}"})
+                messages.append(ToolMessage(
+                    content="error: malformed tool call from the gateway",
+                    tool_call_id=tc_id or "unknown", name=name or "unknown"))
+                continue
             args = tc.get("args", {}) or {}
             result = await call_tool(name, args)
             recorder.record_tool(name, args, result)
-            messages.append(ToolMessage(content=str(result["output"]), tool_call_id=tc["id"], name=name))
+            messages.append(ToolMessage(content=str(result["output"]), tool_call_id=tc_id, name=name))
 
             if on_first_tool is not None and not nudge_injected:
                 nudge_injected = True

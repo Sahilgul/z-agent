@@ -583,11 +583,22 @@ def test_permissions_active_routes_readonly_to_gate():
     assert _should_continue(state) == "gate"
 
 
-def test_permissions_active_autonomous_skips_gate():
-    """Autonomous still bypasses the gate even with a ruleset active."""
+def test_permissions_active_autonomous_routes_to_gate():
+    """Autonomous WITH an active ruleset routes through the gate: the gate is
+    the only place DENY/ASK rule effects are enforced, so skipping it made
+    hard policies (e.g. "deny git push --force") decorative exactly when no
+    human backstop exists."""
     ai = _ai("", [_tc("tc1", "file_read", {"file_path": "x"})])
     state = {"messages": [ai], "mode": Mode.DEVELOPMENT, "autonomy": "autonomous",
              "permissions_active": True}
+    assert _should_continue(state) == "gate"
+
+
+def test_autonomous_without_ruleset_skips_gate():
+    """Autonomous WITHOUT a ruleset keeps the fast path: needs_approval is
+    False for every tool in autonomous, so the gate is skipped entirely."""
+    ai = _ai("", [_tc("tc1", "terminal_exec", {"command": "ls"})])
+    state = {"messages": [ai], "mode": Mode.DEVELOPMENT, "autonomy": "autonomous"}
     assert _should_continue(state) == "tools"
 
 

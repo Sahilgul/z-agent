@@ -75,7 +75,18 @@ class TerminalManager:
         window (or background=True), hand it to a job and return the
         background_started typed result."""
         workspace = Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
+        # Compile the watch regex BEFORE spawning: an invalid pattern must
+        # fail the call cleanly, not kill the pump afterwards and leak a
+        # running process stuck "running" forever.
+        try:
+            watch = re.compile(watch_regex) if watch_regex else None
+        except re.error as exc:
+            return {"kind": "error", "ok": False,
+                    "output": f"error: invalid watch_regex: {exc}",
+                    "tool": "terminal_exec",
+                    "details": {"background": False}}
         job = BackgroundJob(command, workspace, watch_regex)
+        job._watch = watch  # type: ignore[attr-defined]
         self.jobs[job.job_id] = job
         job._proc = await asyncio.create_subprocess_shell(
             command,
@@ -89,7 +100,10 @@ class TerminalManager:
 
         if not background:
             try:
-                await asyncio.wait_for(asyncio.shield(self._wait(job)), timeout=foreground_timeout)
+                # No shield: the pump owns completion. wait_for cancels the
+                # _wait helper cleanly on timeout — shielding it orphaned one
+                # sleeper task per auto-backgrounded command.
+                await asyncio.wait_for(self._wait(job), timeout=foreground_timeout)
             except TimeoutError:
                 pass  # auto-background below
 
@@ -109,7 +123,10 @@ class TerminalManager:
         reader.cancel()
         try:
             await reader
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            # The pump owns job completion (exit_code/ended are always set in
+            # its finally); a pump error must surface as a typed result, not
+            # propagate out of run() leaving the job looking alive.
             pass
         return {
             "kind": "success" if job.exit_code == 0 else "error",
@@ -124,7 +141,38 @@ class TerminalManager:
         assert job._proc and job._proc.stdout
         loop = asyncio.get_running_loop()
         deadline = loop.time() + JOB_TIMEOUT_S
-        watch = re.compile(job.watch_regex) if job.watch_regex else None
+        # Precompiled in run() (invalid patterns are rejected before spawn).
+        watch: re.Pattern[str] | None = getattr(job, "_watch", None)
+        try:
+            await self._pump_loop(job, watch, loop, deadline)
+            rc = await self._reap(job)
+            job.exit_code = 124 if job.killed_by == "timeout" else rc
+        except asyncio.CancelledError:
+            # Cancelled mid-flight (shutdown): reap the process so it is
+            # never leaked, then let the cancellation propagate.
+            if job._proc.returncode is None:
+                try:
+                    os.killpg(os.getpgid(job._proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                try:
+                    await asyncio.wait_for(job._proc.wait(), timeout=_KILL_GRACE_S)
+                except TimeoutError:
+                    pass
+            job.exit_code = job.exit_code if job.exit_code is not None else -1
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # The pump owns the job's terminal state. ANY failure here (file
+            # I/O, reap error) must end the job with a verdict — never leave
+            # it "running" forever with the exception lost to the void.
+            job.killed_by = job.killed_by or "pump_error"
+            job.exit_code = 1
+            job.watch_hits.append(f"pump error: {exc}")
+        finally:
+            job.ended = time.monotonic()
+
+    async def _pump_loop(self, job: BackgroundJob, watch: "re.Pattern[str] | None",
+                         loop: asyncio.AbstractEventLoop, deadline: float) -> None:
         with job.output_file.open("ab") as fh:
             while True:
                 # M-08: check the ceiling at the TOP of the loop too. The old
@@ -160,9 +208,6 @@ class TerminalManager:
                     job.killed_by = "ceiling"
                     self.kill(job, reason="ceiling")
                     break
-        rc = await self._reap(job)
-        job.exit_code = 124 if job.killed_by == "timeout" else rc
-        job.ended = time.monotonic()
 
     async def _reap(self, job: BackgroundJob) -> int:
         """Wait for the process to exit, escalating SIGTERM -> SIGKILL after
@@ -176,7 +221,13 @@ class TerminalManager:
                 os.killpg(os.getpgid(job._proc.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-            return await job._proc.wait()
+            try:
+                return await asyncio.wait_for(job._proc.wait(), timeout=_KILL_GRACE_S)
+            except TimeoutError:
+                # SIGKILL denied (permissions) and the process won't die —
+                # record a verdict instead of hanging the pump forever.
+                job.killed_by = job.killed_by or "kill_failed"
+                return -1
 
     async def _wait(self, job: BackgroundJob) -> None:
         while job.running:

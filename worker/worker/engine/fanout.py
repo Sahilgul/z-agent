@@ -149,10 +149,19 @@ def reset_registry() -> None:
 
 # --- Engine-side veto logic ---
 
-def _veto(req: SpawnRequest, *, worker_idle: bool = True) -> tuple[bool, str]:
-    """Engine-side veto. Returns (allowed, reason). The agent never bypasses this."""
+def _veto(req: SpawnRequest, *, worker_idle: bool = True, live: int = 0) -> tuple[bool, str]:
+    """Engine-side veto. Returns (allowed, reason). The agent never bypasses this.
+
+    `live` is the registry's current live count: the cap applies to the
+    RUNNING TOTAL, not just the incoming batch — 7 live + an 8-slice swarm
+    must be refused (15 > 8), not waved through because each check passed
+    in isolation."""
     if not worker_idle:
         return False, "worker pool saturated — fan-out refused, retry later"
+    incoming = len(req.slices) if req.kind == "swarm" and req.slices else 1
+    if live + incoming > SWARM_MAX_SLICES:
+        return False, (f"live spawns ({live}) + {incoming} new exceeds "
+                       f"cap {SWARM_MAX_SLICES}")
     if req.kind == "swarm":
         if not req.slices:
             return False, "swarm requires at least one slice"
@@ -189,7 +198,8 @@ def spawn_agent(prompt: str, repo: str | None = None) -> str:
     # worker_idle=True and every call site omitted it, so a saturated worker
     # pool never refused a spawn (C-03). Drive it from the registry's live
     # spawn count.
-    allowed, reason = _veto(req, worker_idle=not _registry.is_saturated())
+    allowed, reason = _veto(req, worker_idle=not _registry.is_saturated(),
+                            live=_registry.live_count())
     if not allowed:
         return f"error: spawn vetoed — {reason}"
     spawn_id = str(uuid.uuid4())
@@ -212,7 +222,8 @@ def spawn_swarm(slices: list[dict[str, str]], rationale: str = "") -> str:
     drain if the parent stops. Max width: 8 slices.
     """
     req = SpawnRequest(kind="swarm", prompt="", slices=slices)
-    allowed, reason = _veto(req, worker_idle=not _registry.is_saturated())
+    allowed, reason = _veto(req, worker_idle=not _registry.is_saturated(),
+                            live=_registry.live_count())
     if not allowed:
         return f"error: swarm vetoed — {reason}"
     spawn_ids = []

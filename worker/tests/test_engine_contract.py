@@ -200,12 +200,39 @@ async def test_file_read_existing_file(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_terminal_exec_readonly_variant_blocks_mutating(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """The readonly terminal_exec (readonly.py) blocks mutating commands;
-    the mutating variant (mutating.py) allows them after approval."""
+    """The readonly terminal_exec (readonly.py) blocks mutating commands.
+
+    NOTE: this pins the READONLY registry variant only (call_tool). Production
+    dispatch (call_tool_direct) routes terminal_exec to the MUTATING manager
+    (C-02) — the real production boundary is the approval gate +
+    is_destructive_command, pinned by test_terminal_exec_direct_dispatch_*."""
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     r = await call_tool("terminal_exec", {"command": "rm -rf /"})
     assert r["kind"] == "error"
     assert "blocked" in r["output"].lower() or "error" in r["output"].lower()
+
+
+@pytest.mark.asyncio
+async def test_terminal_exec_direct_dispatch_executes_mutating_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The REAL production dispatch (call_tool_direct) routes terminal_exec
+    to the mutating TerminalManager — a command the readonly variant would
+    block must EXECUTE here (the gate upstream already decided)."""
+    from worker.engine.tools import call_tool_direct
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+    r = await call_tool_direct("terminal_exec", {"command": "mkdir direct-dispatch-proof"})
+    assert r["kind"] == "success", f"mutating dispatch did not execute: {r['output']}"
+    assert (tmp_path / "direct-dispatch-proof").is_dir()
+
+
+def test_terminal_exec_destructive_never_always_allowable():
+    """The production boundary for destructive commands post-C-02: they run
+    after approval, but is_destructive_command keeps them OUT of the
+    always_allow class — verbatim approval every single time."""
+    from worker.engine.tools.mutating import is_destructive_command
+    assert is_destructive_command("rm -rf /")
+    assert is_destructive_command("git push --force origin main")
+    assert is_destructive_command("git reset --hard")
+    assert not is_destructive_command("ls -la")
 
 
 @pytest.mark.asyncio

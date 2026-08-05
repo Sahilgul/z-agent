@@ -44,7 +44,7 @@ from langgraph.types import Command
 
 from worker.control import ControlListener, ControlMessage
 from worker.engine.approvals import ApprovalBroker
-from worker.engine.checkpointer import DeltaChannel, open_checkpointer
+from worker.engine.checkpointer import DeltaChannel, MirroredSaver, open_checkpointer
 from worker.engine.compaction import Compactor, SelfTuningLimit
 from worker.engine.events import EventEmitter
 from worker.engine.graph import build_graph
@@ -109,12 +109,12 @@ class EngineRunner:
         # spawn registry so a process reused across runs (or the spike
         # matrix running models sequentially in one process) can't inherit
         # the previous run's live spawns / watchdogs.
-        from worker.engine.fanout import reset_registry
+        from worker.engine.fanout import get_registry, reset_registry, set_current_thread_id
         reset_registry()
+        self._spawn_registry = get_registry()
         # M-14: scope the spawn registry's parent_thread_id to THIS runner
         # via a ContextVar (not the process-wide env), so concurrent/
         # sequential runs in one process can't cross-register spawns.
-        from worker.engine.fanout import set_current_thread_id
         set_current_thread_id(self.thread_id)
 
         self.tuning = SelfTuningLimit()
@@ -231,6 +231,11 @@ class EngineRunner:
 
         try:
             async with open_checkpointer() as saver:
+                # Mirror every checkpoint write to the DeltaChannel JSONL —
+                # the PHI-grade replay fallback when Postgres is unavailable
+                # and the edit-and-resend fork source. Previously constructed
+                # but never wired, so the fallback file was never written.
+                saver = MirroredSaver(saver, self.delta_channel, self.thread_id, self.context_id)
                 graph = build_graph(checkpointer=saver)
                 config = self._config()
 
@@ -258,8 +263,30 @@ class EngineRunner:
             await self._emit_engine_error(str(exc))
             return 1
         finally:
-            for task in (control_listener, control_pump, heartbeat, watchdog):
+            tasks = (control_listener, control_pump, heartbeat, watchdog)
+            for task in tasks:
                 task.cancel()
+            # Cancellation only SCHEDULES CancelledError — gather the tasks
+            # so their cleanup completes BEFORE the Redis connections they
+            # may still be publishing on are closed underneath them.
+            await asyncio.gather(*tasks, return_exceptions=True)
+            # CASCADE DRAIN: the thread is stopping (kill, idle-complete,
+            # SIGTERM, or failure) — stop every spawn registered under it.
+            # Previously drain() existed but had no production caller, so
+            # spawned threads outlived their parent contrary to the contract.
+            drained = self._spawn_registry.drain(self.thread_id)
+            if drained:
+                try:
+                    from zagent_contracts import StepKind
+                    await self.forwarder.publish_events([self.emitter._next(
+                        StepKind.STATUS,
+                        f"cascade drain: {len(drained)} spawn(s) stopped",
+                        {"kind": "cascade_drain", "drained": drained},
+                        self.task_id, None,
+                    )])
+                except Exception:  # noqa: BLE001
+                    log.warning("cascade-drain event publish failed",
+                                run_id=self.run_id, thread_id=self.thread_id)
             await self.forwarder.close()
             await self.broker.close()
             await self.control.close()
@@ -282,7 +309,14 @@ class EngineRunner:
             usage=result.get("last_usage"),
         )
         await self.forwarder.publish_events([boundary])
-        self._record_episode(episodic, result)
+        try:
+            self._record_episode(episodic, result)
+        except Exception as exc:  # noqa: BLE001
+            # Episodic memory is a best-effort side-effect. A SQLite blip
+            # (disk full, locked db) must NEVER retroactively fail a turn
+            # that already succeeded.
+            log.warning("episodic record failed — memory side-effect, turn unaffected",
+                        run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
 
         if err:
             self.status = "failed"
@@ -362,6 +396,13 @@ class EngineRunner:
                 return
             if msg.type == "nudge":
                 await self._pending_nudges.put(msg)
+            elif msg.type == "spawn_done":
+                # The feed signals a spawned subagent/swarm thread finished.
+                # This is the production path that moves a spawn out of
+                # "running" (besides the 2h watchdog) — without it the
+                # registry saturated permanently after SWARM_MAX_SLICES
+                # spawns and every subsequent fan-out was vetoed.
+                self._spawn_registry.finish(msg.text)
             elif msg.type == "mode":
                 try:
                     self.mode = Mode(msg.mode)

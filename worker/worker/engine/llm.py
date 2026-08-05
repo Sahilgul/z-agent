@@ -140,8 +140,23 @@ def _is_retryable(exc: Exception) -> bool:
     status = getattr(exc, "status_code", None)
     if status in (429, 529, 500, 502, 503, 504):
         return True
-    # Transport errors (connection, timeout) are retryable
-    return isinstance(exc, (ConnectionError, TimeoutError))
+    # Transport errors (connection, timeout) are retryable. This must cover
+    # the SDK wrappers too: openai.APIConnectionError / APITimeoutError and
+    # the underlying httpx.TransportError do NOT subclass ConnectionError /
+    # TimeoutError, so the most common transient gateway faults previously
+    # failed the turn on the first attempt without any retry.
+    transport_types: tuple[type[BaseException], ...] = (ConnectionError, TimeoutError)
+    try:
+        import httpx
+        transport_types += (httpx.TransportError,)
+    except ImportError:  # pragma: no cover
+        pass
+    try:
+        import openai
+        transport_types += (openai.APIConnectionError, openai.APITimeoutError)
+    except ImportError:  # pragma: no cover
+        pass
+    return isinstance(exc, transport_types)
 
 
 def _retry_after(exc: Exception) -> float | None:

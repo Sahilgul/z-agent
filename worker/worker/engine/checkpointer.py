@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import UTC
 from pathlib import Path
 from typing import Any
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
+
+log = logging.getLogger(__name__)
 
 
 class DeltaChannel:
@@ -55,6 +59,44 @@ def _append_line(path: Path, line: str) -> None:
 def _now_iso() -> str:
     from datetime import datetime
     return datetime.now(UTC).isoformat()
+
+
+class MirroredSaver(BaseCheckpointSaver):
+    """Checkpointer proxy that mirrors every checkpoint write to a DeltaChannel.
+
+    LangGraph requires a BaseCheckpointSaver INSTANCE (ensure_valid_checkpointer
+    rejects duck-typed proxies), so this subclasses it and delegates every
+    operation to the wrapped saver, overriding only `aput` to append the
+    mirrored JSONL line. The mirror is the PHI-grade replay/fork fallback —
+    best-effort: a failed append must NEVER fail the checkpoint write itself.
+    """
+
+    def __init__(self, inner: Any, delta_channel: DeltaChannel,
+                 thread_id: str, context_id: str) -> None:
+        super().__init__()
+        self._inner = inner
+        self._delta = delta_channel
+        self._thread_id = thread_id
+        self._context_id = context_id
+
+    def __getattr__(self, name: str) -> Any:
+        # Delegate everything not explicitly overridden (aget, aget_tuple,
+        # alist, aput_writes, adelete_thread, get_next_version, ...).
+        return getattr(self._inner, name)
+
+    async def aput(self, config: Any, checkpoint: Any, metadata: Any,
+                   new_versions: Any) -> Any:
+        result = await self._inner.aput(config, checkpoint, metadata, new_versions)
+        try:
+            await self._delta.append(
+                self._thread_id, self._context_id,
+                str(checkpoint.get("id", "")),
+                dict(metadata or {}),
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("delta-channel mirror append failed — fallback degraded, write kept",
+                        exc_info=True)
+        return result
 
 
 def make_checkpointer(*, use_postgres: bool = False, conn_string: str | None = None,
@@ -140,4 +182,4 @@ class _PostgresCtx:
             await self._ctx.__aexit__(*exc)
 
 
-__all__ = ["DeltaChannel", "make_checkpointer", "open_checkpointer"]
+__all__ = ["DeltaChannel", "MirroredSaver", "make_checkpointer", "open_checkpointer"]

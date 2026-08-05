@@ -60,7 +60,13 @@ class MCPManager:
 
     async def _refresh_one(self, name: str) -> dict[str, Any]:
         st = self.status.get(name)
-        cfg = next((s for s in self.servers if s.get("name", "") == name), None)
+        # Use the SAME name fallback as __init__ (server-{i}) — the old
+        # `s.get("name", "")` lookup never matched a nameless config, so a
+        # server without an explicit `name` was permanently unreachable.
+        cfg = next(
+            (s for i, s in enumerate(self.servers) if (s.get("name") or f"server-{i}") == name),
+            None,
+        )
         if st is None or cfg is None:
             return {"kind": "error", "ok": False, "error": f"unknown server {name}"}
         last_error: str | None = None

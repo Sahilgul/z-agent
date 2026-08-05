@@ -397,12 +397,16 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
             # left the streak intact and the 3-denial breaker misfired.
             denial_streak = 0
             continue
+        # An explicit ASK rule forces a card EVEN when the capability default
+        # wouldn't (e.g. ASK on a readonly tool) and even in autonomous mode —
+        # the rule is the operator's explicit request for a human decision.
+        ask_required = effect is Effect.ASK
         # knowledge_draft scope=user is auto-approved.
-        if name == "knowledge_draft" and args.get("scope") == "user":
+        if not ask_required and name == "knowledge_draft" and args.get("scope") == "user":
             approved[tc_id] = {"approved": True, "via": "scope_user_auto", "args": args}
             denial_streak = 0  # H-02: auto-allow breaks the denial streak
             continue
-        if not needs_approval(name, autonomy):
+        if not ask_required and not needs_approval(name, autonomy):
             approved[tc_id] = {"approved": True, "via": "not_required"}
             denial_streak = 0  # H-02: auto-allow breaks the denial streak
             continue
@@ -452,10 +456,14 @@ def _after_gate(state: EngineState) -> str:
     last = messages[-1] if messages else None
     tool_calls = getattr(last, "tool_calls", None) or []
     approved = state.get("approved_calls", {})
+    permissions_active = state.get("permissions_active")
     for tc in tool_calls:
         tc_id = tc.get("id", "")
         name = tc.get("name", "")
-        if tc_id not in approved and needs_approval(name, autonomy):
+        # With an active ruleset, undecided calls route back through the gate
+        # even when needs_approval is False — an ASK rule on a readonly tool
+        # requires a human decision before execution.
+        if tc_id not in approved and (permissions_active or needs_approval(name, autonomy)):
             return "gate"
     return "tools"
 
@@ -1011,9 +1019,14 @@ def _should_continue(state: EngineState) -> str:
         # and blocks deny without a card. Previously the ruleset was never
         # consulted here, so DENY/ASK on readonly tools was bypassed (C-05).
         autonomy = _autonomy_of(state)
-        if autonomy != "autonomous" and (
-            state.get("permissions_active")
-            or any(needs_approval(tc.get("name", ""), autonomy) for tc in tool_calls)
+        # An active ruleset ALWAYS routes through the gate — even in
+        # autonomous mode. The gate is the only place DENY/ASK rule effects
+        # are enforced; skipping it in autonomous made hard policies
+        # (e.g. "deny git push --force") decorative exactly when no human
+        # backstop exists. Without a ruleset, needs_approval already returns
+        # False for autonomous, so the fast path is preserved.
+        if state.get("permissions_active") or any(
+            needs_approval(tc.get("name", ""), autonomy) for tc in tool_calls
         ):
             return "gate"
         return "tools"
