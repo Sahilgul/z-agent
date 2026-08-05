@@ -50,10 +50,17 @@ export function CommandPalette() {
         e.preventDefault();
         setOpen((v) => !v);
       }
+      // M-78: wire the ⌘N hint — "new run" was display-only (the hint was
+      // dead). ⌘N now triggers the same action as the "new run" palette item.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        navigate("/");
+        setOpen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [navigate]);
 
   const go = (to: string) => {
     navigate(to);

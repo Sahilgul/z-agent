@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "../Markdown";
 import { CARD_META, type CardKind } from "./cardTypes";
@@ -11,14 +11,21 @@ export function Viewer({ item, onClose }: {
   item: import("./Feed").FeedItem | null;
   onClose: () => void;
 }) {
+  // M-79: the keydown listener re-subscribed on every parent render (item
+  // is a new object reference each streaming tick), so ESC could drop
+  // mid-stream as the effect cleaned up + re-bound. Bind the listener once
+  // and read the latest item/onClose from refs so ESC never drops.
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
-    if (!item) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && itemRef.current) onCloseRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [item, onClose]);
+  }, []);
 
   if (!item) return null;
   const meta = CARD_META[item.kind as CardKind];

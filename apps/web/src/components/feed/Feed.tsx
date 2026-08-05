@@ -179,7 +179,14 @@ export function Feed({
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    // M-77: smooth-scroll on every streamTick change fought itself during
+    // event bursts (competing smooth animations jittered/fought). Only
+    // auto-scroll when the user is already near the bottom (don't yank a
+    // reader who scrolled up to read), and use instant ("auto") behavior so
+    // rapid bursts don't queue overlapping smooth scrolls.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom > 120) return;  // user scrolled up to read
+    el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
   }, [streamTick, filtered.length]);
 
   return (
