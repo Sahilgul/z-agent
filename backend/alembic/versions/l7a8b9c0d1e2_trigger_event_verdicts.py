@@ -23,7 +23,7 @@ def upgrade() -> None:
     # the log row.
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    existing = {t["name"] for t in inspector.get_table_names()}
+    existing = set(inspector.get_table_names())
     if "trigger_event_verdicts" not in existing:
         op.create_table(
             "trigger_event_verdicts",
@@ -41,6 +41,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    existing = {t["name"] for t in inspector.get_table_names()}
+    existing = set(inspector.get_table_names())
     if "trigger_event_verdicts" in existing:
         op.drop_table("trigger_event_verdicts")
