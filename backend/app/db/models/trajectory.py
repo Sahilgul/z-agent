@@ -1,5 +1,5 @@
 """trajectory_summaries — per-thread distilled trajectory, written at run end FROM
-DAY ONE (plan §7) so the Phase 5 Sleep-Time Distiller has history to mine.
+DAY ONE so the Sleep-Time Distiller has history to mine.
 Episodic recall: a user's OWN trajectory_summaries are in their retrieval search
 space (privacy-safe by construction — your own history is yours).
 """

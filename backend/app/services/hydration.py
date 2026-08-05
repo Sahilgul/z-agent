@@ -1,4 +1,4 @@
-"""Hydration service (plan §8/WU5): deterministic pre-run hydration.
+"""Hydration service: deterministic pre-run hydration.
 
 Three concerns, all pure code (no LLM):
   * my_tickets — the user's ADO "My active tickets" (AssignedTo the stored
@@ -23,7 +23,7 @@ log = get_logger(service="hydration")
 
 async def my_tickets(user, ado_client: AdoClient | None = None) -> list[dict]:
     """The user's ADO 'My active tickets'. Requires a bound ado_descriptor
-    (identity binding §1b); returns [] when unbound so the UI can prompt
+    (identity binding); returns [] when unbound so the UI can prompt
     the user to bind their ADO account."""
     descriptor = getattr(user, "ado_descriptor", None)
     if not descriptor:
@@ -67,7 +67,7 @@ async def hydrate_title(work_item_id: int | None, task: str,
 
 
 class PrewarmPool:
-    """Stub prewarm pool (WU5): records desired prewarms so the API surface is
+    """Stub prewarm pool: records desired prewarms so the API surface is
     testable without Docker. The real pool stamps read-only clones on a warmed
     worker; this stub records intent and reports a per-repo status. A single
     shared instance lives on app.state."""

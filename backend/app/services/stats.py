@@ -1,4 +1,4 @@
-"""Cost/token dashboards (plan Phase 5): METADATA-ONLY team-wide rollups of
+"""Cost/token dashboards: METADATA-ONLY team-wide rollups of
 runs — costs, tokens, counts. Never content (titles, tasks, events). Gateway
 metering lands on Run.cost_usd/tokens; this is the read side."""
 

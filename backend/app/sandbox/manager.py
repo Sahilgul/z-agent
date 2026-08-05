@@ -1,4 +1,4 @@
-"""Sandbox manager (plan §3/§8): Docker SDK — stamp, run, destroy, session volumes.
+"""Sandbox manager: Docker SDK — stamp, run, destroy, session volumes.
 
 Stamping (DECIDED): WRITABLE threads get a self-contained local clone from golden
 (same-fs hardlinks — seconds; the thread owns its .git; shredding is rm -rf).
@@ -6,7 +6,7 @@ READ-ONLY context repos are read-only bind mounts of golden. Worktrees are
 rejected for writable threads (absolute .git pointer, shared object store writes,
 prune lifecycle — three collisions with the mount rules).
 
-Durable session volume (BUG-1 fix): ~/.claude mounts PER-LANE to
+Durable session volume: ~/.claude mounts PER-LANE to
 sessions/<run_id>/<thread_id>/ so resume/fork_session survive workspace shredding.
 Retention 30d default; after expiry the run is replay-only.
 """
@@ -51,7 +51,7 @@ def session_subpath(run_id: str, thread_id: str) -> Path:
 
 def stamp_clone(repo: Repo, run_id: str, thread_id: str) -> Path:
     """Synchronous final fetch (agent always starts on latest), then a
-    self-contained clone stamp at origin/<integration_branch> (plan §3)."""
+    self-contained clone stamp at origin/<integration_branch>."""
     settings = get_settings()
     golden_repo = settings.golden_dir / repo.name
     dest = settings.workspaces_dir / run_id / repo.name
@@ -77,7 +77,7 @@ def _env() -> dict[str, str]:
 
 
 def stamp_mcp_config(workspace: Path, repo: Repo) -> bool:
-    """Playwright MCP wiring (plan §2/WU3): when the repo profile opts in
+    """Playwright MCP wiring: when the repo profile opts in
     (``repo.profile.extra["playwright_mcp"]`` — the UI-repo flag), write a
     .mcp.json into the stamped workspace so the thread's agent SDK picks up the
     playwright-mcp server at session start. The backend never RUNS a Playwright
@@ -131,7 +131,7 @@ class SandboxManager:
             # the gateway does not publish and the thread key is not scoped to.
             "MODEL": self.settings.gateway_model,
             "WORKSPACE_DIR": "/workspace",
-            # --- Custom engine (RB cutover) ---
+            # --- Custom engine ---
             "ENGINE": self.settings.engine_runtime,
             "MODE": self.settings.engine_default_mode,
             "AUTONOMY": _engine_autonomy(permission_mode),
@@ -145,7 +145,7 @@ class SandboxManager:
         if thread.session_id:
             env["RESUME_SESSION_ID"] = thread.session_id
         if self.settings.package_proxy_url:
-            # Phase 2: threads install deps through the allowlisting proxy only.
+            # Threads install deps through the allowlisting proxy only.
             proxy = self.settings.package_proxy_url
             env["HTTP_PROXY"] = proxy
             env["HTTPS_PROXY"] = proxy
@@ -163,8 +163,8 @@ class SandboxManager:
                            permission_mode: str, writable_repo: Repo | None,
                            context_repos: list[Repo],
                            resume_from_thread_id: str | None = None) -> str:
-        """Start the worker container. Phase 1 ladder: Ask = read-only golden
-        mounts only; writable clone stamps arrive with Phase 2 coding threads.
+        """Start the worker container. Ask ladder: Ask = read-only golden
+        mounts only; writable clone stamps arrive with coding threads.
 
         When resume_from_thread_id is set, the new thread mounts the PREVIOUS
         thread's session volume instead of a fresh one — the SDK's conversation
@@ -223,7 +223,7 @@ class SandboxManager:
 
     def shred_workspace(self, run_id: str) -> None:
         """Workspaces are destroyed at run end; survivors are branches/PRs,
-        events (DB), knowledge, and the session volume (plan §3)."""
+        events (DB), knowledge, and the session volume."""
         path = self.settings.workspaces_dir / run_id
         if path.exists():
             shutil.rmtree(path, ignore_errors=True)

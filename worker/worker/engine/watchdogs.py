@@ -1,13 +1,13 @@
-"""Team watchdogs (plan §11, Phase 8) — drift, collision, budget, idle.
+"""Team watchdogs — drift, collision, budget, idle.
 
 The team layer runs alongside the engine, watching the run's threads for
-problems that need human attention. Phase 8 ships:
+problems that need human attention. It ships:
 
   - DRIFT WATCHDOG: a thread is "drifting" if its tool-success rate drops
     over a window (event-based) OR if it's been running with no progress for
-    too long (time-based). Fires a drift event; Phase 8 does NOT auto-stop
+    too long (time-based). Fires a drift event; does NOT auto-stop
     (that's blocked-escalation).
-  - COLLISION RADAR v1 (warn-only): two threads' repo scopes overlap. Phase 8
+  - COLLISION RADAR v1 (warn-only): two threads' repo scopes overlap. It
     WARNS only — it does not refuse the spawn (that's the engine-side veto in
     fanout.py). The warning surfaces to the human.
   - BUDGET REMINDERS: at 50% and 80% of a thread/run/goal budget, fire a
@@ -16,7 +16,7 @@ problems that need human attention. Phase 8 ships:
     for completion (the engine's idle watchdog already handles this; the
     team layer surfaces it to the human so they know the thread is done).
 
-The critic×3 merged rubric (plan §8) wraps the implement/verify stages of
+The critic×3 merged rubric wraps the implement/verify stages of
 goal mode. Three critic passes (correctness, completeness, risk) with a
 merged rubric; failures route to blocked-escalation (the only human gate
 inside goal mode besides clarify).
@@ -143,7 +143,7 @@ class IdleGate:
         return status == "idle" and idle_for_s > self.idle_ttl_s
 
 
-# --- Critic×3 merged rubric (plan §8) ---
+# --- Critic×3 merged rubric ---
 
 class CriticDimension(str, Enum):
     CORRECTNESS = "correctness"

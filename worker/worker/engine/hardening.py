@@ -1,4 +1,4 @@
-"""Hardening harness (plan §5, Phase 5) — the 30-turn soak + SLO/load tests.
+"""Hardening harness — the 30-turn soak + SLO/load tests.
 
 This is the operational gate before cutting the CAS seam. It runs the final
 engine (not the spike) through:
@@ -10,7 +10,7 @@ engine (not the spike) through:
 
 Much of this is operational (needs live gateway + containers); the code here
 is the harness that runs inside the worker container. The dual-runtime soak
-(Phase 5) compares this engine against the legacy CAS runtime on the same
+compares this engine against the legacy CAS runtime on the same
 task; the canary flips traffic to the new engine at 10% → 50% → 100%.
 """
 
@@ -60,7 +60,7 @@ class SoakResult:
         return s[int(len(s) * 0.95)]
 
 
-# --- SLO thresholds (plan §5 — fixed pre-run) ---
+# --- SLO thresholds (fixed pre-run) ---
 
 SLO = {
     "min_turns": 30,
@@ -86,7 +86,7 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
 
     emitter = EventEmitter(run_id, thread_id)
     graph = build_graph()
-    _checkpointer = make_checkpointer()  # wired for Postgres in Phase 5 hardening
+    _checkpointer = make_checkpointer()  # wired for Postgres in hardening
 
     state: EngineState = {
         "run_id": run_id, "thread_id": thread_id, "context_id": thread_id,

@@ -1,4 +1,4 @@
-"""Push notifications + autonomy promotion tests (plan Phase 4): subscription
+"""Push notifications + autonomy promotion tests: subscription
 upsert/prune, injected sender tallies, deep links, evidence-based cap ladder,
 clamp semantics, review-bot normalizer + trigger task text.
 """

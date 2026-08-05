@@ -1,5 +1,5 @@
-/** Pure run-state logic (plan §8 lib/runMachine.ts) — the tested heart of the
- *  session: stage presentation, live-state interaction rules (§1a), watchdog
+/** Pure run-state logic — the tested heart of the
+ *  session: stage presentation, live-state interaction rules, watchdog
  *  detection, and the swarm critical path. No React imports. */
 
 import type { Thread, RunStage } from "../types";
@@ -34,7 +34,7 @@ export function stageMeta(stage: RunStage): StageMeta {
 
 export const RAIL_STAGES = RAIL;
 
-/** §1a live-state rules: while the agent WORKS, decision buttons hide; the
+/** Live-state rules: while the agent WORKS, decision buttons hide; the
  *  Stop button and typed Lead-nudges stay available. The backend's
  *  available_actions is the source of truth for WHAT may be offered; this
  *  decides WHEN the UI may show them. */
@@ -64,7 +64,7 @@ const TERMINAL_STAGES = new Set([
 ]);
 
 /** A thread is a watchdog candidate when it claims to be active but its
- *  heartbeat has gone stale — the UI shows "nudge / let it run" (§4). */
+ *  heartbeat has gone stale — the UI shows "nudge / let it run". */
 export function isStaleThread(thread: Thread, now: number): boolean {
   if (thread.status !== "running" && thread.status !== "queued") return false;
   if (!thread.heartbeat_at) return thread.status === "running";
@@ -82,7 +82,7 @@ export function staleThreads(
 }
 
 // ------------------------------------------------------------- critical path
-/** Critical path (§4 swarm view): the chain whose completion gates the run.
+/** Critical path (swarm view): the chain whose completion gates the run.
  *  v1 heuristic — among ACTIVE threads, the one carrying the most work (steps)
  *  is the head of the critical path; ties break by oldest thread. Terminal threads
  *  are never on it. */
@@ -113,7 +113,7 @@ export interface StreamItem {
   detail: Record<string, unknown>;
 }
 
-/** Typed status sub-kinds → display card kinds (RF console parity, §19 card
+/** Typed status sub-kinds → display card kinds (console parity, card
  *  taxonomy): todo-checklist, compaction card, ⚠ warning, ◆ recap, approvals. */
 const DETAIL_KIND_MAP: Record<string, string> = {
   "todo-checklist": "todo_checklist",
@@ -137,7 +137,7 @@ export function displayKind(e: { kind: string; detail: Record<string, unknown> }
  *  session-init / thinking_tokens / turn-complete bookkeeping. Rendering them
  *  makes one healthy reply look like a stack of restarts, so untyped status
  *  events never reach the stream. TYPED status events (todo, compaction,
- *  warning, recap, approval) are progress and DO render (RF). */
+ *  warning, recap, approval) are progress and DO render. */
 function isPlumbing(e: { kind: string; detail?: Record<string, unknown> }): boolean {
   if (e.kind !== "status") return false;
   const sub = typeof e.detail?.kind === "string" ? e.detail.kind : null;

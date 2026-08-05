@@ -1,4 +1,4 @@
-"""RD deferred tools (Phase 10, R34): web_search, file_delete, terminal_await,
+"""Deferred tools: web_search, file_delete, terminal_await,
 playbook_load, mode_request. All DEFERRED tier — never bound by default,
 loaded via tool_search. (tool_search itself lives in discovery.py and is
 Tier 0.)
@@ -17,7 +17,7 @@ from worker.engine.security import wrap_untrusted
 from worker.engine.tools.readonly import _resolve as _resolve_path
 
 AWAIT_TIMEOUT_DEFAULT_S = 120.0
-# R24#1 odd-interval poll rules: irregular cadence, never a fixed tight loop.
+# Odd-interval poll rules: irregular cadence, never a fixed tight loop.
 POLL_CADENCE_S = (1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 10.0)
 
 
@@ -60,7 +60,7 @@ def file_delete(file_path: str) -> str:
 async def terminal_await(job_id: str, pattern: str | None = None,
                          timeout_s: float = AWAIT_TIMEOUT_DEFAULT_S) -> str:
     """Block on a terminal_exec background job until it exits OR its output
-    matches a regex pattern. Polls on an irregular cadence (R24#1).
+    matches a regex pattern. Polls on an irregular cadence.
 
     Args:
         job_id: the background job id from terminal_exec.
@@ -92,8 +92,8 @@ async def terminal_await(job_id: str, pattern: str | None = None,
 
 @tool
 def playbook_load(name: str) -> str:
-    """Load a T5 procedural playbook into context by name. Playbooks are
-    versioned team procedures (§9 T5 precedence/routing rules apply).
+    """Load a procedural playbook into context by name. Playbooks are
+    versioned team procedures (precedence/routing rules apply).
 
     Args:
         name: the playbook name (without .md).
@@ -117,7 +117,7 @@ def re_fullmatch_safe(name: str) -> bool:
 @tool
 def mode_request(target_mode: str, reason: str) -> str:
     """REQUEST a mode transition (never a silent self-switch). Routed through
-    the audited §8 transition path: team policy + authorizer identity apply;
+    the audited mode transition path: team policy + authorizer identity apply;
     the request is approval-routed — a human approves before the mode changes.
 
     Args:
@@ -156,7 +156,7 @@ async def call_deferred_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _web_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search provider via the gateway (R34): POST ZAGENT_SEARCH_ENDPOINT.
+    """Search provider via the gateway: POST ZAGENT_SEARCH_ENDPOINT.
     Unconfigured endpoint is a typed error, never a crash."""
     endpoint = os.environ.get("ZAGENT_SEARCH_ENDPOINT", "").strip()
     if not endpoint:

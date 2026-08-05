@@ -1,4 +1,4 @@
-"""Autonomy promotion (plan Phase 4): the dial unlocks on EVIDENCE, not on
+"""Autonomy promotion: the dial unlocks on EVIDENCE, not on
 request. Computed, never stored — a demotion needs no migration, and the cap
 is always honest at read time.
 
@@ -51,7 +51,7 @@ def clamp(requested: str | None, user_id: int) -> str:
     """A requested level above the cap is clamped DOWN, silently — the run card
     shows the effective level, and the composer greys out what's locked."""
     if not requested:
-        return "gated"  # product default (§6)
+        return "gated"  # product default
     if requested not in LADDER:
         return "supervised"
     cap = cap_for(user_id)["cap"]

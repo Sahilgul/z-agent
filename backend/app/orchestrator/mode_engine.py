@@ -1,10 +1,10 @@
-"""Mode engine: resolves a mode name to its blueprint (plan §6 — modes as DB rows
+"""Mode engine: resolves a mode name to its blueprint (modes as DB rows
 + one blueprint file per mode).
 
-Resolution order (plan §6 Phase 2):
+Resolution order:
   1. The Mode DB row's ``topology`` column selects the blueprint (modes are data:
      persona/permissions/playbooks live on the row; topology stays code).
-  2. Fallback: the mode ``name`` equals a blueprint name (Phase 1 ask-mode path).
+  2. Fallback: the mode ``name`` equals a blueprint name (ask-mode path).
 
 The DB lookup degrades to the name fallback when the modes table is unavailable
 (pre-migration boot, isolated unit tests that never swap the global engine) so

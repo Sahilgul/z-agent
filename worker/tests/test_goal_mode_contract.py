@@ -1,4 +1,4 @@
-"""Contract tests for Phase 7 goal mode core (plan §17)."""
+"""Contract tests for goal mode core."""
 
 from __future__ import annotations
 

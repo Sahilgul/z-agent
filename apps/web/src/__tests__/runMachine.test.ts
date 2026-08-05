@@ -25,7 +25,7 @@ describe("stageMeta", () => {
   });
 });
 
-describe("visibleActions (§1a live-state rules)", () => {
+describe("visibleActions (live-state rules)", () => {
   it("hides decision buttons while the agent works, keeps Stop", () => {
     const shown = visibleActions("developing", ["stop_run", "create_pr", "abandon_run"]);
     expect(shown).toEqual(["stop_run"]);
@@ -118,7 +118,7 @@ describe("foldStream", () => {
     expect(items[1].role).toBe("agent");
   });
 
-  // --- RF console parity: typed status events render as their card kinds ---
+  // --- console parity: typed status events render as their card kinds ---
 
   it("maps typed status events to their display card kinds", () => {
     const items = foldStream(

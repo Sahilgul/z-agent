@@ -1,7 +1,7 @@
-"""Contract tests for the Phase 2 engine (plan §17 — highest leverage).
+"""Contract tests for the engine (highest leverage).
 
 These do NOT hit the gateway. They validate:
-- The EventEmitter produces correctly-shaped StepEvents (Phase 1 contract).
+- The EventEmitter produces correctly-shaped StepEvents.
 - Tool-use -> tool-result pairing yields one complete event per tool.
 - Secrets redaction is applied at the event boundary.
 - The capability registry gates approval correctly.
@@ -123,7 +123,7 @@ def test_sensitive_path_detection():
 # ----------------------------------------------------------- Capability registry
 
 def test_readonly_tools_need_no_approval():
-    # Phase 3: file_read/search/glob stay readonly; terminal_exec is now MUTATING.
+    # file_read/search/glob stay readonly; terminal_exec is now MUTATING.
     for name in ("file_read", "file_search", "file_glob"):
         assert capability_of(name).value == "readonly"
         assert needs_approval(name, "supervised") is False

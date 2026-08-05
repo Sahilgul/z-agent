@@ -1,11 +1,11 @@
 """Event bus: worker -> Redis STREAMS (durable ingest, consumer-group ack) ->
-backend -> DB + WS (plan §8 events split).
+backend -> DB + WS (events split).
 
 The events table is the PHI-grade system of record; Streams + acks mean a backend
 crash mid-write never loses an event. Every stored event is also appended to the
 run's flat JSONL transcript (services/transcript.py) for open/export without a
 database. Transient typing deltas ride pub/sub ONLY.
-Poison-pill path (plan §10): a StepEvent failing Pydantic validation goes to the
+Poison-pill path: a StepEvent failing Pydantic validation goes to the
 DEAD-LETTER stream + watchdog card — never acked-and-dropped (that would silently
 hole the record), never blocks the consumer group.
 """

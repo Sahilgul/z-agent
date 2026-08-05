@@ -1,4 +1,4 @@
-"""Permission glob rulesets with findLast precedence (plan §7 cross-cutting R6).
+"""Permission glob rulesets with findLast precedence.
 
 Every tool belongs to a permission CLASS (the capability map in tools/) and a
 call may carry glob RULESETS that refine the class per-call. Rules match on
@@ -13,13 +13,13 @@ terminal_exec command, the file path):
 
 findLast precedence (donor: opencode permission.ts): the LAST matching rule
 wins — later, more-specific team/user overlays refine earlier broad presets
-without reordering. No match -> the capability-map default applies (R6:
-"extends the capability map", never replaces it).
+without reordering. No match -> the capability-map default applies
+("extends the capability map", never replaces it).
 
 Effects:
   allow -> executes without a card (still audited via StepEvents)
   ask   -> the approval gate (two-phase verbatim)
-  deny  -> typed error result, never reaches the gate (hard git policies §11)
+  deny  -> typed error result, never reaches the gate (hard git policies)
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Durability + rollback-drill tests (plan §5, Phase 5).
+"""Durability + rollback-drill tests.
 
 Validates:
 - Redis stream events survive a consumer disconnect (the events table is the
@@ -172,7 +172,7 @@ def test_slo_fails_on_short_soak():
     assert verdict["checks"]["turns_met"] is False
 
 
-# --- StepEvent schema durability (Phase 1 contract enforced) ---
+# --- StepEvent schema durability (contract enforced) ---
 
 def test_step_event_round_trips_through_json():
     """A StepEvent survives JSON serialization (the events table stores it as JSON)."""

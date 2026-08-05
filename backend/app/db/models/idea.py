@@ -1,4 +1,4 @@
-"""Ideas space (plan §6) — SHARED team-wide by design, never privacy-scoped.
+"""Ideas space — SHARED team-wide by design, never privacy-scoped.
 Every member's comments persist permanently; Counsel's comments live alongside
 human comments forever (author_type=agent, author_ref='counsel').
 """

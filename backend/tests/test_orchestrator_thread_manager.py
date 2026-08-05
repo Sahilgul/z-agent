@@ -213,7 +213,7 @@ async def test_spawn_many_spawns_all_specs(session, make_user, monkeypatch):
 
 
 async def test_spawn_many_queues_past_cap_and_announces_once(session, make_user, monkeypatch):
-    """§4: over-cap requests queue deterministically AND the UI says so (one
+    """Over-cap requests queue deterministically AND the UI says so (one
     queued note per waiting thread, not a spam loop)."""
     run = _make_run(session, make_user)
     relay = _FakeRelay()

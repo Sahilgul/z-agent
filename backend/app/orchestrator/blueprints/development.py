@@ -1,7 +1,7 @@
-"""Development mode blueprint (plan §6/§9): hydrate -> develop -> stamp -> evaluate.
+"""Development mode blueprint: hydrate -> develop -> stamp -> evaluate.
 
 hydrate   (deterministic): load the approved Plan + steps from the DB by run_id;
-            resolve the repo + the mode's writable/repos scope (modes-as-data §6);
+            resolve the repo + the mode's writable/repos scope (modes-as-data);
             stamp a writable clone path on Run.session_volume_path and compute the
             deterministic branch name.
 develop   (agentic developer thread): one developer thread with the approved plan steps
@@ -71,7 +71,7 @@ class DevelopmentBlueprint(Blueprint):
                 .first()
             )
             if plan is None:
-                # Strict gate (plan §2): development only ever runs on a plan the
+                # Strict gate: development only ever runs on a plan the
                 # human approved — never silently on a draft. The approval of
                 # record is what makes the evidence trail auditable.
                 raise RuntimeError("no approved plan to develop")

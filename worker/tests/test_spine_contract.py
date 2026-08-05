@@ -1,10 +1,10 @@
-"""Contract tests for the RA spine (plan §23 — DONE = WIRED + EVIDENCED).
+"""Contract tests for the spine (DONE = WIRED + EVIDENCED).
 
 These drive the REAL assembled graph (agent -> approval_gate -> tools ->
 compaction -> goal_router) with a scripted LLM — no gateway. They evidence:
 
   1. a 5-turn development thread on the real graph with a checkpointer;
-  2. compaction firing on a seeded overflow (the §9 trigger);
+  2. compaction firing on a seeded overflow (the compaction trigger);
   3. interrupt/resume carrying an approval across the checkpoint boundary —
      including across a GRAPH REBUILD (the container-replacement case);
   4. the 3-denial circuit breaker (blocked-escalation);
@@ -187,7 +187,7 @@ async def test_five_turn_development_thread_e2e(monkeypatch: pytest.MonkeyPatch,
 @pytest.mark.asyncio
 async def test_compaction_fires_on_seeded_overflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Seeded message overflow -> the compaction node prunes and emits the
-    compaction card. The §9 trigger is IN the run path, not just tested."""
+    compaction card. The compaction trigger is IN the run path, not just tested."""
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     (tmp_path / "x.txt").write_text("hello\n")
     collector = EventCollector()
@@ -267,7 +267,7 @@ async def test_context_overflow_forces_compaction_and_retries(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_approval_interrupt_resume_round_trip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Supervised file_write: the gate interrupt()s with the card payload;
-    Command(resume=allow) executes with the verbatim args. This is the plan §11
+    Command(resume=allow) executes with the verbatim args. This is the
     Redis-driver transport (interrupt -> publish -> await -> resume)."""
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     collector = EventCollector()

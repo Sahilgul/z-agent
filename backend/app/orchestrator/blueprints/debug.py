@@ -1,4 +1,4 @@
-"""Debug mode blueprint (plan §6/WU4): hydrate -> reproduce -> diagnose -> propose -> present.
+"""Debug mode blueprint: hydrate -> reproduce -> diagnose -> propose -> present.
 
 hydrate    (deterministic): resolve the repo (read-only), load the failing repro
              signal from the run title / ADO work item.
@@ -173,7 +173,7 @@ class DebugBlueprint(Blueprint):
                     success_criterion=step.success_criterion, status="pending",
                 ))
             transition(run, RunStage.AWAITING_USER)
-            # Handoff summary (plan §6): the inbox card shows the diagnosis, not
+            # Handoff summary: the inbox card shows the diagnosis, not
             # a blank run — auto_summary is the human's first read of the debug.
             diagnosis = (ctx.artifacts.get("diagnosis") or "").strip()
             confirmed = ctx.artifacts.get("failure_confirmed")

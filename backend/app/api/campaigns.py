@@ -1,4 +1,4 @@
-"""Campaign mode + delivery rollups + cost dashboard (plan Phase 5)."""
+"""Campaign mode + delivery rollups + cost dashboard."""
 
 from __future__ import annotations
 

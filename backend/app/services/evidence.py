@@ -1,4 +1,4 @@
-"""Deterministic evidence collection (plan §9): the control plane — not the
+"""Deterministic evidence collection: the control plane — not the
 agent — runs tests and stamps screenshots, so evidence is tamper-proof and
 agents can't misreport test results.
 

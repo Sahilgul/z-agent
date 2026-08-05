@@ -1,6 +1,6 @@
-"""LLM client — ChatOpenAI via the LiteLLM gateway (plan §6 llm.py, §15 plumbing).
+"""LLM client — ChatOpenAI via the LiteLLM gateway.
 
-Build-on vs build-custom (plan §4):
+Build-on vs build-custom:
   BUILD ON: langchain-openai ChatOpenAI (OpenAI-compatible protocol).
   BUILD CUSTOM: gateway retry/backoff for 429/529, model capability registry
   (LiteLLM does not expose vision/reasoning flags reliably), fail-closed on
@@ -16,7 +16,7 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-# --- Model capability registry (plan §6 — LiteLLM doesn't expose this reliably) ---
+# --- Model capability registry (LiteLLM doesn't expose this reliably) ---
 
 class ModelCapabilities:
     """What a gateway model alias can actually do. Fail-closed: unknown = no."""
@@ -31,8 +31,8 @@ class ModelCapabilities:
         self.supports_streaming = supports_streaming
 
 
-# Registry keyed by gateway model alias. Add entries as models are validated
-# at the Phase 0 gate. Unknown aliases get the conservative default.
+# Registry keyed by gateway model alias. Add entries as models are validated.
+# Unknown aliases get the conservative default.
 _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
     "kimi-foundry": ModelCapabilities(vision=False, reasoning=True, max_tokens=8192),
     "qwen-foundry": ModelCapabilities(vision=False, reasoning=False, max_tokens=8192),
@@ -45,7 +45,7 @@ def get_capabilities(model: str) -> ModelCapabilities:
     return _CAPABILITY_REGISTRY.get(model, _DEFAULT_CAPS)
 
 
-# --- Per-model prompt suffix selection (plan §10) ---
+# --- Per-model prompt suffix selection ---
 
 def suffix_for(model: str) -> str:
     """Return the model-specific suffix path (or empty if none)."""
@@ -59,7 +59,7 @@ def suffix_for(model: str) -> str:
     return path if os.path.exists(path) else ""
 
 
-# --- Gateway retry/backoff (plan §15) ---
+# --- Gateway retry/backoff ---
 
 class GatewayRetryError(Exception):
     """Raised when the gateway is unreachable after all retries."""
@@ -117,7 +117,7 @@ def _retry_after(exc: Exception) -> float | None:
         return None
 
 
-# --- Cost estimation (plan §13 budget accounting) ---
+# --- Cost estimation (budget accounting) ---
 
 # USD per 1M tokens (input, output). Conservative defaults; refine from gateway
 # invoices. Unknown aliases get the conservative default (fail-closed posture).

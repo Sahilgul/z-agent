@@ -1,7 +1,7 @@
-"""Knowledge flywheel service (plan §3 G-1 fix + §7).
+"""Knowledge flywheel service.
 
 Corpus lifecycle: items are born DRAFTS, and drafts are ALWAYS scoped ``user``
-— the deterministic PHI checkpoint (§7: drafts distilled from PHI-bearing runs
+— the deterministic PHI checkpoint (drafts distilled from PHI-bearing runs
 never enter the shared corpus before a human sees the diff). Approval is where
 a private episode becomes a shared fact: the approver picks the promoted scope
 (global | repo | user). Retrieval reads APPROVED items only.
@@ -35,7 +35,7 @@ log = get_logger(service="knowledge")
 SCOPES = {"global", "repo", "user"}
 
 # Per-run prompt-block cache: the first thread of a run pays the rerank, the
-# rest reuse the block. Single-host local era; cross-host store lands Phase 5.
+# rest reuse the block. Single-host local era; cross-host store lands later.
 _block_cache: dict[str, str] = {}
 
 
@@ -100,7 +100,7 @@ def mined_run_ids() -> set[str]:
 
 
 def pending() -> list[dict]:
-    """Draft items, team-wide (§7a shared-by-design exception: the corpus and
+    """Draft items, team-wide (shared-by-design exception: the corpus and
     its approval cards are visible to every teammate)."""
     session = get_session()
     try:

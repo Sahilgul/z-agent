@@ -1,4 +1,4 @@
-"""proposals — Janitor/Perfector ranked Improvement Inbox items (plan §6/§7).
+"""proposals — Janitor/Perfector ranked Improvement Inbox items.
 Team-wide readable (cite code, not sessions); NEVER unsolicited PRs at scale.
 Accept -> Development run; Dismiss -> preference signal to the flywheel.
 """

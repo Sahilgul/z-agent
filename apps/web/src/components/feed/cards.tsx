@@ -1,6 +1,6 @@
-/** RF console parity: the §19 card kinds that were missing — todo-checklist,
+/** Console parity: the card kinds that were missing — todo-checklist,
  *  compaction, ⚠ warning, ◆ recap — plus the dedicated approval card. Shared
- *  by the live EventStream and the Phase 9 Feed so both render LIVE StepEvents
+ *  by the live EventStream and the Feed so both render LIVE StepEvents
  *  identically. Locked tokens only (bg-warn, blue-bright, hairline…). */
 
 export interface TaskArtifact {
@@ -36,7 +36,7 @@ export function TodoChecklist({ detail }: { detail: Record<string, unknown> }) {
   );
 }
 
-/** compaction card: what the §9 compaction did, with token deltas. */
+/** compaction card: what the compaction did, with token deltas. */
 export function CompactionCard({ detail }: { detail: Record<string, unknown> }) {
   const num = (k: string) => (typeof detail[k] === "number" ? (detail[k] as number) : null);
   const parts = [

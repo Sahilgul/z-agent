@@ -1,4 +1,4 @@
-"""PWA push notifications (plan Phase 4): well-timed asks, never on landing.
+"""PWA push notifications: well-timed asks, never on landing.
 
 The default sender uses pywebpush when installed (lands with the VM move);
 without it, sends are skipped and logged — notify must NEVER fail the action

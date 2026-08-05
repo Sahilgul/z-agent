@@ -1,4 +1,4 @@
-"""Improvement Inbox tests (plan Phase 4): emit validation (evidence required),
+"""Improvement Inbox tests: emit validation (evidence required),
 impact×confidence ranking, accept → gated Development run with weekly spend
 ceiling, dismiss → user-scoped flywheel preference draft. run_manager is a fake.
 """

@@ -1,4 +1,4 @@
-"""Contract tests for the Phase 0 spike (plan §17 — highest leverage).
+"""Contract tests for the spike (highest leverage).
 
 These do NOT hit the gateway (no live LLM). They validate:
 - The spike tool-result taxonomy (kind: success|error) is consistent.

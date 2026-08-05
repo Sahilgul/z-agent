@@ -1,9 +1,9 @@
-"""RC contract tests — missing modules land BOUND (plan §23 RC).
+"""Contract tests — missing modules land BOUND.
 
 Covers: permissions glob rulesets (findLast), update_tasks two-artifact model,
 compact trigger, web_fetch readability + quarantine, git_snapshot,
 knowledge_draft scope gating, diagnostics hook, terminal background contract,
-edit-and-resend, MCP partial success, metrics, and the §7 binding assertion.
+edit-and-resend, MCP partial success, metrics, and the binding assertion.
 
 Graph-level tests reuse the ScriptedLLM harness pattern from
 test_spine_contract.py — the REAL spine, no mocks of the nodes themselves.
@@ -503,13 +503,13 @@ async def test_compact_tool_forces_compaction_flag(monkeypatch: pytest.MonkeyPat
     assert result.get("error") is None
 
 
-# ------------------------------------------------------- §7 binding assertion
+# ------------------------------------------------------- binding assertion
 
 
 SECTION7_RC_TOOLS = [
-    # RC scope: the pre-existing surface + the 5 never-defined tools + mcp
-    # pattern. RD-owned §7 names (tool_search, web_search, file_delete,
-    # terminal_await, playbook_load, mode_request) land in RD — asserted there.
+    # Scope: the pre-existing surface + the 5 never-defined tools + mcp
+    # pattern. Deferred names (tool_search, web_search, file_delete,
+    # terminal_await, playbook_load, mode_request) land in the deferred set — asserted there.
     "file_read", "code_search", "file_glob", "file_edit", "file_write",
     "terminal_exec", "web_fetch", "git_snapshot", "update_tasks", "compact",
     "knowledge_draft", "memory_search", "ask_user", "spawn_agent", "spawn_swarm",
@@ -517,7 +517,7 @@ SECTION7_RC_TOOLS = [
 
 
 def test_every_section7_rc_tool_resolvable_via_registry():
-    """RC binding assertion: every §7 RC-scope tool name resolves through the
+    """Binding assertion: every scoped tool name resolves through the
     registry AND its dispatch path exists (BOUND, not merely defined)."""
     from worker.engine.tools import ALL_BUILT_TOOL_BY_NAME, resolve_tool_name
     from worker.engine.tools.extended import EXTENDED_TOOL_BY_NAME
@@ -530,7 +530,7 @@ def test_every_section7_rc_tool_resolvable_via_registry():
 
 @pytest.mark.asyncio
 async def test_registry_dispatch_paths_execute():
-    """Each RC tool's dispatch path is callable (proves BOUND, not decorative)."""
+    """Each tool's dispatch path is callable (proves BOUND, not decorative)."""
     from worker.engine.tools import call_tool_direct
     for name, args in [
         ("update_tasks", {"updates": [{"action": "add", "id": "x", "content": "c"}]}),

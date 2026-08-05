@@ -1,4 +1,4 @@
-"""Phase 1 mechanical rename: lane → thread across backend/app (idempotent, word-boundary safe).
+"""Mechanical rename: lane → thread across backend/app (idempotent, word-boundary safe).
 
 Run from repo root: python scripts/rename_lane_to_thread.py
 

@@ -1,4 +1,4 @@
-"""Capacity semaphores (plan §4): global thread cap (12), per-repo WRITE lock (1
+"""Capacity semaphores: global thread cap (12), per-repo WRITE lock (1
 writable thread per repo — 10 writable threads means 10 different repos, never 10
 writers on one). Read-only threads are unlimited per repo up to the global cap.
 Requests beyond the cap queue deterministically.

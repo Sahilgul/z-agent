@@ -1,4 +1,4 @@
-"""BYO-PAT tests (plan §1b Phase 3): stdlib cipher round-trip + tamper detection,
+"""BYO-PAT tests: stdlib cipher round-trip + tamper detection,
 connectionData identity proof (fail-closed), 90-day expiry, 7-day warning,
 write-only status. The ADO verify call is injected — no sockets.
 """

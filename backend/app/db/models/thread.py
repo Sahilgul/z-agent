@@ -2,7 +2,7 @@
 forked_from_session_id: edit-and-resend preserves the original attempt as a
 sibling branch (fork branches share run_id = one continuous timeline).
 
-Renamed from `threads` (Plan Phase 1 — thread→thread mechanical rename).
+Renamed from `threads` (thread→thread mechanical rename).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class Thread(Base):
     gateway_key: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)  # injected at container start
     next_seq: Mapped[int] = mapped_column(default=0)
     # Original prompt/persona_prompt — kill_replace respawns from this, never by
-    # re-asking the blueprint (plan §4 thread controls).
+    # re-asking the blueprint (thread controls).
     spawn_context: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(nullable=True)
     container_id: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)

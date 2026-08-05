@@ -1,4 +1,4 @@
-"""Intent bus (plan §1a hybrid interaction): buttons AND typing are first-class —
+"""Intent bus (hybrid interaction): buttons AND typing are first-class —
 both feed ONE bus. Typed text is classified against the CURRENT available_actions
 only (tiny legal move set = near-perfect interpretation).
 
@@ -55,7 +55,7 @@ def gate_intent(run: Run, intent: UserIntent) -> None:
     if intent.source in (IntentSource.TEXT, IntentSource.VOICE):
         if intent.intent not in READ_ONLY_INTENTS and not intent.confirmed:
             raise IntentNeedsConfirmation(intent)
-    # Thread controls are always legal (§1a/§4: per-thread stop/nudge/pin/kill-replace
+    # Thread controls are always legal (per-thread stop/nudge/pin/kill-replace
     # stay available while the agent works — they target a thread, not the run stage).
     # SWITCH_MODE is always legal too: it sets run.mode for the next send, never
     # touches in-flight work, so no stage gates it.
@@ -69,7 +69,7 @@ def gate_intent(run: Run, intent: UserIntent) -> None:
 
 
 def load_run_for_user(run_id: str, user_id: int) -> Run | None:
-    """§7a hard scope: sessions are PRIVATE — a user can only touch their own runs."""
+    """Hard scope: sessions are PRIVATE — a user can only touch their own runs."""
     session = get_session()
     try:
         run = session.get(Run, run_id)

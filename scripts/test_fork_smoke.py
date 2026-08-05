@@ -1,4 +1,4 @@
-"""P1 session-durability smoke test (plan §8 worker/sessions.py):
+"""Session-durability smoke test (worker/sessions.py):
 per-lane session volume + fork_session edit-and-resend, end to end.
 
 Prereqs (the whole point — this is a LIVE smoke, not a unit test):

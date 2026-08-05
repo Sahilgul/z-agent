@@ -1,4 +1,4 @@
-"""Webhook ingress (plan §6): ONE generic endpoint, signature-verified,
+"""Webhook ingress: ONE generic endpoint, signature-verified,
 idempotent. Normalizes into contracts.TriggerEvent and hands to the triggers
 engine — the ADO vocabulary lives in trigger ROWS, never in code.
 """

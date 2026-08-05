@@ -1,4 +1,4 @@
-"""Improvement Inbox API (plan §7): team-wide ranked proposals, accept →
+"""Improvement Inbox API: team-wide ranked proposals, accept →
 Development run, dismiss → flywheel preference signal."""
 
 from __future__ import annotations

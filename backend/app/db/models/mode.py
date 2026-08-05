@@ -1,4 +1,4 @@
-"""modes — modes are DB rows (plan §6): a new mode = one blueprint file + one row.
+"""modes — modes are DB rows: a new mode = one blueprint file + one row.
 Autonomy dial orthogonal: Supervised -> Gated -> Autonomous, promotion evidence-based.
 """
 
@@ -25,7 +25,7 @@ class Mode(Base):
     permission_mode: Mapped[str] = mapped_column(sa.String(24), default="default")
     topology: Mapped[str] = mapped_column(sa.String(24), default="single")
     model_tier: Mapped[str] = mapped_column(sa.String(16), default="strong")
-    # Writable/read repo scope for the mode (plan §6 — modes as data): which repos
+    # Writable/read repo scope for the mode (modes as data): which repos
     # a thread spawned under this mode may stamp a writable clone for. Empty dict =
     # read-only. Topology stays code (selects the blueprint); this is data.
     permissions: Mapped[dict] = mapped_column(sa.JSON, default=dict)

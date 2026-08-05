@@ -1,4 +1,4 @@
-# Redis for the event bus + approval streams (plan Phase 5). Single replica
+# Redis for the event bus + approval streams. Single replica
 # with AOF persistence — the streams are rebuildable from the DB, so HA Redis
 # is not worth the operational cost at fleet scale.
 apiVersion: apps/v1

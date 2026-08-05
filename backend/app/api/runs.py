@@ -1,5 +1,5 @@
 """Run routes (THIN). POST /runs + POST /runs/{id}/intent are the single entry
-points; §7a: every query hard-scopes by created_by = requesting user.
+points; every query hard-scopes by created_by = requesting user.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class CreateRunBody(BaseModel):
     repo: str | None = None
     work_item_id: int | None = None
     autonomy: str | None = None
-    fanout: int | None = None  # §4 user-requested swarm width (Lead still decomposes)
+    fanout: int | None = None  # user-requested swarm width (Lead still decomposes)
 
 
 class IntentBody(BaseModel):
@@ -98,7 +98,7 @@ async def create_run(body: CreateRunBody, request: Request, user: User = Depends
 @router.get("")
 def list_my_runs(user: User = Depends(current_user), repo: str | None = None,
                  stage: str | None = None, q: str | None = None):
-    """Inbox = MY runs only (§7a) — filter by repo/mode/status, search by
+    """Inbox = MY runs only — filter by repo/mode/status, search by
     title/auto_summary."""
     session = get_session()
     try:
@@ -153,8 +153,8 @@ def run_threads(run_id: str, user: User = Depends(current_user)):
 
 @router.get("/{run_id}/plan")
 def run_plan(run_id: str, user: User = Depends(current_user)):
-    """Plan-approval card data (plan §2/§9): the latest Plan row + its steps.
-    Hard-scoped to the run owner (§7a)."""
+    """Plan-approval card data: the latest Plan row + its steps.
+    Hard-scoped to the run owner."""
     run = load_run_for_user(run_id, user.id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -186,7 +186,7 @@ def run_plan(run_id: str, user: User = Depends(current_user)):
 
 @router.get("/{run_id}/evidence")
 def run_evidence(run_id: str, user: User = Depends(current_user)):
-    """PR overlay data (§9): the tamper-proof evidence package — assembled from
+    """PR overlay data: the tamper-proof evidence package — assembled from
     the DB at read time, with the sha256 the PR body pins. 404 before any plan
     exists (the overlay explains itself from that)."""
     run = load_run_for_user(run_id, user.id)
@@ -206,8 +206,8 @@ def run_evidence(run_id: str, user: User = Depends(current_user)):
 @router.post("/{run_id}/intent")
 async def post_intent(run_id: str, body: IntentBody, request: Request,
                       user: User = Depends(current_user)):
-    """THE single endpoint for button intents and classified text intents
-    (plan §1a). Irreversible intents require confirmed=true."""
+    """THE single endpoint for button intents and classified text intents.
+    Irreversible intents require confirmed=true."""
     run = load_run_for_user(run_id, user.id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -217,7 +217,7 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
         intent = classify_text(run, body.text)
         if intent is None:
             # Plain conversation: a nudge to the Lead thread (typed Lead-nudges
-            # stay enabled while the agent works — §1a carve-out).
+            # stay enabled while the agent works — carve-out).
             intent = UserIntent(run_id=run_id, intent=ActionKind.SEND_MESSAGE,
                                 source=IntentSource.TEXT, text=body.text,
                                 thread_id=body.thread_id)
@@ -313,7 +313,7 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind == ActionKind.MERGE_PR:
         handoff_url = await run_manager.merge_pr(run_id, user.id)
         # handoff_url is set only under merge_native_ui: the UI deep-links the
-        # human into ADO's native complete screen (plan §9 merge-identity lock).
+        # human into ADO's native complete screen (merge-identity lock).
         return {"status": "ok", "intent": kind.value, "handoff_url": handoff_url}
     elif kind == ActionKind.START_PLAN:
         await run_manager.start_plan(run_id)
@@ -351,7 +351,7 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok", "intent": kind.value, "mode": mode_name}
     elif kind == ActionKind.LET_IT_RUN:
-        # Watchdog card dismissal (§4): no thread action — the card clears and the
+        # Watchdog card dismissal: no thread action — the card clears and the
         # thread keeps working; recorded so the UI's dismissal is intentional.
         return {"status": "ok", "intent": kind.value}
     return {"status": "ok", "intent": kind.value}

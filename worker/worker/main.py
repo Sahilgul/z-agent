@@ -1,4 +1,4 @@
-"""Worker runtime (plan §8 — the load-bearing shape).
+"""Worker runtime — the load-bearing shape.
 
 THREE concurrent asyncio tasks around receive_messages() (the long-lived
 iterator) — event pump, Redis control listener, heartbeat — with explicit
@@ -8,7 +8,7 @@ single-response convenience iterator and CANNOT deliver nudge-while-working.
 Nudge semantics (decided): graceful interrupt() + inject + resume — one SDK turn
 is the entire agentic loop, so queued delivery would land after the work is done.
 
-Config arrives via env at container start (plan §10: API keys never baked in):
+Config arrives via env at container start (API keys never baked in):
   RUN_ID, THREAD_ID, PERSONA_PROMPT, TASK_PROMPT, PERMISSION_MODE, BUDGET_USD,
   REDIS_URL, WORKSPACE_DIR, RESUME_SESSION_ID (optional), MODEL (optional),
   ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN (gateway + per-thread virtual key),
@@ -23,8 +23,8 @@ import signal
 import sys
 
 # The CAS SDK is an OPTIONAL extra (worker[cas]) — kept for the dual-runtime
-# soak (Phase 5) and as the fallback target. The new LangGraph engine
-# (worker/engine/, Phase 2+) does NOT depend on it. Import lazily so the worker
+# soak and as the fallback target. The new LangGraph engine
+# (worker/engine/) does NOT depend on it. Import lazily so the worker
 # package imports cleanly without the cas extra installed.
 try:
     from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
@@ -115,7 +115,7 @@ class ThreadRuntime:
                         break
                     if self._pump_task.done() and (exc := self._pump_task.exception()):
                         # Gateway-down failure story: thread FAILS SAFE — the session
-                        # volume makes it resumable (plan §10).
+                        # volume makes it resumable.
                         self.status = "failed"
                         await self.forwarder.heartbeat(self.status)
                         raise exc
@@ -156,7 +156,7 @@ class ThreadRuntime:
                     await client.interrupt()
                     self.status = "interrupted"
                 elif msg.type == "nudge":
-                    # graceful interrupt + inject + resume (plan §8 decided semantics)
+                    # graceful interrupt + inject + resume (decided semantics)
                     if self.status == "running":
                         await client.interrupt()
                     await client.query(msg.text)
@@ -216,8 +216,8 @@ def _main_sdk() -> int:
 
 
 def main() -> int:
-    """ENGINE=sdk|custom dispatch (plan §20/RB). Default: the custom LangGraph
-    engine runner. The boot line is the RB exit evidence — the container log
+    """ENGINE=sdk|custom dispatch. Default: the custom LangGraph
+    engine runner. The boot line is the exit evidence — the container log
     shows WHICH runtime is serving the thread."""
     engine = os.environ.get("ENGINE", "custom").strip().lower()
     if engine == "sdk":

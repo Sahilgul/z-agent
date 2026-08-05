@@ -1,4 +1,4 @@
-"""Contract tests for Phase 8 critics + team watchdogs (plan §17)."""
+"""Contract tests for critics + team watchdogs."""
 
 from __future__ import annotations
 

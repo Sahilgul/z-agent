@@ -1,4 +1,4 @@
-"""users + one-time setup codes (plan §1b/§7). Identity binding: names are labels,
+"""users + one-time setup codes. Identity binding: names are labels,
 never keys — ado_descriptor (Graph-resolved GUID) is the identity key, bound at
 provisioning, fail-loud on 0 or 2+ matches. Offboarding = DEACTIVATE + token_version
 bump; never delete (shared threads keep attribution).
@@ -30,7 +30,7 @@ class User(Base):
     token_version: Mapped[int] = mapped_column(default=0)
     ado_email: Mapped[str | None] = mapped_column(sa.String(256), nullable=True)
     ado_descriptor: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, unique=True)
-    byo_pat_encrypted: Mapped[str | None] = mapped_column(sa.Text, nullable=True)  # Phase 3, write-only
+    byo_pat_encrypted: Mapped[str | None] = mapped_column(sa.Text, nullable=True)  # write-only
     byo_pat_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
     failed_pin_attempts: Mapped[int] = mapped_column(default=0)
     locked_until: Mapped[datetime | None] = mapped_column(nullable=True)

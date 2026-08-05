@@ -1,4 +1,4 @@
-"""Blueprint base (plan §6 — Stripe Minions pattern).
+"""Blueprint base (Stripe Minions pattern).
 
 Each mode is a state machine mixing DETERMINISTIC nodes (fetch/stamp/lint/test/
 push/PR-create/evidence-collect — pure code, zero LLM) and AGENTIC nodes

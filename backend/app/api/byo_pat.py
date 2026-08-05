@@ -1,4 +1,4 @@
-"""BYO-PAT routes (plan §1b Phase 3): store (identity-proofed), status
+"""BYO-PAT routes: store (identity-proofed), status
 (write-only — never returns the secret), revoke. Mounted under /me.
 """
 

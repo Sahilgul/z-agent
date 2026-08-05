@@ -1,4 +1,4 @@
-"""notifications — PWA push subscriptions (Phase 4). Well-timed asks, never on
+"""notifications — PWA push subscriptions. Well-timed asks, never on
 landing: opt-in after first AwaitingYou; A2HS after first phone approval.
 """
 

@@ -1,4 +1,4 @@
-"""PIN auth (plan §1b — FINAL identity model, no SSO ever).
+"""PIN auth — FINAL identity model, no SSO ever.
 
 username + 4-6 digit PIN, bcrypt hash, JWT in httpOnly cookie, token_version bump
 kills sessions instantly (offboarding = deactivate, never delete). Brute-force:
@@ -73,7 +73,7 @@ def record_success(session: Session, user: User) -> None:
 # ------------------------------------------------------------------ deps
 
 def current_user(request: Request) -> User:
-    """created_by scoping starts here (§7a): every session query hard-scopes by
+    """created_by scoping starts here: every session query hard-scopes by
     this user's id at the API layer, not just in the UI."""
     token = request.cookies.get("zagent_token")
     if not token:

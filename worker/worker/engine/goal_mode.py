@@ -1,9 +1,9 @@
-"""Goal mode core (plan §8, Phase 7) — the long-horizon stage subgraph.
+"""Goal mode core — the long-horizon stage subgraph.
 
 Goal mode is a meta-mode: user story → PR, fully autonomous after an optional
 clarify step. It composes the existing modes (ask, plan, development) into a
 stage subgraph with persistent objective state. NO human approval gates
-inside the pipeline (plan §8 correction): human interaction is ONLY the
+inside the pipeline: human interaction is ONLY the
 initial clarify (if needed) or blocked-escalation. The pipeline runs
 autonomously until PR creation.
 
@@ -17,10 +17,10 @@ Stages:
   rebase-gate — ensure the branch is rebased on the target; resolve conflicts or escalate.
   pr       — create the PR; the goal is done.
 
-The goal budget is a separate envelope from the thread budget (plan §13):
+The goal budget is a separate envelope from the thread budget:
 the goal budget is the SUM of all threads spawned for the goal.
 
-Phase 7 ships the stage graph WITHOUT critics (Phase 8 adds critic×3 +
+The stage graph ships WITHOUT critics (a later layer adds critic×3 +
 blocked-escalation). The ask_user tool and QuestionCard are here.
 """
 
@@ -118,13 +118,13 @@ def clear_pending_questions() -> None:
     set_pending_questions(None)
 
 
-# --- Stage graph (the Phase 7 core, no critics) ---
+# --- Stage graph (the core, no critics) ---
 
 @dataclass
 class GoalGraph:
-    """The stage subgraph. Phase 7: linear pipeline, no critic loop.
+    """The stage subgraph. Linear pipeline, no critic loop.
 
-    Phase 8 wraps implement/verify with critic×3 + blocked-escalation.
+    A later layer wraps implement/verify with critic×3 + blocked-escalation.
     """
     artifact: GoalArtifact
 
@@ -166,8 +166,8 @@ def make_goal(user_story: str, *, repo: str | None = None,
 def needs_clarification(user_story: str) -> bool:
     """Heuristic: does the story need clarification before autonomous work?
 
-    Phase 7 uses a simple heuristic (missing repo, missing success signal,
-    pronouns like 'it'/'that' without referent). Phase 8 may add an LLM judge.
+    Uses a simple heuristic (missing repo, missing success signal,
+    pronouns like 'it'/'that' without referent). A later layer may add an LLM judge.
     """
     if not user_story or len(user_story.strip()) < 20:
         return True
@@ -198,9 +198,9 @@ def build_clarify_card(user_story: str) -> list[dict[str, Any]]:
     ]
 
 
-# --- Stage envelopes (RA — injected per-turn by the graph's goal router) ---
+# --- Stage envelopes (injected per-turn by the graph's goal router) ---
 #
-# Each stage gets a short synthetic-reminder envelope (plan §10 — per-turn
+# Each stage gets a short synthetic-reminder envelope (per-turn
 # fragments, never part of the system message). The goal router advances the
 # artifact; the agent node renders the current stage's envelope transiently.
 

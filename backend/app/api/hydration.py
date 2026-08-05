@@ -1,4 +1,4 @@
-"""Hydration routes (plan §8/WU5): deterministic pre-run hydration — my ADO
+"""Hydration routes: deterministic pre-run hydration — my ADO
 tickets, fleet blast radius, title hydration, and the prewarm pool. All pure
 code; the agent never self-reports any of this.
 """
@@ -22,7 +22,7 @@ class PrewarmBody(BaseModel):
 @router.get("/my-tickets")
 async def my_tickets(request: Request, user: User = Depends(current_user)):
     """The user's ADO 'My active tickets' for the New-Run picker. 422 when the
-    user hasn't bound their ADO identity (§1b) — the UI needs to distinguish
+    user hasn't bound their ADO identity — the UI needs to distinguish
     'bind your account' from 'no active tickets', which an empty list can't say."""
     if not getattr(user, "ado_descriptor", None):
         raise HTTPException(status_code=422, detail="ADO identity not bound — link your account first")
@@ -49,7 +49,7 @@ async def hydrate_title(request: Request, work_item_id: int | None = None, task:
 
 @router.post("/prewarm")
 async def prewarm(body: PrewarmBody, request: Request, user: User = Depends(current_user)):
-    """Record desired prewarms (stub, WU5). The live pool lands with the VM move —
+    """Record desired prewarms (stub). The live pool lands with the VM move —
     semantics are defined in orchestrator/thread_manager.py (see /prewarm-status)."""
     pool = getattr(request.app.state, "prewarm_pool", None) or hydration_service.PrewarmPool()
     return await pool.prewarm(body.repos)
@@ -57,7 +57,7 @@ async def prewarm(body: PrewarmBody, request: Request, user: User = Depends(curr
 
 @router.get("/prewarm-status")
 def prewarm_status(_user: User = Depends(current_user)):
-    """Pool truth (plan §2): enabled=false until the live pool lands. The UI must
+    """Pool truth: enabled=false until the live pool lands. The UI must
     render warmth from THIS, never from the record-intent endpoint above."""
     from app.orchestrator.thread_manager import prewarm_status as _status
     return _status()

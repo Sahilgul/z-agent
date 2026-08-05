@@ -1,9 +1,9 @@
-"""Redis -> WebSocket relay (plan §1b ordering rule): StepEvents carry monotonic
+"""Redis -> WebSocket relay (monotonic ordering rule): StepEvents carry monotonic
 per-thread seq; the relay delivers and the UI renders STRICTLY by seq. Transient
 deltas carry no seq and never enter history — forwarded on a separate WS message
 type so the UI can render the growing in-progress step then replace it.
 
-Privacy (§7a): WS subscriptions are per-user; the relay only fans a run's events
+Privacy: WS subscriptions are per-user; the relay only fans a run's events
 out to sockets authenticated as run.created_by (enforced in ws/events.py).
 """
 
@@ -87,7 +87,7 @@ class Relay:
             return
         await self._fanout(run_id, {"type": "delta", "delta": delta})
 
-    # repo_added WS event (plan §1b): invalidates the repo-list query, no refresh.
+    # repo_added WS event: invalidates the repo-list query, no refresh.
     async def publish_global(self, message: dict) -> None:
         for run_id in list(self.subscribers):
             await self._fanout(run_id, message)

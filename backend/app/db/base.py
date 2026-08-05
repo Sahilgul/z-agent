@@ -1,4 +1,4 @@
-"""Engine/session setup. Dialect-neutrality discipline (plan §7): portable types
+"""Engine/session setup. Dialect-neutrality discipline: portable types
 only (sa.JSON, never JSONB/ARRAY), DB URL from config, WAL mode on SQLite, file on
 the WSL2 Linux fs. Single-writer rule: ALL writes flow through this one backend
 process — workers speak Redis/contracts only.

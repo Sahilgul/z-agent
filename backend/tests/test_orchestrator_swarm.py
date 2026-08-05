@@ -1,4 +1,4 @@
-"""Width-swarm blueprint tests (plan §4/Phase 3): hydrate/decompose/fanout/
+"""Width-swarm blueprint tests: hydrate/decompose/fanout/
 collect/synthesize/complete — all threads read-only, Lead decomposes, collect
 reads the event stream."""
 import json

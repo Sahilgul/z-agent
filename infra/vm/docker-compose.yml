@@ -1,11 +1,11 @@
 name: zagent
 
-# Ubuntu-VM stack (plan §7 Phase 4 gate — the production-shaped deployment).
+# Ubuntu-VM stack — the production-shaped deployment.
 # Everything the app needs runs here; the only internet-egress services are
 # `gateway` (Foundry) and `db`-adjacent nothing. Access via the web service's
 # published port (see its `ports:` note).
 #
-#   db          — APP Postgres (Phase 4 cutover: ZAGENT_DB_URL points here)
+#   db          — APP Postgres (ZAGENT_DB_URL points here)
 #   redis       — event bus (AOF everysec)
 #   gateway-db  — LiteLLM-internal Postgres (disposable; re-mint keys to rebuild)
 #   gateway     — LiteLLM proxy, sole LLM egress, virtual keys + budgets
@@ -19,7 +19,7 @@ networks:
   egress:
     driver: bridge
   lane:
-    # Worker lane lockdown (plan §10): NO internet route — lanes reach ONLY the
+    # Worker lane lockdown: NO internet route — lanes reach ONLY the
     # gateway (LLM) and redis (events/control).
     driver: bridge
     internal: true

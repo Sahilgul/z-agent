@@ -1,5 +1,5 @@
 """pydantic-settings config. DB URL, Redis, gateway, ADO, dirs — all from env.
-Dialect-neutrality (plan §7): SQLite local era, Postgres at the VM move = URL change.
+Dialect-neutrality: SQLite local era, Postgres at the VM move = URL change.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     worker_redis_url: str = "redis://redis:6379/0"
     worker_gateway_url: str = "http://gateway:4000"
     worker_image: str = "zagent-worker:0.2.0"
-    # Engine cutover (plan §20/RB): custom LangGraph engine by default; "sdk"
+    # Engine cutover: custom LangGraph engine by default; "sdk"
     # keeps the legacy CAS fallback alive through the RE soak.
     engine_runtime: str = "custom"
     # Canary mode: read-only production threads on the custom engine before the
@@ -39,11 +39,11 @@ class Settings(BaseSettings):
     # local-era stack (app Postgres arrives at the VM move) — the engine falls
     # back to MemorySaver with a loud warning.
     engine_database_url: str = ""
-    # Egress-locked compose network for thread containers (plan §10): internal-only,
+    # Egress-locked compose network for thread containers: internal-only,
     # no internet route — threads reach gateway + redis and nothing else.
     worker_network: str = "zagent_thread"
-    # Package-registry egress (Phase 2): allowlisting squid on the thread network.
-    # Empty string disables proxy injection (Phase 1 read-only threads).
+    # Package-registry egress: allowlisting squid on the thread network.
+    # Empty string disables proxy injection (read-only threads).
     package_proxy_url: str = ""
     pip_cache_volume: str = "zagent_pip-cache"
     npm_cache_volume: str = "zagent_npm-cache"
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-change-me"
     jwt_ttl_seconds: int = 60 * 60 * 24 * 14
     admin_usernames: str = "sahil"
-    # First-admin bootstrap (plan §1b chicken-and-egg): seed creates this ACTIVE
+    # First-admin bootstrap (chicken-and-egg): seed creates this ACTIVE
     # admin if the username doesn't exist yet. Local-dev convenience only —
     # teammates are still born in the Team UI via one-time setup codes.
     bootstrap_admin_username: str = "sahil"
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     ado_project: str = ""
     fetch_pat: str = ""
     fleet_pat: str = ""
-    # Merge-identity lock (plan §9): True = service account may NOT bypass
+    # Merge-identity lock: True = service account may NOT bypass
     # policies on complete; the merge tap deep-links to ADO's native UI instead.
     merge_native_ui: bool = False
 
@@ -82,55 +82,55 @@ class Settings(BaseSettings):
     events_ttl_months: int = 12
 
     # Tool-permission cards. The worker's BLPOP gives up after this long and
-    # denies deterministically (plan §10), so the backend has to expire the row
+    # denies deterministically, so the backend has to expire the row
     # on the same clock or the console keeps offering a dead button.
     approval_timeout_seconds: int = 900
 
     global_thread_cap: int = 12
     default_thread_budget_usd: float = 5.0
 
-    # PREWARM_POOL (documented-not-implemented, plan §2): semantics live in
+    # PREWARM_POOL (documented-not-implemented): semantics live in
     # orchestrator/thread_manager.py; prewarm_status() reports {"enabled": false}.
     prewarm_pool_enabled: bool = False
     prewarm_pool_size: int = 2
 
-    # Knowledge flywheel retrieval (plan §3 G-1 fix): cheap-model rerank of
+    # Knowledge flywheel retrieval: cheap-model rerank of
     # trigger_descriptions at run start. Any gateway failure falls back to
     # deterministic lexical ranking — retrieval must never fail a run.
     knowledge_rerank_model: str = "kimi-foundry"
     knowledge_top_k: int = 8
     knowledge_rerank_timeout_seconds: float = 10.0
 
-    # Ideas space (plan §6): Counsel + Lead synthesis completions via the gateway.
+    # Ideas space: Counsel + Lead synthesis completions via the gateway.
     ideas_model: str = "kimi-foundry"
 
-    # BYO-PAT (plan §1b Phase 3): local-era at-rest encryption key; Key Vault
+    # BYO-PAT: local-era at-rest encryption key; Key Vault
     # takes over at the VM move. Empty disables BYO-PAT storage.
     byo_pat_encryption_key: str = "dev-only-byo-pat-key"
 
-    # Triggers engine (plan §6 Phase 4): webhook HMAC secret (empty = ingress
+    # Triggers engine: webhook HMAC secret (empty = ingress
     # rejects everything, fail-closed), the service account's OWN ADO descriptor
     # (guardrail 1 loop prevention), and the state-flapping coalesce window.
     ado_webhook_secret: str = ""
     service_account_descriptor: str = ""
     trigger_flap_window_minutes: int = 10
-    # Guardian circuit breaker (Phase 4): max fix runs per PR per 24h before
+    # Guardian circuit breaker: max fix runs per PR per 24h before
     # halt; a repeated failure signature halts immediately regardless.
     guardian_max_attempts: int = 3
-    # Improvement Inbox (Phase 4): accepted proposals spend real money with no
+    # Improvement Inbox: accepted proposals spend real money with no
     # human initiating each one — the weekly ceiling is enforced in code.
     proposals_weekly_ceiling_usd: float = 25.0
-    # PWA push (Phase 4): VAPID identity for web push; generated per deploy,
+    # PWA push: VAPID identity for web push; generated per deploy,
     # empty = push disabled (sends are skipped, subscriptions still stored).
     vapid_public_key: str = ""
     vapid_private_key: str = ""
     vapid_subject: str = "mailto:admin@zagentharness.ai"
-    # Autonomy promotion (Phase 4): evidence thresholds — completed runs at the
+    # Autonomy promotion: evidence thresholds — completed runs at the
     # level below before the dial unlocks one notch. Failures reset nothing;
     # they just don't count.
     autonomy_promote_gated_after: int = 3
     autonomy_promote_autonomous_after: int = 8
-    # Cross-host session store (Phase 5): Azure Blob connection for the session
+    # Cross-host session store: Azure Blob connection for the session
     # mirror. Empty = single-host era, uploads skip (bind-mount is the path).
     session_store_connection: str = ""
 

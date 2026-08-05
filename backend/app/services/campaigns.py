@@ -1,4 +1,4 @@
-"""Campaign mode (plan Phase 5 — fleet swarm): ONE task applied across the
+"""Campaign mode — fleet swarm: ONE task applied across the
 fleet — "migrate every repo to the new logging" becomes one Delivery grouping
 one gated Development run per repo, each opening its own PR under the same
 delivery. The runs are ordinary runs (inbox, trace, HITL) — the Delivery row

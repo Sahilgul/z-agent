@@ -1,4 +1,4 @@
-"""Run state machine (plan §1a): stage -> available_actions, computed by the
+"""Run state machine: stage -> available_actions, computed by the
 orchestrator, rendered as-is by the UI. Pure Python — NO FastAPI imports.
 """
 
@@ -20,7 +20,7 @@ ACTIONS_BY_STAGE: dict[str, list[str]] = {
     RunStage.DEVELOPING.value: [],
     RunStage.VERIFYING.value: [ActionKind.REVIEW_EVIDENCE.value, ActionKind.CREATE_PR.value],
     RunStage.PR_READY.value: [ActionKind.REVIEW_DIFF.value, ActionKind.MERGE_PR.value],
-    # From interrupted, exactly two resume paths (§1a): edit-last-and-resend, send-new-message.
+    # From interrupted, exactly two resume paths: edit-last-and-resend, send-new-message.
     RunStage.INTERRUPTED.value: [ActionKind.EDIT_AND_RESEND.value, ActionKind.RESUME_RUN.value],
     RunStage.COMPLETED.value: [],
     RunStage.FAILED.value: [ActionKind.RESUME_RUN.value],

@@ -1,7 +1,7 @@
-/** RF exit evidence (P9 acceptance): the 4 previously-missing card kinds
+/** Exit evidence: the 4 previously-missing card kinds
  *  (todo-checklist, compaction, ⚠ warning, ◆ recap) + the dedicated approval
  *  kind render from LIVE-shaped StepEvents in BOTH console surfaces —
- *  the production EventStream and the Phase 9 Feed. */
+ *  the production EventStream and the Feed. */
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -21,7 +21,7 @@ const ev = (seq: number, kind: StepEvent["kind"], title: string, detail: Record<
   sdk_message_uuid: null,
 });
 
-// Live-shaped payloads exactly as the engine emits them (RC/RA/RF).
+// Live-shaped payloads exactly as the engine emits them.
 const TODO = ev(1, "command", "update_tasks", {
   kind: "todo-checklist",
   tasks: {
@@ -70,7 +70,7 @@ const feedItems: FeedItem[] = ALL_EVENTS.map((e) => ({
   detail: e.detail,
 }));
 
-describe("EventStream — P9 card parity from live StepEvents", () => {
+describe("EventStream — card parity from live StepEvents", () => {
   it("renders the todo-checklist card with checkbox states", () => {
     render(<EventStream events={[TODO]} deltas={[]} />);
     expect(screen.getByTestId("todo-checklist")).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe("EventStream — P9 card parity from live StepEvents", () => {
   });
 });
 
-describe("Feed — P9 card parity", () => {
+describe("Feed — card parity", () => {
   it("renders all four missing card kinds + approval", () => {
     render(<Feed items={feedItems} />);
     expect(screen.getByTestId("todo-checklist")).toBeInTheDocument();
@@ -123,7 +123,7 @@ describe("Feed — P9 card parity", () => {
   });
 });
 
-describe("Feed preview clip — §19 two-tier disclosure", () => {
+describe("Feed preview clip — two-tier disclosure", () => {
   it("clips at 10 lines (raised from 6)", () => {
     expect(PREVIEW_CLIP_LINES).toBe(10);
     const text = Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join("\n");

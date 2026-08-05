@@ -1,4 +1,4 @@
-"""Seed the repos registry from fleet-config/repos.json (plan §9 Phase 0).
+"""Seed the repos registry from fleet-config/repos.json.
 
 For each fleet-config repo: resolve integrationBranch AGAINST THE REMOTE (branch
 list fetched, never free-typed), then upsert the `repos` row. The DB row is the

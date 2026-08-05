@@ -1,4 +1,4 @@
-"""Autonomy dial <-> SDK permission_mode mapping (plan §6, verified against SDK
+"""Autonomy dial <-> SDK permission_mode mapping (verified against SDK
 source). WARNING: the SDK SHADOWS can_use_tool under auto-approving modes —
 Supervised must stay on 'default' or approvals silently vanish.
 

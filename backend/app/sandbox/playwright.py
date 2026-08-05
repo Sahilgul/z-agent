@@ -1,4 +1,4 @@
-"""Playwright MCP client (plan §9): drives the Playwright MCP server to stamp
+"""Playwright MCP client: drives the Playwright MCP server to stamp
 before/after screenshots for UI-change evidence.
 
 Lazily constructed so the backend never hard-depends on a running Playwright

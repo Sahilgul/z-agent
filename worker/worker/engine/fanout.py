@@ -1,4 +1,4 @@
-"""Fan-out (plan §4, Phase 6) — spawn_agent + spawn_swarm.
+"""Fan-out — spawn_agent + spawn_swarm.
 
 Two fan-out tools, both engine-side (the agent proposes, the engine vets):
 
@@ -26,7 +26,7 @@ Engine-side vetoes (the agent never gets to bypass these):
 
 AGENTS.md orientation hydration: at spawn, the subagent's first user message
 includes the AGENTS.md diff (if any) so it starts oriented. The worker idle
-metric (plan §4) gates whether a new spawn is even allowed — a saturated
+metric gates whether a new spawn is even allowed — a saturated
 worker pool refuses new spawns.
 """
 
@@ -40,7 +40,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-# --- Configuration (plan §4 fan-out guards) ---
+# --- Configuration (fan-out guards) ---
 
 SPAWN_STAGGER_S = 2.0          # delay between spawns
 SWARM_MAX_SLICES = 8           # hard cap on simultaneous swarm width
@@ -116,7 +116,7 @@ def _veto(req: SpawnRequest, *, worker_idle: bool = True) -> tuple[bool, str]:
             return False, "swarm requires at least one slice"
         if len(req.slices) > SWARM_MAX_SLICES:
             return False, f"swarm width {len(req.slices)} exceeds cap {SWARM_MAX_SLICES}"
-        # DISTINCT slices (plan §4 — never arithmetic clones)
+        # DISTINCT slices (never arithmetic clones)
         prompts = {s["prompt"] for s in req.slices}
         if len(prompts) < len(req.slices):
             return False, "swarm slices must be DISTINCT (duplicate prompts rejected)"

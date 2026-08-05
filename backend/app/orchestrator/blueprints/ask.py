@@ -1,7 +1,7 @@
-"""Ask mode blueprint (Phase 1 first milestone): single read-only thread.
+"""Ask mode blueprint: single read-only thread.
 
 hydrate (deterministic) -> investigate (agentic: one thread, live-grep ground
-truth, hand-written ServerApp AGENTS.md seed until maps arrive in Phase 2) ->
+truth, hand-written ServerApp AGENTS.md seed until maps arrive) ->
 complete (deterministic: cost readback + trajectory summary).
 """
 
@@ -35,7 +35,7 @@ class AskBlueprint(Blueprint):
         ]
 
     async def _hydrate(self, ctx: BlueprintContext) -> None:
-        """Deterministic pre-run hydration (plan §8 ado/hydrate grows from here):
+        """Deterministic pre-run hydration (ado/hydrate grows from here):
         resolve target repo, load guidebook seed, compose the thread prompt."""
         session = get_session()
         try:
@@ -70,7 +70,7 @@ class AskBlueprint(Blueprint):
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
         ctx.artifacts["thread_id"] = thread.id
-        # Phase 1: block until the thread's turn ends (idle/completed/failed).
+        # Block until the thread's turn ends (idle/completed/failed).
         await self._await_thread(thread.id)
 
     async def _await_thread(self, thread_id: str, poll_seconds: float = 2.0) -> None:

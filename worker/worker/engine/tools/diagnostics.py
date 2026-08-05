@@ -1,4 +1,4 @@
-"""Diagnostics hook for file_write (plan §7, R34: NOT a pull tool).
+"""Diagnostics hook for file_write (NOT a pull tool).
 
 After a successful write, lint the file and append a bounded ERROR-only block:
 

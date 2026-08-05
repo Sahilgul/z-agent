@@ -1,4 +1,4 @@
-"""Campaign mode + cost dashboard tests (plan Phase 5): launch validation,
+"""Campaign mode + cost dashboard tests: launch validation,
 delivery rollup, run↔delivery linkage, dashboard aggregation math.
 """
 
@@ -53,7 +53,7 @@ async def test_launch_scoped_subset_and_missing_repos(session, make_user):
 
 
 async def test_launch_includes_ready_no_map_repos(session, make_user):
-    """Onboarding lands every repo at ready-no-map until the Phase 2 map
+    """Onboarding lands every repo at ready-no-map until the map
     generator exists, so filtering on 'ready' alone matched the whole fleet out
     of every campaign."""
     session.add(Repo(name="ServerApp", integration_branch="main", status="ready-no-map"))

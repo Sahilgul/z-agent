@@ -1,6 +1,6 @@
 import { api } from "./api";
 
-/** PWA push opt-in (plan Phase 4): asked ONLY after the first AwaitingYou
+/** PWA push opt-in: asked ONLY after the first AwaitingYou
  *  moment — never on landing. Deep links land on the specific action card. */
 
 export function pushSupported(): boolean {

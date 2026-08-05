@@ -35,7 +35,7 @@ _TMP_ROOT = Path(tempfile.mkdtemp(prefix="zagent-test-"))
 os.environ.setdefault("ZAGENT_GOLDEN_DIR", str(_TMP_ROOT / "golden"))
 os.environ.setdefault("ZAGENT_SESSIONS_DIR", str(_TMP_ROOT / "sessions"))
 os.environ.setdefault("ZAGENT_WORKSPACES_DIR", str(_TMP_ROOT / "workspaces"))
-# fleet-config: real read-only local fixtures (plan §5)
+# fleet-config: real read-only local fixtures
 os.environ.setdefault("ZAGENT_FLEET_CONFIG_DIR", str(Path(__file__).resolve().parents[2] / "fleet-config"))
 
 import pytest  # noqa: E402

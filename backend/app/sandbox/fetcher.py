@@ -1,10 +1,10 @@
-"""Golden fetch service (plan §3): keeps golden fresh — fetch every 5 min per
+"""Golden fetch service: keeps golden fresh — fetch every 5 min per
 repo on origin/<integrationBranch>, plus one synchronous fetch before stamping.
 
 Runs IN-PROCESS via APScheduler during the SQLite era (single-writer rule); splits
 into its own compose service at the Postgres cutover. Skips archived repos.
 Fetch failures surface as a golden-staleness signal — the PAT-expiry canary
-(§10: 1-year PAT max lifetime discovered here, not mid-run).
+(1-year PAT max lifetime discovered here, not mid-run).
 
 Tier invariants: only this service ever WRITES to golden. Workers stamp clones
 or bind-mount read-only.

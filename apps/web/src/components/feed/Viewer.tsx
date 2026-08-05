@@ -5,7 +5,7 @@ import { CARD_META, type CardKind } from "./cardTypes";
 
 /** The two-tier viewer — a separate, view-only modal for full file/diff
  *  content. Opened by clicking a preview row in the feed. Never expands
- *  full content inline (plan §19). The viewer is read-only: no edit actions,
+ *  full content inline. The viewer is read-only: no edit actions,
  *  just the full content with a header showing the card kind + title + path. */
 export function Viewer({ item, onClose }: {
   item: import("./Feed").FeedItem | null;

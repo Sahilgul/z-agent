@@ -1,4 +1,4 @@
-"""can_use_tool -> approval service bridge (plan §4/§6).
+"""can_use_tool -> approval service bridge.
 
 The SDK calls this and BLOCKS until the human (or thread policy) resolves. The
 request is published to the backend on approvals:{run_id}; the decision comes back
@@ -6,7 +6,7 @@ on approval:{approval_id}:decision via BLPOP.
 
 Supervised auto-allow floor (anti-approval-fatigue): read/grep/glob always pass
 without a card; only writes, bash, git, and MCP mutations reach the human.
-Timeout behavior is deterministic (plan §10): timeout = DENY (+ notify), EXCEPT
+Timeout behavior is deterministic: timeout = DENY (+ notify), EXCEPT
 Autonomous where nothing is bridged at all (bypassPermissions).
 """
 

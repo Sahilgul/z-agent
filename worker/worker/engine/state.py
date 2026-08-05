@@ -1,8 +1,8 @@
-"""Engine state schema (plan §6 state.py).
+"""Engine state schema.
 
 The state flows through the LangGraph graph. Every node inspects and mutates
-only the keys it owns (plan §3 — context scope isolation). PromptOrigin tags
-every message so compaction can keep-vs-drop with one switch (plan §9).
+only the keys it owns (context scope isolation). PromptOrigin tags
+every message so compaction can keep-vs-drop with one switch.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ class PromptOrigin(str, Enum):
     ASSISTANT = "assistant"    # the model's own prior turns
     TOOL = "tool"              # tool results (prunable)
     ENVELOPE = "envelope"      # per-turn mode/env/AGENTS.md fragment (ephemeral, popped on exit)
-    MEMORY = "memory"          # T2/T3 memory slices (prunable, lower priority than tool)
+    MEMORY = "memory"          # thread-artifact/episodic memory slices (prunable, lower priority than tool)
     NUDGE = "nudge"            # injected steering message (protected)
 
 
@@ -64,40 +64,40 @@ class EngineState(TypedDict, total=False):
     # The conversation (PromptOrigin-tagged via additional_kwargs)
     messages: list[BaseMessage]
 
-    # Identity (plan §1 — identifiers.py)
+    # Identity (identifiers.py)
     run_id: str
     thread_id: str
     context_id: str          # == thread_id for top-level; derived for subagents
     task_id: str             # the current turn
 
-    # Mode + autonomy (plan §8)
+    # Mode + autonomy
     mode: Mode
     autonomy: Autonomy
 
-    # Budget (plan §13 — gateway > thread > goal)
+    # Budget (gateway > thread > goal)
     budget: Budget | dict[str, Any]  # dict form: msgpack-safe (see graph.py)
 
-    # The frozen plan artifact + live execution tracker (plan §7 update_tasks)
+    # The frozen plan artifact + live execution tracker (update_tasks)
     plan_artifact: dict[str, Any] | None
     task_tracker: list[dict[str, Any]] | None
-    # RC two-artifact task model (R24-amends-R23):
+    # Two-artifact task model:
     # {"artifact": [{id, content, scope, acceptance}], "tracker": {id: status}}
     tasks: dict[str, Any]
-    # RC T4 knowledge drafts staged by knowledge_draft (draft -> approve path)
+    # knowledge drafts staged by knowledge_draft (draft -> approve path)
     knowledge_drafts: list[dict[str, Any]]
 
-    # R34 discovered tools — session-scoped, checkpointed, survives compaction
+    # Discovered tools — session-scoped, checkpointed, survives compaction
     # (it is STATE, not messages). Names the agent loaded via tool_search.
     discovered_tools: list[str]
 
-    # Goal-mode artifact (plan §8 goal mode)
+    # Goal-mode artifact (goal mode)
     goal_artifact: dict[str, Any] | None
 
-    # Drift/collision flags (plan §11 team layer)
+    # Drift/collision flags (team layer)
     drift_detected: bool
     collision_warning: str | None
 
-    # Compaction bookkeeping (plan §9)
+    # Compaction bookkeeping
     compacted_event_ids: list[str]
     last_compaction_at: float | None
     compaction_count: int
@@ -105,16 +105,16 @@ class EngineState(TypedDict, total=False):
     force_compact: bool           # bypass the should_compact gate once
     compaction_retries: int       # cap forced retries (context overflow loop guard)
 
-    # Approvals (RA — interrupt-driven gate; plan §11 Redis driver)
+    # Approvals (interrupt-driven gate; Redis driver)
     approved_calls: dict[str, dict[str, Any]]  # tool_call_id -> decision record
     denial_streak: int            # consecutive denials; 3 -> blocked-escalation
 
-    # Watchdogs (plan §13)
+    # Watchdogs
     tool_streak: dict[str, int]   # failing-call signature -> consecutive count
     turn_count: int
     last_usage: dict[str, Any] | None  # usage_metadata of the last AI turn
 
-    # Goal-mode routing (RA — stage subgraph mount)
+    # Goal-mode routing (stage subgraph mount)
     stage_envelope: str | None    # current goal stage (drives the per-turn envelope)
     critic_iterations: int
     blocked_reason: str | None

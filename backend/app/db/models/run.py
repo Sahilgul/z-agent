@@ -1,5 +1,5 @@
-"""runs + plans + plan_steps (plan §7). created_by is MANDATORY — sessions are
-PRIVATE per teammate (§7a); every query hard-scopes by created_by at the API layer.
+"""runs + plans + plan_steps. created_by is MANDATORY — sessions are
+PRIVATE per teammate; every query hard-scopes by created_by at the API layer.
 available_actions is computed by the orchestrator and rendered as-is by the UI.
 Indexed by created_by+status+repo.
 """

@@ -399,7 +399,7 @@ def test_create_run_unknown_mode(auth_client, monkeypatch):
 
 
 def test_create_run_passes_fanout_through(auth_client):
-    """§4 user-requested fan-out: the count rides POST /runs into the swarm
+    """User-requested fan-out: the count rides POST /runs into the swarm
     blueprint's hydrate (the Lead still authors the slices)."""
     client, _, services, _ = auth_client
     r = client.post("/runs", json={"mode": "agent-rnd", "task": "map billing", "fanout": 5})
@@ -866,7 +866,7 @@ def test_post_intent_merge_pr_confirmed(auth_client, session, make_user):
     assert services["run_manager"].prs_merged == [("r1", user.id)]
 
 
-# --------------------------------------------------------------- thread controls (§4)
+# --------------------------------------------------------------- thread controls
 def test_post_intent_stop_thread(auth_client, session, make_user):
     client, _, services, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))

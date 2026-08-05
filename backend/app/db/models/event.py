@@ -1,10 +1,10 @@
-"""events — the full replayable StepEvent stream; PHI-BEARING STORAGE (§7a).
+"""events — the full replayable StepEvent stream; PHI-BEARING STORAGE.
 sdk_message_uuid NULLABLE (the edit-and-resend bridge; null = non-message /
 pre-instrumentation — free to add now, migration headache later). Durable with a
 CONFIGURABLE TTL (default 12 months, legal-hold override per run); a maintenance
 job purges expired rows. ~30GB SQLite capacity guardrail pulls Postgres forward.
 
-Renamed thread_id → thread_id (Plan Phase 1 — thread→thread mechanical rename).
+Renamed thread_id → thread_id (thread→thread mechanical rename).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Canonical TriggerEvent (plan §6 triggers-as-data). ONE generic ingress normalizes
+"""Canonical TriggerEvent (triggers-as-data). ONE generic ingress normalizes
 every source into this shape; the triggers engine matches it against `triggers` rows.
 Idempotent on (source, external_id, revision). Identity resolution is fail-closed:
 unresolved changed_by descriptor = no run.

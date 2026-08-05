@@ -1,4 +1,4 @@
-"""Backend -> worker thread control (plan §4). Interrupt is immediate; nudge is
+"""Backend -> worker thread control. Interrupt is immediate; nudge is
 graceful interrupt+inject+resume on the worker side; kill_replace ends the
 container and the thread manager re-stamps with the session volume mounted.
 """

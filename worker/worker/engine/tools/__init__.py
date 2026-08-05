@@ -1,8 +1,8 @@
-"""Tools package — capability registry + idempotency keys (plan §6, §15 plumbing).
+"""Tools package — capability registry + idempotency keys.
 
 The capability registry is the single source of truth for what each tool can
-do (read-only vs mutating, needs-approval, mcp-sourced). Phase 3 adds the
-mutating tools with the two-phase verbatim approval contract.
+do (read-only vs mutating, needs-approval, mcp-sourced). The mutating tools
+carry the two-phase verbatim approval contract.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ class Capability(str, Enum):
     """What a tool is allowed to do — drives the approval gate."""
 
     READONLY = "readonly"          # always allowed (no approval)
-    MUTATING = "mutating"          # needs approval (Phase 3)
-    DESTRUCTIVE = "destructive"    # needs verbatim approval every time (Phase 3)
+    MUTATING = "mutating"          # needs approval
+    DESTRUCTIVE = "destructive"    # needs verbatim approval every time
     MCP = "mcp"                    # external; capability per-tool
 
 
@@ -42,15 +42,15 @@ _TOOL_CAPABILITIES: dict[str, Capability] = {
     "ask_user": Capability.READONLY,
     "spawn_agent": Capability.MUTATING,
     "spawn_swarm": Capability.MUTATING,
-    # RC extended set (§7). knowledge_draft is MUTATING (repo|global scopes are
-    # human-gated); the gate auto-allows scope=user per the T4 contract.
+    # Extended set. knowledge_draft is MUTATING (repo|global scopes are
+    # human-gated); the gate auto-allows scope=user per the contract.
     "web_fetch": Capability.READONLY,
     "git_snapshot": Capability.READONLY,
     "update_tasks": Capability.READONLY,
     "compact": Capability.READONLY,
     "knowledge_draft": Capability.MUTATING,
-    # RD deferred set (Phase 10, R34). file_delete is DESTRUCTIVE: verbatim
-    # approval every time. mode_request is MUTATING (approval-routed §8 path).
+    # Deferred set. file_delete is DESTRUCTIVE: verbatim
+    # approval every time. mode_request is MUTATING (approval-routed mode path).
     "tool_search": Capability.READONLY,
     "web_search": Capability.READONLY,
     "file_delete": Capability.DESTRUCTIVE,
@@ -86,7 +86,7 @@ def needs_approval(tool_name: str, autonomy: str,
     AUTONOMOUS: nothing is bridged (bypassPermissions) — the gateway per-key
     budget is the only backstop.
 
-    RC: glob rulesets (permissions.py, findLast precedence) refine the
+    Glob rulesets (permissions.py, findLast precedence) refine the
     capability default per-call — an explicit allow rule bypasses the card,
     an ask rule forces one, deny never reaches this function (the gate
     rejects it first).
@@ -124,8 +124,8 @@ def _extra_tools() -> dict[str, Any]:
 
 
 # Every built tool, unique by name (the mutating terminal_exec wins over the
-# read-only variant). ALL_TOOLS keeps its Phase-3 shape for the §17 contract
-# tests; ALL_BUILT_TOOLS is the RA interim registry (bound mode-aware).
+# read-only variant). ALL_TOOLS keeps its mutating shape for the contract
+# tests; ALL_BUILT_TOOLS is the interim registry (bound mode-aware).
 def _dedupe_by_name(tools: list[Any]) -> list[Any]:
     seen: dict[str, Any] = {}
     for t in tools:
@@ -136,9 +136,9 @@ def _dedupe_by_name(tools: list[Any]) -> list[Any]:
 ALL_BUILT_TOOLS: list[Any] = _dedupe_by_name(ALL_TOOLS + list(_extra_tools().values()))
 ALL_BUILT_TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in ALL_BUILT_TOOLS}
 
-# §7/RD Tier-0 name parity: the ripgrep search tool is named `code_search` in
-# the plan contracts; the langchain tool object is `file_search`. Alias at the
-# registry level so either name resolves (RD's DEFAULT_TOOLS uses code_search).
+# Tier-0 name parity: the ripgrep search tool is named `code_search` in
+# the contracts; the langchain tool object is `file_search`. Alias at the
+# registry level so either name resolves (DEFAULT_TOOLS uses code_search).
 _NAME_ALIASES = {"code_search": "file_search"}
 
 
@@ -146,7 +146,7 @@ def resolve_tool_name(name: str) -> str:
     return _NAME_ALIASES.get(name, name)
 
 
-# --- R34 two-tier surface ---
+# --- Two-tier tool surface ---
 
 # Tier 0 — bound every turn (mode-intersected). Contract names; code_search
 # resolves to the file_search tool object.
@@ -155,8 +155,8 @@ DEFAULT_TOOLS: list[str] = [
     "code_search", "file_glob", "update_tasks", "tool_search",
 ]
 
-# §8 mode tool_filter (fail-closed: denied tools are absent from binding AND
-# from the tool_search index + D6 roster). "mcp__*" gates the MCP fold-in.
+# Mode tool_filter (fail-closed: denied tools are absent from binding AND
+# from the tool_search index + roster). "mcp__*" gates the MCP fold-in.
 _READ_SET = {
     "file_read", "file_search", "file_glob", "terminal_exec", "update_tasks",
     "compact", "web_fetch", "web_search", "git_snapshot", "memory_search",
@@ -176,7 +176,7 @@ MODE_ALLOWED: dict[str, set[str]] = {
 
 
 def mode_allowed(name: str, mode: Any) -> bool:
-    """§8 tool_filter — the single fail-closed check used by binding, the
+    """tool_filter — the single fail-closed check used by binding, the
     discovery index, and the roster."""
     mode_val = mode.value if hasattr(mode, "value") else str(mode)
     allowed = MODE_ALLOWED.get(mode_val, MODE_ALLOWED["ask"])
@@ -185,8 +185,8 @@ def mode_allowed(name: str, mode: Any) -> bool:
     return resolve_tool_name(name) in allowed
 
 
-# Mode-gated default additions (§8): fan-out in development/goal. ask_user is
-# DEFERRED (discoverable) so the goal default bind stays <=10 schemas (P10).
+# Mode-gated default additions: fan-out in development/goal. ask_user is
+# DEFERRED (discoverable) so the goal default bind stays <=10 schemas.
 _MODE_DEFAULT_ADDITIONS: dict[str, list[str]] = {
     "development": ["spawn_agent", "spawn_swarm"],
     "goal": ["spawn_agent", "spawn_swarm"],
@@ -202,7 +202,7 @@ def default_tool_names(mode: Any) -> list[str]:
 
 
 def tools_for_mode(mode: Any) -> list[Any]:
-    """R34 Tier-0 binding: DEFAULT_TOOLS(mode) + mode-gated additions — NEVER
+    """Tier-0 binding: DEFAULT_TOOLS(mode) + mode-gated additions — NEVER
     the full registry. The agent node adds state.discovered_tools on top."""
     tools: list[Any] = []
     for name in default_tool_names(mode):
@@ -215,7 +215,7 @@ def tools_for_mode(mode: Any) -> list[Any]:
 async def call_any_tool(name: str, args: dict[str, Any],
                         *, approval_gate: Any = None, autonomy: str = "supervised") -> dict[str, Any]:
     """Dispatch any tool. Mutating calls go through the approval gate first
-    (§3 two-phase verbatim). The gate returns the verbatim args to execute
+    (two-phase verbatim). The gate returns the verbatim args to execute
     with; we call the tool with THOSE args, not the agent's original."""
     if name in TOOL_BY_NAME:
         return await call_tool(name, args)
@@ -225,7 +225,7 @@ async def call_any_tool(name: str, args: dict[str, Any],
             if not decision["approved"]:
                 return {"kind": "error", "ok": False, "output": f"error: {decision.get('reason', 'denied')}",
                         "tool": name, "args": args}
-            # §3: execute with the VERBATIM args from the gate
+            # Execute with the VERBATIM args from the gate
             return await call_mutating_tool(name, decision["args"])
         return await call_mutating_tool(name, args)
     extra = _extra_tools()
@@ -236,8 +236,8 @@ async def call_any_tool(name: str, args: dict[str, Any],
 
 async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Dispatch WITHOUT the approval gate — the graph's gate node has already
-    decided (RA). Mutating tools execute with the gate's verbatim args.
-    mcp__* routes to the MCP manager (R24#7 per-server isolation); the RC
+    decided. Mutating tools execute with the gate's verbatim args.
+    mcp__* routes to the MCP manager (per-server isolation); the
     extended set routes through its async-aware shim (web_fetch is a coroutine)."""
     name = resolve_tool_name(name)
     if name.startswith("mcp__"):
@@ -282,7 +282,7 @@ async def _call_extra_tool(t: Any, name: str, args: dict[str, Any]) -> dict[str,
         return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
 
 
-# --- Idempotency keys (plan §15) ---
+# --- Idempotency keys ---
 
 def idempotency_key(run_id: str, thread_id: str, task_id: str, tool_name: str, args: dict[str, Any]) -> str:
     """Stable idempotency key so a retried tool call doesn't double-execute."""

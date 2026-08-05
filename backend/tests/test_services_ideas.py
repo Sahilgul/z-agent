@@ -1,4 +1,4 @@
-"""Ideas space tests (plan §6): shared threads, permanent Counsel comments,
+"""Ideas space tests: shared threads, permanent Counsel comments,
 Lead synthesis, promote-to-Plan brief. Completions are injected — no sockets.
 """
 

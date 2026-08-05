@@ -1,4 +1,4 @@
-"""Approval service (plan §1a/§6): consumes the worker's approvals:{run_id}
+"""Approval service: consumes the worker's approvals:{run_id}
 stream into Approval rows + WS cards; decisions publish back to the worker's
 blocking BLPOP. Timeout = DENY + notify (Autonomous never bridges).
 """
@@ -128,7 +128,7 @@ class ApprovalService:
             session.commit()
         finally:
             session.close()
-        # Approval cards ALWAYS break through (§1a): even while the agent works,
+        # Approval cards ALWAYS break through: even while the agent works,
         # Supervised autonomy surfaces tool-permission cards.
         await self.relay.publish_run_stage(run_id, "awaiting_user",
                                            ["allow_once", "always_allow", "deny_tool"])
@@ -140,7 +140,7 @@ class ApprovalService:
 
     @staticmethod
     def _push_to_owner(run_id: str, approval: Approval) -> None:
-        """Well-timed ask (plan Phase 4): the push deep-links THIS card, and a
+        """Well-timed ask: the push deep-links THIS card, and a
         push failure must never delay the approval flow."""
         try:
             from app.services import push

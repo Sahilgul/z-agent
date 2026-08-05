@@ -1,4 +1,4 @@
-"""Guidebook seeding tests (plan §3 Layer 2): deterministic generation from
+"""Guidebook seeding tests (Layer 2): deterministic generation from
 fleet-config + profile, the <200 line contract, idempotent seeding, per-repo
 failure isolation. Git runner + ADO client are fakes — no shells, no sockets.
 """

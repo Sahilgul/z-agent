@@ -1,11 +1,11 @@
-"""Responder (plan Phase 4): a PR comment lands → the ORIGINATING run answers.
+"""Responder: a PR comment lands → the ORIGINATING run answers.
 
 The comment author needs no Zagent identity — attribution was settled when the
 run was created; the engine therefore skips owner resolution for handler-routed
 events. Routing: pr_links.ado_pr_id → run. An active thread gets a nudge (graceful
 interrupt + inject); a finished thread is CONTINUED — a responder thread spawned
 against the same run with resume_session=True so the worker resumes from the
-thread's durable session volume (BUG-1 fix), then pushes the update.
+thread's durable session volume, then pushes the update.
 """
 
 from __future__ import annotations

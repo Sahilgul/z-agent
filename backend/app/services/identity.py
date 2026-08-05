@@ -1,5 +1,5 @@
-"""Identity resolution service (plan §1b/§6): ADO descriptor -> users.id.
-The §1b binding's second consumer (triggers engine); fail-closed by contract —
+"""Identity resolution service: ADO descriptor -> users.id.
+The identity binding's second consumer (triggers engine); fail-closed by contract —
 an unresolved descriptor returns None and the caller MUST NOT start a run.
 Names are labels, never keys; the descriptor GUID is the identity key.
 """

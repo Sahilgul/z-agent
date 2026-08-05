@@ -1,4 +1,4 @@
-"""LiteLLM gateway adapter (plan §4 — the cost data path).
+"""LiteLLM gateway adapter — the cost data path.
 
 The control plane mints a VIRTUAL KEY PER LANE with a per-key max_budget, injects
 it as the worker's gateway credential at container start, and reads spend back at
@@ -63,7 +63,7 @@ class GatewayClient:
 
     async def read_spend_reconciled(self, key: str, grace_seconds: float = 5.0, polls: int = 3) -> float:
         """Gateway metering is eventually consistent — poll with a grace window
-        before declaring a thread's final cost (plan §4)."""
+        before declaring a thread's final cost."""
         await asyncio.sleep(grace_seconds)
         spend = 0.0
         for _ in range(polls):
@@ -81,7 +81,7 @@ class GatewayClient:
 
 
 async def retry_with_backoff(fn, attempts: int = 5, base_delay: float = 1.0):
-    """Worker-side gateway failure story (plan §10): bounded backoff on
+    """Worker-side gateway failure story: bounded backoff on
     429/5xx/timeout, then the thread FAILS SAFE (stage=failed, resumable)."""
     for attempt in range(attempts):
         try:

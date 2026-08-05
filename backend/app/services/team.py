@@ -1,4 +1,4 @@
-"""Team provisioning (plan §1b — one-time setup codes, no self-service).
+"""Team provisioning — one-time setup codes, no self-service.
 
 Admin Team settings UI: 'Add teammate' = username + display name + ADO email
 (the email resolves the ADO descriptor AT CREATION — identity binding happens

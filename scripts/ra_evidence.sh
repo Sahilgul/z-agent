@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# RA exit evidence: run the spine contract suite against a REAL Postgres
-# checkpointer in a throwaway container (plan §23 — DONE = WIRED + EVIDENCED).
+# Exit evidence: run the spine contract suite against a REAL Postgres
+# checkpointer in a throwaway container (DONE = WIRED + EVIDENCED).
 #
 # Usage: scripts/ra_evidence.sh
 set -euo pipefail

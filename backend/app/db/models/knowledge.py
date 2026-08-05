@@ -1,5 +1,5 @@
 """knowledge_items + playbooks — the flywheel corpus (SHARED, human-approved).
-Privacy boundary (§7a): distilled lessons only, no transcripts; drafts from
+Privacy boundary: distilled lessons only, no transcripts; drafts from
 PHI-bearing runs are scoped user until approved, NEVER global/repo as drafts.
 Retrieval: cheap-model rerank by trigger_description at run start; ~200 rows, no
 embeddings needed (the RAG ban is for code, not curated rows).

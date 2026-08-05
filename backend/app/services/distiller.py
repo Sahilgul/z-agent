@@ -1,4 +1,4 @@
-"""Sleep-Time Distiller (plan §9 Phase 5): nightly consolidation — mine
+"""Sleep-Time Distiller: nightly consolidation — mine
 trajectory_summaries, draft knowledge candidates, score them against the
 held-out bench pool BEFORE the approval inbox (the card shows the bench
 delta). Memory consolidation that must prove it doesn't regress the fleet.

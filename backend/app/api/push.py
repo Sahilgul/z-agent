@@ -1,4 +1,4 @@
-"""Push subscription API (plan Phase 4): VAPID public key for the client,
+"""Push subscription API: VAPID public key for the client,
 subscription save/remove. Opt-in only — the frontend asks after the first
 AwaitingYou moment, never on landing."""
 

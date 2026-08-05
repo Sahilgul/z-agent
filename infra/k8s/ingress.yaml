@@ -1,4 +1,4 @@
-# Ingress (plan Phase 5): TLS at the cluster edge. WebSocket upgrade headers
+# Ingress: TLS at the cluster edge. WebSocket upgrade headers
 # are REQUIRED for the live trace.
 apiVersion: networking.k8s.io/v1
 kind: Ingress

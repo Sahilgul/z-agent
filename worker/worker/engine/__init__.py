@@ -1,17 +1,17 @@
-"""z-agent custom engine (Phase 2+).
+"""z-agent custom engine.
 
 Replaces the Claude Agent SDK coupling with a LangGraph StateGraph that talks
-to the LiteLLM gateway over the OpenAI-compatible protocol. The Phase 0 spike
+to the LiteLLM gateway over the OpenAI-compatible protocol. The spike
 validated the gateway fidelity (a–g); this is the production loop.
 
-Layout (plan §6):
+Layout:
   state.py        — EngineState, PromptOrigin, Mode, Budget
   llm.py          — ChatOpenAI via gateway, retry/backoff, capability registry
   security.py     — secrets redaction + quarantine
-  events.py       — engine state -> canonical StepEvents (the Phase 1 contract)
+  events.py       — engine state -> canonical StepEvents (the event contract)
   checkpointer.py — LangGraph persistence + DeltaChannel JSONL mirror
   graph.py        — the StateGraph (agent -> tools -> agent ... -> end)
-  tools/          — read-only tools (Phase 2); mutating + approvals (Phase 3)
+  tools/          — read-only tools; mutating + approvals
   prompts/        — base.md + model suffixes + per-turn envelopes
 """
 

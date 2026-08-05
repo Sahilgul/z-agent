@@ -1,20 +1,20 @@
-"""Engine runner — the real turn loop (RA spine, plan §6 runner.py + §23).
+"""Engine runner — the real turn loop.
 
-This is what the worker container invokes once the seam is cut (RB). It owns:
+This is what the worker container invokes once the seam is cut. It owns:
 
   - the compiled graph WITH a checkpointer (Postgres default via
     open_checkpointer — MemorySaver only when DATABASE_URL is unset, dev/test);
-  - the interrupt-driven approval transport (plan §11 Redis driver): the gate
+  - the interrupt-driven approval transport (Redis driver): the gate
     node interrupt()s -> the runner emits the card -> awaits the decision on
     Redis (deny-on-timeout) -> Command(resume=decision). The decision crosses
     the checkpoint boundary, so approvals survive container replacement;
   - the turn loop: initial prompt -> turn -> idle (lingers for nudges) ->
     nudge/kill/mode via the Redis control channel -> next turn, until idle
     TTL completes the thread;
-  - turn bookkeeping: turn-boundary StepEvents, episodic-memory recording (T3),
+  - turn bookkeeping: turn-boundary StepEvents, episodic-memory recording,
     heartbeats, budget status.
 
-Env (plan §10):
+Env:
   RUN_ID, THREAD_ID, TASK_PROMPT, MODE, AUTONOMY, BUDGET_USD,
   MODEL (gateway alias), LITELLM_BASE_URL, LITELLM_API_KEY,
   REDIS_URL, WORKSPACE_DIR, DATABASE_URL (checkpointer; unset = MemorySaver),
@@ -53,7 +53,7 @@ from worker.forwarder import Forwarder
 
 
 def _permissions_from_env() -> list[dict[str, Any]]:
-    """Team/repo permission rulesets (RC §7): JSON list in ZAGENT_PERMISSIONS,
+    """Team/repo permission rulesets: JSON list in ZAGENT_PERMISSIONS,
     e.g. [{"effect":"deny","tool":"terminal_exec","args":{"command":"git push *"}}].
     Malformed config fails closed to an empty ruleset (capability map only)."""
     import json
@@ -84,7 +84,7 @@ class EngineRunner:
         self.mirror_dir = Path(os.environ.get("CHECKPOINT_MIRROR_DIR", "./checkpoints"))
         self.idle_ttl_s = float(os.environ.get("IDLE_TTL_SECONDS", "900"))
         self.approval_timeout_s = int(os.environ.get("APPROVAL_TIMEOUT_S", "900"))
-        # Canary mode (plan §17/RB): the custom engine serves READ-ONLY
+        # Canary mode: the custom engine serves READ-ONLY
         # production threads before the flag flip — ask-mode tools only,
         # supervised autonomy, regardless of what the request asked for.
         self.canary = os.environ.get("CANARY", "").strip().lower() in ("1", "true", "yes")
@@ -185,7 +185,7 @@ class EngineRunner:
             decision = await self.broker.wait_decision(payload["approval_id"])
             self.status = "running"
             await self.forwarder.heartbeat(self.status)
-            # RF: the paired decision event (same action_id as the card).
+            # The paired decision event (same action_id as the card).
             decision = {**decision, "tool": payload.get("tool")}
             await self.forwarder.publish_events([
                 self.emitter.approval_decision(payload["approval_id"], decision, self.task_id)])
@@ -193,7 +193,7 @@ class EngineRunner:
 
     async def _emit_approval_card(self, payload: dict[str, Any]) -> None:
         """Render the interrupt payload as the approval-card StepEvent —
-        dedicated APPROVAL kind with action_id pairing (RF)."""
+        dedicated APPROVAL kind with action_id pairing."""
         await self.forwarder.publish_events([self.emitter.approval_card(payload, self.task_id)])
 
     # ---------------------------------------------------------------- turn loop
@@ -299,7 +299,7 @@ class EngineRunner:
         }, episodic)
 
     def _record_episode(self, episodic: EpisodicMemory, result: dict[str, Any]) -> None:
-        """T3: one episode per turn (the memory.search substrate)."""
+        """One episode per turn (the memory.search substrate)."""
         messages = result.get("messages", [])
         last_text = ""
         for msg in reversed(messages):
@@ -332,7 +332,7 @@ class EngineRunner:
             elif msg.type == "mode":
                 try:
                     self.mode = Mode(msg.mode)
-                    # Mode transitions are audited via a durable event (plan §8).
+                    # Mode transitions are audited via a durable event.
                     from zagent_contracts import StepKind
                     await self.forwarder.publish_events([self.emitter._next(
                         StepKind.STATUS,

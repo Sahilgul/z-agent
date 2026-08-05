@@ -1,4 +1,4 @@
-"""One Redis client factory for the whole backend (plan §7 single-writer bus).
+"""One Redis client factory for the whole backend (single-writer bus).
 
 redis_url scheme decides the client:
 - "redis://…"  -> real server (all deployments set ZAGENT_REDIS_URL explicitly)

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
-/** The two-row composer (plan §19).
+/** The two-row composer.
  *
  * Row 1 (chips): context chips — repo, branch, files attached. Clickable to
  * remove. Plus mode / model / budget selectors.

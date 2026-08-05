@@ -1,4 +1,4 @@
-"""Plan HITL service (plan §2/§9): approve/reject a drafted Plan.
+"""Plan HITL service: approve/reject a drafted Plan.
 
 Pure DB state changes only — no blueprint execution. The API layer calls these
 then asks run_manager to chain into the next blueprint (development on approve,

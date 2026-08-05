@@ -1,4 +1,4 @@
-"""Admin Team settings routes (plan §1b): add teammate -> one-time code (shown
+"""Admin Team settings routes: add teammate -> one-time code (shown
 ONCE), regenerate, deactivate, list pending. Admin stats are METADATA-ONLY
 (run counts, cost, PRs merged — never message content).
 """
@@ -67,7 +67,7 @@ def deactivate(user_id: int, _: User = Depends(admin_user)):
 
 @router.get("/stats")
 def metadata_stats(_: User = Depends(admin_user)):
-    """METADATA-ONLY: counts/costs — admin never reads content (§1b/§7a)."""
+    """METADATA-ONLY: counts/costs — admin never reads content."""
     session = get_session()
     try:
         runs = session.query(Run).all()

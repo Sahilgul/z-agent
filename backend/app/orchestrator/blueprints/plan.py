@@ -1,4 +1,4 @@
-"""Plan mode blueprint (plan §2/§9): hydrate -> draft -> critique -> present.
+"""Plan mode blueprint: hydrate -> draft -> critique -> present.
 
 hydrate  (deterministic): resolve repo scope; if run.work_item_id fetch the ADO
            work item into artifacts; compute blast_radius from the fleet graph.

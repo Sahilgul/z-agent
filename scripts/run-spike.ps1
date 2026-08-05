@@ -1,6 +1,6 @@
 # Day-1 tracer bullet runner — builds the worker image and runs the spike INSIDE
-# the container on this workstation (the Docker-Desktop-under-Cortex-XDR leg,
-# plan §10). Prereqs: Docker Desktop running; infra/.env filled (gateway up).
+# the container on this workstation (the Docker-Desktop-under-Cortex-XDR leg).
+# Prereqs: Docker Desktop running; infra/.env filled (gateway up).
 param(
   [ValidateSet("ask","structured","soak","interrupt","cache","all")]
   [string]$Check = "all",

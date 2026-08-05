@@ -1,4 +1,4 @@
-"""Cross-host session store (plan Phase 5): session volumes are host paths;
+"""Cross-host session store: session volumes are host paths;
 when workers run on OTHER hosts (VM → AKS), a thread's durable session must
 follow it. The store mirrors `sessions/<run_id>/<thread_id>/` into object
 storage at thread end and materializes it back on resume — the bind-mount stays
@@ -6,7 +6,7 @@ the hot path, the store is the cross-host substrate.
 
 The client is injectable: production wires Azure Blob (env-gated); tests use a
 dict fake. The 30-day retention policy deletes both the volume AND the mirror —
-replay-only afterwards (events remain to the §7 TTL).
+replay-only afterwards (events remain to their TTL).
 """
 
 from __future__ import annotations

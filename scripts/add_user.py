@@ -1,4 +1,4 @@
-"""add_user CLI — BOOTSTRAP PATH ONLY (plan §1b): chicken-and-egg — the Team
+"""add_user CLI — BOOTSTRAP PATH ONLY: chicken-and-egg — the Team
 settings UI needs an admin to exist, so you run this ONCE for yourself; every
 teammate after that is born in the UI.
 

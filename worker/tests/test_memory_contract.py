@@ -1,4 +1,4 @@
-"""Contract tests for Phase 4 memory + compaction (plan §17)."""
+"""Contract tests for memory + compaction."""
 
 from __future__ import annotations
 

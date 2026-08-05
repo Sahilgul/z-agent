@@ -1,4 +1,4 @@
-"""SDK messages -> canonical StepEvent, at the worker edge (plan §1b hard rule).
+"""SDK messages -> canonical StepEvent, at the worker edge.
 
 One Normalizer instance per thread. A StepEvent is emitted ONCE, COMPLETE, at step
 end: tool_use blocks are held until their tool_result arrives, then one event
@@ -138,7 +138,7 @@ class Normalizer:
                     "is_error": msg.is_error,
                     "session_id": msg.session_id,
                     # Reported usage — gateway metering remains the cost source of
-                    # truth (plan §4); SDK USD is wrong for Kimi and is NOT stored.
+                    # truth; SDK USD is wrong for Kimi and is NOT stored.
                     "usage": msg.usage,
                 },
                 uuid,

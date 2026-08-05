@@ -1,4 +1,4 @@
-"""fleet-config loader (plan §5 Layer 0 + §7 registry).
+"""fleet-config loader (Layer 0 + registry).
 
 stdlib-only on purpose: importable by scripts AND the backend without dragging
 dependencies. Org-adoptable: point `fleet_config_dir` at YOUR org's copy of
@@ -71,7 +71,7 @@ class FleetGraph:
 
     def condensed_for_prompt(self) -> str:
         """Condensed callChain + rules for Lead/planner/Debug prompts ONLY —
-        never injected into single-repo specialist lanes (plan §5)."""
+        never injected into single-repo specialist lanes."""
         rules = "\n".join(f"- {r}" for r in self.blast_radius_rules)
         return f"Fleet call chain: {self.call_chain}\nBlast-radius rules:\n{rules}"
 

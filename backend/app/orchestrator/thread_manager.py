@@ -1,11 +1,11 @@
-"""Thread manager: spawn/control threads end-to-end (plan §4).
+"""Thread manager: spawn/control threads end-to-end.
 
 Spawn: capacity semaphore -> mint per-thread LiteLLM virtual key (the cost data
 path) -> Thread row -> worker container with session volume + stamp/mounts ->
 ingest stream registered. Cost readback at thread end reconciles from gateway
 metering (grace window), filling thread/run cost fields.
 
-PREWARM_POOL (plan §2 — semantics DEFINED, implementation lands with the VM move):
+PREWARM_POOL (semantics DEFINED, implementation lands with the VM move):
 A small fleet of pre-started worker containers held ready so the first thread of a
 run spawns in ~1s instead of cold-starting. Semantics:
   * Pool workers are GENERIC: no per-thread LiteLLM virtual key and no session
@@ -43,7 +43,7 @@ log = get_logger(service="thread_manager")
 
 
 def prewarm_status() -> dict:
-    """Documented-not-implemented stub (plan §2): the pool semantics are DEFINED
+    """Documented-not-implemented stub: the pool semantics are DEFINED
     in this module's docstring; the live pool lands with the VM move. The API
     surfaces this verbatim so the UI never implies warmth that doesn't exist."""
     settings = get_settings()
@@ -75,7 +75,7 @@ class ThreadManager:
                     resume_session: bool = False,
                     resume_from_thread_id: str | None = None) -> Thread:
         repo_name = writable_repo.name if writable_repo else None
-        # Flywheel injection (plan §3 G-1 fix): pinned knowledge + the owner's
+        # Flywheel injection: pinned knowledge + the owner's
         # episodic recall join every thread's persona prompt. Cached per run, so
         # only the first thread pays the rerank; stored in spawn_context so a
         # kill/replace replay reproduces the exact same prompt.
@@ -161,7 +161,7 @@ class ThreadManager:
     async def spawn_many(self, run: Run, specs: list[dict],
                          context_repos: list[Repo],
                          queue_poll_seconds: float = 5.0) -> list[Thread]:
-        """Width-swarm fan-out (plan §4/Phase 3): spawn one thread per spec
+        """Width-swarm fan-out: spawn one thread per spec
         CONCURRENTLY — parallel stamping falls out of each spawn running its own
         stamp in a thread. Requests beyond the global cap queue deterministically
         and the UI says so (a single swarm_queued relay note per waiting thread);
@@ -192,7 +192,7 @@ class ThreadManager:
         return [l for l in threads if l is not None]
 
     async def settle_cost(self, thread_id: str) -> float:
-        """End-of-thread spend readback (eventually consistent, plan §4 grace
+        """End-of-thread spend readback (eventually consistent, grace
         window). This — not the SDK's Anthropic-priced calculator — fills cost."""
         session = get_session()
         try:

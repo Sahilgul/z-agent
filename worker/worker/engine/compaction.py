@@ -1,4 +1,4 @@
-"""Compaction — prune → summarize → splice (plan §9, Phase 4).
+"""Compaction — prune → summarize → splice.
 
 The context window is a scarce resource. Compaction keeps it healthy without
 lying about what was removed. Three stages, in order:
@@ -20,7 +20,7 @@ message (system, user, nudge) was dropped, and that the summary carries the
 compaction marker. A failed validator rolls back the compaction (the
 conversation is left intact and the context-limit breach is reported instead).
 
-PromptOrigin (Phase 1) drives keep-vs-drop with one switch per origin.
+PromptOrigin drives keep-vs-drop with one switch per origin.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class CompactionResult:
 
 @dataclass
 class CompactionPolicy:
-    """When + how hard to compact. Self-tuning (plan §9)."""
+    """When + how hard to compact. Self-tuning."""
     # The soft limit (tokens). The agent compacts BEFORE breaching it.
     context_limit: int = 120_000
     # The floor — never compact below this many messages (keep recent context).
@@ -78,7 +78,7 @@ class Compactor:
         self.policy = policy or CompactionPolicy()
         # The summarizer is an async callable (str) -> str. If None, compaction
         # prunes only (no summarize stage) — the safe default until the LLM
-        # summarizer is wired (Phase 4 self-tuning wires it).
+        # summarizer is wired (self-tuning wires it).
         self.summarizer = summarizer
 
     def _origin_of(self, msg: BaseMessage) -> PromptOrigin:
@@ -175,7 +175,7 @@ class Compactor:
         return new_messages, result
 
 
-# --- Self-tuning context limit (plan §9) ---
+# --- Self-tuning context limit ---
 
 @dataclass
 class SelfTuningLimit:

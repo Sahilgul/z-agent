@@ -1,4 +1,4 @@
-"""terminal_exec background contract (plan §7 R24#1).
+"""terminal_exec background contract.
 
 30s foreground -> auto-background. Per-job: output file + in-memory ring
 buffer + 16MiB ceiling force-kill; header/body/footer format on reads;
@@ -167,7 +167,7 @@ class TerminalManager:
 
     def ghost_reconcile(self) -> list[str]:
         """On (re)start: jobs from a previous process are dead — mark them so
-        the agent doesn't wait on ghosts (plan §13 ghost-reconcile)."""
+        the agent doesn't wait on ghosts (ghost-reconcile)."""
         reconciled = []
         for job in self.jobs.values():
             if job.running and (job._proc is None or job._proc.returncode is not None):

@@ -1,4 +1,4 @@
-"""Engine core loop — the LangGraph StateGraph (RA spine, plan §6/§23).
+"""Engine core loop — the LangGraph StateGraph.
 
 The assembled run path (this is what the Round-33 audit found missing — every
 node below was a tested island; now they are MOUNTED):
@@ -6,24 +6,24 @@ node below was a tested island; now they are MOUNTED):
   START -> [goal? goal_router] -> agent -> approval_gate? -> tools -> compaction -> agent ...
 
   agent          LLM + mode-aware tool binding + transient per-turn envelope
-                 (D1 env block + mode envelope + goal-stage envelope) +
+                 (env block + mode envelope + goal-stage envelope) +
                  usage/budget accounting + budget reminders.
-  approval_gate  interrupt()-driven two-phase gate (plan §11 Redis driver:
+  approval_gate  interrupt()-driven two-phase gate (Redis driver:
                  interrupt -> runner publishes card -> awaits -> Command(resume=)).
                  ONE interrupt per node execution; denials feed the 3-denial
                  circuit breaker (blocked-escalation).
   tools          Executes decided calls (denied calls become error ToolMessages,
                  never execute). Stuck-loop watchdog: nudge@3, decision-menu@5,
-                 hand-off@8, force-stop@12 (plan §13). ask_user pauses the turn
+                 hand-off@8, force-stop@12. ask_user pauses the turn
                  (goal-mode clarify = INPUT_REQUIRED).
-  compaction     prune -> summarize -> splice (plan §9) with the §9 trigger and
+  compaction     prune -> summarize -> splice with the trigger and
                  the force path for context-overflow retries; emits the
                  compaction-card event.
-  goal_router    The goal-mode stage subgraph (plan §8): intake -> clarify? ->
+  goal_router    The goal-mode stage subgraph: intake -> clarify? ->
                  explore -> plan -> implement -> verify -> rebase-gate -> PR,
                  with the critic loop (plan/verify exits) and blocked-escalation.
 
-The graph is compiled WITH a checkpointer (RA: Postgres default via
+The graph is compiled WITH a checkpointer (Postgres default via
 checkpointer.open_checkpointer; MemorySaver in tests). interrupt/resume is the
 approval + clarify transport, so it must survive container replacement.
 """
@@ -68,7 +68,7 @@ from worker.engine.watchdogs import CriticRubric
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
-# Stuck-loop watchdog thresholds (plan §13).
+# Stuck-loop watchdog thresholds.
 _STREAK_NUDGE = 3
 _STREAK_MENU = 5
 _STREAK_HANDOFF = 8
@@ -86,7 +86,7 @@ def _read_prompt(name: str) -> str:
 
 
 def _build_system_message(model: str, mode: Mode) -> SystemMessage:
-    """base.md + model suffix (plan §10 — ONE system message per turn)."""
+    """base.md + model suffix — ONE system message per turn."""
     base = _read_prompt("base.md")
     marker = "--- PROMPT START ---"
     if marker in base:
@@ -117,13 +117,13 @@ def _autonomy_of(state: EngineState) -> str:
 
 
 def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMessage | None:
-    """The transient per-turn envelope (plan §10 — D1 env block + D2 mode
+    """The transient per-turn envelope (env block + mode
     envelope + goal-stage envelope). Rides as a synthetic user-role message,
     NEVER persisted, NEVER part of the system message."""
     mode = _mode_of(state)
     parts: list[str] = []
 
-    # D1 — environment block (the source of truth for where/when the agent is)
+    # Environment block (the source of truth for where/when the agent is)
     workspace = config["configurable"].get("workspace", "")
     budget = state.get("budget")
     budget_line = ""
@@ -143,13 +143,13 @@ def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMes
     )
     parts.append(env)
 
-    # D2 — mode envelope (advertises the mode's tool filter — fixes the
+    # Mode envelope (advertises the mode's tool filter — fixes the
     # Round-33 prompt/tool drift class)
     envelope_text = _read_prompt(f"envelopes/{mode}.md").strip()
     if envelope_text:
         parts.append(f"<mode-envelope mode=\"{mode}\">\n{envelope_text}\n</mode-envelope>")
 
-    # D6 — deferred-tool roster fragment (R34): names + one-liners, <=0.5K
+    # Deferred-tool roster fragment: names + one-liners, <=0.5K
     # tokens; bound and discovered tools are excluded.
     from worker.engine.tools import default_tool_names
     from worker.engine.tools.discovery import roster_fragment
@@ -175,7 +175,7 @@ def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMes
 
 
 def _bound_tools(state: EngineState, mode: str) -> list[Any]:
-    """R34 two-tier binding: DEFAULT_TOOLS(mode) + discovered — NEVER the full
+    """Two-tier binding: DEFAULT_TOOLS(mode) + discovered — NEVER the full
     registry. Mode-gates are re-checked at bind time: a discovered tool that
     became mode-denied drops out. MCP tools bind from the manager's live
     catalog (only after discovery)."""
@@ -243,7 +243,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     except Exception as exc:  # noqa: BLE001
         err = str(exc)
         # Context-length overflow -> force one compaction and retry the turn
-        # (plan §9 force-compaction path; the retry cap stops an infinite loop).
+        # (force-compaction path; the retry cap stops an infinite loop).
         if _looks_like_context_overflow(err) and state.get("compaction_retries", 0) < _MAX_COMPACTION_RETRIES:
             tuning = config["configurable"].get("tuning")
             if tuning is not None:
@@ -261,7 +261,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     events = emitter.from_assistant(ai_message, task_id)
     _publish_events(config, events)
 
-    # Budget accounting (plan §13): usage -> cost -> budget.used; the gateway
+    # Budget accounting: usage -> cost -> budget.used; the gateway
     # remains the hard cap, this drives the 50%/80% reminders.
     usage = getattr(ai_message, "usage_metadata", None)
     out: dict[str, Any] = {
@@ -296,7 +296,7 @@ def _looks_like_context_overflow(err: str) -> bool:
 
 def _budget_reminder(emitter: EventEmitter, task_id: str | None,
                      prev_used: float, new_used: float, cap: float) -> StepEvent | None:
-    """50%/80% budget reminders (plan §13). Never auto-stops."""
+    """50%/80% budget reminders. Never auto-stops."""
     if cap <= 0:
         return None
     for threshold in (0.80, 0.50):
@@ -335,7 +335,7 @@ def _delta(state: EngineState, content: Any) -> TypingDelta:
     )
 
 
-# --- The approval gate node (interrupt-driven, plan §11 Redis driver) ---
+# --- The approval gate node (interrupt-driven, Redis driver) ---
 
 async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict[str, Any]:
     """Two-phase gate via LangGraph interrupt().
@@ -364,8 +364,8 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
         args = tc.get("args", {}) or {}
         if tc_id in approved:
             continue
-        # RC: glob rulesets (findLast) — a deny rule short-circuits BEFORE the
-        # card (hard git policies §11 never reach a human); allow skips it.
+        # Glob rulesets (findLast) — a deny rule short-circuits BEFORE the
+        # card (hard git policies never reach a human); allow skips it.
         effect = perms_evaluate(name, args, ruleset)
         if effect is Effect.DENY:
             approved[tc_id] = {"approved": False,
@@ -381,7 +381,7 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
         if effect is Effect.ALLOW:
             approved[tc_id] = {"approved": True, "via": "ruleset_allow", "args": args}
             continue
-        # T4 contract: knowledge_draft scope=user is auto-approved.
+        # knowledge_draft scope=user is auto-approved.
         if name == "knowledge_draft" and args.get("scope") == "user":
             approved[tc_id] = {"approved": True, "via": "scope_user_auto", "args": args}
             continue
@@ -473,8 +473,8 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             result = {"kind": "error", "ok": False,
                       "output": f"error: denied — {decision.get('reason', 'denied by user')}"}
         elif name == "update_tasks":
-            # RC two-artifact model: the reducer owns state; every mutation is
-            # a durable event (R31 recovery reconstructs from the event log).
+            # Two-artifact model: the reducer owns state; every mutation is
+            # a durable event (recovery reconstructs from the event log).
             from worker.engine.tools.extended import apply_task_updates
             new_tasks, err = apply_task_updates(state.get("tasks"), args.get("updates", []))
             if err:
@@ -486,13 +486,13 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                                     f"{sum(1 for s in new_tasks['tracker'].values() if s == 'completed')} completed",
                           "detail_tasks": new_tasks}
         elif name == "compact":
-            # RC agent-triggerable compaction (§7): force the next compaction
+            # Agent-triggerable compaction: force the next compaction
             # point regardless of the token threshold.
             out["force_compact"] = True
             result = {"kind": "success", "ok": True,
                       "output": "ok: compaction requested — the engine compacts at the next boundary"}
         elif name == "tool_search":
-            # R34 discovery: matches merge into state.discovered_tools (the
+            # Discovery: matches merge into state.discovered_tools (the
             # next LLM call binds them natively — checkpointed, session-scoped).
             from worker.engine.tools import default_tool_names
             from worker.engine.tools.discovery import tool_search_async
@@ -506,7 +506,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                                 | set(result["discovered"]))
                 out["discovered_tools"] = merged
         elif name == "mode_request":
-            # R34: approval-routed §8 transition — reaching here means the
+            # Approval-routed mode transition — reaching here means the
             # gate approved (MUTATING capability); apply the mode change.
             target = str(args.get("target_mode", ""))
             valid = {m.value for m in Mode}
@@ -518,7 +518,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                 result = {"kind": "success", "ok": True,
                           "output": f"ok: mode transition approved — now in {target} mode"}
         else:
-            # §3: execute with the VERBATIM args recorded at the gate
+            # Execute with the VERBATIM args recorded at the gate
             # (edit-and-resend args land here via decision["args"]).
             exec_args = (decision or {}).get("args", args)
             started = time.monotonic()
@@ -529,8 +529,8 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                 if not result["ok"]:
                     metrics.increment("tool_calls_failed")
 
-        # RC knowledge_draft: stage the draft (scope=user lands directly;
-        # repo|global staged for the human-gated T4 approve path).
+        # knowledge_draft: stage the draft (scope=user lands directly;
+        # repo|global staged for the human-gated approve path).
         if name == "knowledge_draft" and result["ok"]:
             drafts = list(state.get("knowledge_drafts", []))
             drafts.append({
@@ -557,7 +557,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         if name == "ask_user" and result["ok"]:
             out["done"] = True
 
-        # Stuck-loop watchdog (plan §13)
+        # Stuck-loop watchdog
         sig = _call_signature(name, args)
         if result["ok"]:
             streaks.pop(sig, None)
@@ -576,7 +576,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                 if metrics:
                     metrics.increment("stuck_loop_triggers")
 
-    # R24#1: background terminal completion/watch notifies at turn end.
+    # Background terminal completion/watch notifies at turn end.
     from worker.engine.tools.background import terminal_manager
     for note in terminal_manager().completed_notifications():
         new_messages.append(tag_message(HumanMessage(
@@ -594,7 +594,7 @@ def _call_signature(name: str, args: dict[str, Any]) -> str:
 
 def _streak_response(emitter: EventEmitter, task_id: str | None,
                      count: int) -> tuple[str, StepEvent, bool] | None:
-    """nudge@3 -> decision-menu@5 -> hand-off@8 -> force-stop@12 (plan §13)."""
+    """nudge@3 -> decision-menu@5 -> hand-off@8 -> force-stop@12."""
     if count == _STREAK_NUDGE:
         text = ("The same failing call has now failed 3 times in a row. Stop "
                 "retrying it unchanged: re-read the error, change the approach "
@@ -658,12 +658,12 @@ def _tool_title(name: str, args: dict[str, Any]) -> str:
 # --- The compaction node ---
 
 async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[str, Any]:
-    """prune -> summarize -> splice (plan §9) + the force path for context
+    """prune -> summarize -> splice + the force path for context
     overflow. Emits the compaction-card event; honesty-validator rollbacks
     surface as warnings instead of silent drops."""
     compactor: Compactor = config["configurable"].get("compactor") or Compactor()
     emitter: EventEmitter = config["configurable"]["emitter"]
-    # Self-tuning limit (plan §9): the learned limit drives the trigger.
+    # Self-tuning limit: the learned limit drives the trigger.
     tuning = config["configurable"].get("tuning")
     if tuning is not None:
         compactor.policy.context_limit = tuning.current
@@ -713,7 +713,7 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
     return out
 
 
-# --- The goal router node (the stage subgraph, plan §8) ---
+# --- The goal router node (the stage subgraph) ---
 
 async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[str, Any]:
     """The goal-mode stage machine. Runs on goal-mode entry (intake) and after
@@ -852,8 +852,8 @@ def _critic_block(state: EngineState, config: RunnableConfig, emitter: EventEmit
 
 def _publish_stage_event_recap(config: RunnableConfig, emitter: EventEmitter,
                                task_id: str | None, artifact: dict[str, Any]) -> None:
-    """RF: ◆ recap block at every stage entry/advance — the progress-recap
-    card kind (§19 taxonomy)."""
+    """◆ recap block at every stage entry/advance — the progress-recap
+    card kind (recap taxonomy)."""
     stage = artifact["stage"]
     goal_text = str(artifact.get("user_story") or artifact.get("goal", ""))[:120]
     _publish_events(config, [emitter._next(
@@ -900,8 +900,8 @@ def _clarify_answered(state: EngineState) -> bool:
 
 
 def _extract_evidence(state: EngineState) -> dict[str, Any]:
-    """Heuristic verify evidence (RA mount): the most recent test-looking
-    terminal_exec result decides tests_pass. RE's story->PR fixture hardens
+    """Heuristic verify evidence: the most recent test-looking
+    terminal_exec result decides tests_pass. The story->PR fixture hardens
     this into the real evidence contract."""
     messages = state.get("messages", [])
     for msg in reversed(messages):
@@ -959,7 +959,7 @@ def _after_compaction(state: EngineState) -> str:
 # --- Graph builder ---
 
 def build_graph(checkpointer: Any = None) -> Any:
-    """Compile the assembled spine (RA). The checkpointer is REQUIRED for the
+    """Compile the assembled spine. The checkpointer is REQUIRED for the
     interrupt-driven approval + clarify transports — pass the production saver
     from checkpointer.open_checkpointer() (MemorySaver in tests)."""
     g = StateGraph(EngineState)

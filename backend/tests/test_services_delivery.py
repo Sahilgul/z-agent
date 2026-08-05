@@ -23,8 +23,8 @@ def test_branch_name_for_with_thread():
 def test_branch_name_for_without_thread():
     run = Run(id="r1234567-aaaa", title="Fix the Scribe Summary Bug!")
     name = delivery.branch_name_for(run)
-    # plan §9: agent/<run_id>-<slug> — the agent/* namespace carries the ADO
-    # branch policies (§10); a zagent/* prefix would be rejected on push.
+    # agent/<run_id>-<slug> — the agent/* namespace carries the ADO
+    # branch policies; a zagent/* prefix would be rejected on push.
     assert name == "agent/r1234567-fix-the-scribe-summary-bug"
 
 
@@ -261,7 +261,7 @@ def test_open_pr_success(session, make_user, monkeypatch):
     assert fake_ado.created[0]["source_branch"].startswith("agent/r1-")
     assert fake_ado.created[0]["target_branch"] == "main"
     assert fake_ado.created[0]["repo_id"] == "ado-123"
-    # plan §3: the pre-PR fetch+rebase runs BEFORE the push.
+    # the pre-PR fetch+rebase runs BEFORE the push.
     assert order == [("sync", "main"), ("push", link.branch)]
     # tamper-evidence: the PR body pins the package hash and the DB copy matches.
     assert link.evidence["sha256"] == delivery.evidence_sha256(
@@ -322,7 +322,7 @@ def test_merge_pr_success(session, make_user):
 
 
 def test_merge_pr_native_ui_hands_off_without_completing(session, make_user, monkeypatch):
-    """§9 merge-identity lock: compliance disallows bypass-on-complete -> NO
+    """Merge-identity lock: compliance disallows bypass-on-complete -> NO
     completion call; the human finishes in ADO under their own identity and the
     handoff is an audit event on the run."""
     from app.core.config import Settings

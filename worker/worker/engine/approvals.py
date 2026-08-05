@@ -1,4 +1,4 @@
-"""Engine-side approval gate (plan §6/§7, Phase 3) — the two-phase verbatim contract.
+"""Engine-side approval gate — the two-phase verbatim contract.
 
 In SUPERVISED/GATED autonomy, a mutating tool call is NOT executed on the first
 request. It is intercepted here, an approval-card StepEvent carrying the
@@ -6,14 +6,14 @@ VERBATIM command/edit is emitted, and the thread BLOCKS until the human
 decides (Redis BLPOP). On approval, the tool executes with the verbatim args
 from phase 1 (NOT any args the agent mutated meanwhile — the verbatim contract).
 
-§3 rules enforced here:
+Verbatim contract rules enforced here:
   - always_allow persists the tool CLASS (file_edit, terminal_exec), never a
     specific file/command. A re-used always-allow on a new target is rejected.
   - DESTRUCTIVE commands never get always_allow — verbatim every time.
   - AUTONOMOUS: nothing is bridged (bypassPermissions).
 
 The gate is per-run state (the always-allow set is per run, shared across the
-run's threads via Redis). Timeout = DENY deterministically (plan §10).
+run's threads via Redis). Timeout = DENY deterministically.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class ApprovalGate:
         a denial dict. Call this BEFORE executing a mutating tool."""
         await self._load_always_allowed()
 
-        # §3: destructive commands never get always_allow
+        # Destructive commands never get always_allow
         is_destructive = tool_name == "terminal_exec" and is_destructive_command(args.get("command", ""))
         if tool_name in self._always_allowed and not is_destructive:
             return {"approved": True, "args": args, "verbatim": True, "via": "always_allow"}
@@ -74,7 +74,7 @@ class ApprovalGate:
         decision_key = f"approval:{approval_id}:decision"
         result = await self.redis.blpop(decision_key, timeout=self.timeout_s)
         if result is None:
-            # Timeout = DENY deterministically (plan §10)
+            # Timeout = DENY deterministically
             if DENY_ON_TIMEOUT:
                 return {"approved": False, "args": args, "reason": "approval timed out — denied"}
             return {"approved": True, "args": args, "verbatim": True, "via": "timeout"}
@@ -83,7 +83,7 @@ class ApprovalGate:
         decision = json.loads(raw)
         dec = decision.get("decision")
         if dec == "always_allow":
-            # §3: persist the tool CLASS, not the specific target
+            # Persist the tool CLASS, not the specific target
             if tool_name in _ALWAYS_ALLOWABLE_CLASSES and not is_destructive:
                 self._always_allowed.add(tool_name)
                 await self._persist_always_allowed(tool_name)
@@ -119,18 +119,18 @@ class ApprovalGate:
 
 
 class ApprovalBroker:
-    """Runner-side broker for the INTERRUPT-DRIVEN approval flow (RA).
+    """Runner-side broker for the INTERRUPT-DRIVEN approval flow.
 
     The graph's gate node calls interrupt(card_payload) — LangGraph persists
     the checkpoint and halts. The RUNNER (the only place allowed to block)
     emits the card, waits for the human's decision on Redis, and resumes the
     graph with Command(resume=decision). Because the decision crosses the
-    checkpoint boundary, approvals survive container replacement (plan §11 —
-    the Redis driver: interrupt -> publish -> await -> resume).
+    checkpoint boundary, approvals survive container replacement (the
+    Redis driver: interrupt -> publish -> await -> resume).
 
     Decision contract (the resume value):
       {"decision": "allow" | "always_allow" | "deny", "reason": str?}
-    Timeout = DENY deterministically (plan §10); the runner synthesizes the
+    Timeout = DENY deterministically; the runner synthesizes the
     deny decision and resumes with it — the gate node treats it like any denial.
     """
 
@@ -156,7 +156,7 @@ class ApprovalBroker:
         }
 
     async def is_always_allowed(self, tool_name: str, args: dict[str, Any]) -> bool:
-        """§3: the always-allow set is per-run, class-scoped; destructive never."""
+        """The always-allow set is per-run, class-scoped; destructive never."""
         is_destructive = tool_name == "terminal_exec" and is_destructive_command(args.get("command", ""))
         if is_destructive:
             return False

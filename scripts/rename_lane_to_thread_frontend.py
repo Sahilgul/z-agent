@@ -1,4 +1,4 @@
-"""Phase 1 rename pass 3: frontend (apps/web/src) lane → thread.
+"""Rename pass 3: frontend (apps/web/src) lane → thread.
 
 TS/TSX/CSS mechanical rename. Mirrors the Python rename but for JS identifier
 conventions (camelCase laneId → threadId, snake_case lane_id → thread_id,

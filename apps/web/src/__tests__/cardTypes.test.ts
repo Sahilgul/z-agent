@@ -10,10 +10,10 @@ import {
 } from "../components/feed/cardTypes";
 
 describe("cardTypes", () => {
-  it("defines 15 card kinds (§19 taxonomy complete — RF added the 4 missing)", () => {
+  it("defines 15 card kinds (taxonomy complete)", () => {
     const kinds = Object.keys(CARD_META) as CardKind[];
     expect(kinds).toHaveLength(15);
-    // The RF additions: todo-checklist, compaction, ⚠ warning, ◆ recap.
+    // The additions: todo-checklist, compaction, ⚠ warning, ◆ recap.
     for (const k of ["todo_checklist", "compaction", "warning", "recap"] as CardKind[]) {
       expect(kinds).toContain(k);
     }

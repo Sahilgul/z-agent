@@ -1,5 +1,5 @@
-"""approvals — plan | tool | knowledge | pr. Timeout behavior is deterministic
-(plan §10): timeout = DENY + notify, EXCEPT Autonomous = allow-with-log.
+"""approvals — plan | tool | knowledge | pr. Timeout behavior is deterministic:
+timeout = DENY + notify, EXCEPT Autonomous = allow-with-log.
 """
 
 from __future__ import annotations

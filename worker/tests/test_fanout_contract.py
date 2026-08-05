@@ -1,4 +1,4 @@
-"""Contract tests for Phase 6 fan-out (plan §17)."""
+"""Contract tests for fan-out."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def test_spawn_agent_vetoed_when_worker_saturated():
 
 
 def test_spawn_swarm_rejects_duplicate_slices(monkeypatch: pytest.MonkeyPatch):
-    """§4: swarm slices must be DISTINCT — duplicate prompts are rejected."""
+    """Swarm slices must be DISTINCT — duplicate prompts are rejected."""
     monkeypatch.setenv("THREAD_ID", "thread-1")
     slices = [
         {"title": "a", "prompt": "do the same thing"},

@@ -1,5 +1,5 @@
-"""WebSocket endpoint (plan §8 ws/events.py): auth, per-user scoping, per-run
-subscribe. §7a: a socket only receives events for runs the authenticated user
+"""WebSocket endpoint (ws/events.py): auth, per-user scoping, per-run
+subscribe. A socket only receives events for runs the authenticated user
 created — the relay fanout is keyed off this check.
 """
 

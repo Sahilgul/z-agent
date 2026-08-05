@@ -1,6 +1,6 @@
-"""Ideas space + Counsel + Lead synthesis (plan §6, Phase 3).
+"""Ideas space + Counsel + Lead synthesis.
 
-A team-wide SHARED space (§7a shared-by-design exception — never privacy-scoped):
+A team-wide SHARED space (shared-by-design exception — never privacy-scoped):
 threads and ALL comments, including Counsel's, are visible to every teammate and
 persist permanently. Counsel is the product-thinking 11th team member — on demand
 ("Ask Counsel") by default, never auto-invoked into human threads. "Summarize"

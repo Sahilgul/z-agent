@@ -1,5 +1,5 @@
-"""RF engine-side contract tests: dedicated approval StepKind + action_id
-pairing, and the ◆ recap emission at goal stage advances (plan §19, P9)."""
+"""Engine-side contract tests: dedicated approval StepKind + action_id
+pairing, and the ◆ recap emission at goal stage advances."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class TestApprovalEventPairing:
 
 @pytest.mark.asyncio
 async def test_recap_emitted_at_goal_stage_advance(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    """Every stage advance emits the ◆ recap StepEvent (RF console parity)."""
+    """Every stage advance emits the ◆ recap StepEvent (console parity)."""
     from worker.engine.graph import build_graph
 
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))

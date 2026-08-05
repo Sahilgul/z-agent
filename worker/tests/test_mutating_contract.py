@@ -1,8 +1,8 @@
-"""Contract tests for Phase 3 mutating tools + approval gate (plan §17).
+"""Contract tests for mutating tools + approval gate.
 
 Validates the MULTI-ACTOR CONTRACTS:
-  §2 read-before-edit (content-hash guard) — edit/write refused on mismatch.
-  §3 two-phase verbatim approval — always_allow persists the class only;
+  read-before-edit (content-hash guard) — edit/write refused on mismatch.
+  two-phase verbatim approval — always_allow persists the class only;
      destructive never gets always_allow; timeout = deny.
 """
 
@@ -25,7 +25,7 @@ from worker.engine.tools import (
     needs_approval,
 )
 
-# ----------------------------------------------------------- content hash (§2)
+# ----------------------------------------------------------- content hash (read-before-edit)
 
 def test_content_hash_is_stable_and_truncated():
     h1 = content_hash("hello world")
@@ -51,7 +51,7 @@ async def test_file_edit_with_matching_hash_succeeds(tmp_path: Path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_file_edit_refuses_on_hash_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """§2: the file changed since read -> refuse, return current content."""
+    """The file changed since read -> refuse, return current content."""
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     f = tmp_path / "x.txt"
     f.write_text("foo\nbar\n")
@@ -102,7 +102,7 @@ async def test_file_write_create_new_requires_no_hash(tmp_path: Path, monkeypatc
 
 @pytest.mark.asyncio
 async def test_file_write_overwrite_existing_requires_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """§2: overwriting an existing file without the expected hash is refused."""
+    """Overwriting an existing file without the expected hash is refused."""
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     f = tmp_path / "x.txt"
     f.write_text("old content")
@@ -126,7 +126,7 @@ async def test_file_write_overwrite_with_matching_hash(tmp_path: Path, monkeypat
     assert f.read_text() == "new content"
 
 
-# ----------------------------------------------------------- destructive detection (§3)
+# ----------------------------------------------------------- destructive detection
 
 def test_destructive_command_detection():
     assert is_destructive_command("git push --force origin main")
@@ -154,11 +154,11 @@ def test_all_tools_registry_has_seven():
                      "file_edit", "file_write"}
 
 
-# ----------------------------------------------------------- approval gate (§3)
+# ----------------------------------------------------------- approval gate
 
 @pytest.mark.asyncio
 async def test_approval_gate_always_allow_persists_class_only(monkeypatch: pytest.MonkeyPatch):
-    """§3: always_allow persists the tool CLASS, not the specific target."""
+    """always_allow persists the tool CLASS, not the specific target."""
     gate = ApprovalGate("redis://fake", "run-1", "thread-1")
     # Fake Redis: smembers returns empty, then we simulate a decision.
     fake_redis = AsyncMock()
@@ -179,7 +179,7 @@ async def test_approval_gate_always_allow_persists_class_only(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_approval_gate_destructive_never_always_allow(monkeypatch: pytest.MonkeyPatch):
-    """§3: destructive commands never get always_allow — verbatim every time."""
+    """Destructive commands never get always_allow — verbatim every time."""
     gate = ApprovalGate("redis://fake", "run-1", "thread-1")
     fake_redis = AsyncMock()
     fake_redis.smembers = AsyncMock(return_value={"terminal_exec"})  # already always-allowed
@@ -198,7 +198,7 @@ async def test_approval_gate_destructive_never_always_allow(monkeypatch: pytest.
 
 @pytest.mark.asyncio
 async def test_approval_gate_timeout_denies(monkeypatch: pytest.MonkeyPatch):
-    """§3 + §10: timeout = DENY deterministically."""
+    """Timeout = DENY deterministically."""
     gate = ApprovalGate("redis://fake", "run-1", "thread-1", timeout_s=1)
     fake_redis = AsyncMock()
     fake_redis.smembers = AsyncMock(return_value=set())

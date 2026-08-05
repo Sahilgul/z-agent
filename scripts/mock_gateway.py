@@ -1,4 +1,4 @@
-"""Mock LiteLLM gateway (stdlib-only) — RB/RG local evidence harness.
+"""Mock LiteLLM gateway (stdlib-only) — local evidence harness.
 
 Stands in for the real LiteLLM proxy when no Foundry credentials are
 available. Serves BOTH faces of the gateway contract:

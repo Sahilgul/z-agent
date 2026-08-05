@@ -1,11 +1,11 @@
-"""Azure DevOps REST adapter (plan §8 adapter package; §10 credentials lock).
+"""Azure DevOps REST adapter (adapter package; credentials lock).
 
 TWO PATs: FETCH_PAT (Code:Read, golden fetcher ONLY) and FLEET_PAT (Code:R&W,
 service account, injected into workers at container start). A PAT NEVER lands in
 remote URLs, .git/config, events, or logs — git auth rides the credential helper
 (scripts/git-credential-zagent) / http.extraHeader from env.
 
-Identity binding (§1b): names are labels, never keys. resolve_identity maps an
+Identity binding: names are labels, never keys. resolve_identity maps an
 ADO email -> descriptor via the Graph API and FAILS LOUDLY on 0 or 2+ matches
 (the two-Alis rule — the system never picks the likelier Ali).
 """
@@ -54,7 +54,7 @@ class AdoClient:
 
     async def list_branches(self, repo_id: str) -> list[str]:
         """Branch list FETCHED from the remote — integrationBranch is selected
-        from this list in the Add-Repo UI, never free-typed (plan §1b)."""
+        from this list in the Add-Repo UI, never free-typed."""
         async with self._client() as c:
             r = await c.get(
                 f"{self._base}/{self.project}/_apis/git/repositories/{repo_id}/refs",
@@ -90,7 +90,7 @@ class AdoClient:
         )
 
     async def connection_data(self, pat: str) -> AdoIdentity:
-        """BYO-PAT identity proof (Phase 3): the PAT authenticates this call and
+        """BYO-PAT identity proof: the PAT authenticates this call and
         ADO returns the authenticated user's own descriptor."""
         auth = base64.b64encode(f":{pat}".encode()).decode()
         async with httpx.AsyncClient(
@@ -121,7 +121,7 @@ class AdoClient:
 
     async def my_active_tickets(self, descriptor: str) -> list[dict]:
         """'My active tickets' = AssignedTo the stored descriptor — GUID-exact,
-        collision-immune (§1b). Hydration lists these; the user TAPS one."""
+        collision-immune. Hydration lists these; the user TAPS one."""
         wiql = {
             "query": (
                 "SELECT [System.Id] FROM WorkItems "
@@ -169,7 +169,7 @@ class AdoClient:
             return r.json()
 
     async def complete_pull_request(self, repo_id: str, pr_id: int, merge_commit_message: str = "") -> dict:
-        """Merge ceremony (plan §9 Phase 2 lock): the human's approval lives in
+        """Merge ceremony lock: the human's approval lives in
         Zagent's evidence trail; completion rides FLEET_PAT (service account
         granted bypass-policies-on-complete). Fallback: deep-link to ADO native."""
         async with self._client() as c:

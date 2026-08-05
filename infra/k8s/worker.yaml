@@ -1,4 +1,4 @@
-# Worker pool (plan Phase 5): lane containers as Kubernetes Jobs spawned by
+# Worker pool: lane containers as Kubernetes Jobs spawned by
 # the backend's sandbox manager (docker → k8s swap behind the same
 # LaneManager seam). Egress locked to the gateway + dev.azure.com via
 # NetworkPolicy — the prompt-injection exfiltration control, in cluster terms.

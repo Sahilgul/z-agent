@@ -1,4 +1,4 @@
-"""Phase 1 rename pass 2: compound lane→thread terms (LaneManager, lane_manager, run_lane_container, etc).
+"""Rename pass 2: compound lane→thread terms (LaneManager, lane_manager, run_lane_container, etc).
 
 Pass 1 handled single-word Lane/lane/lane_id. This handles the compound
 identifiers that word-boundary patterns missed. Run on backend/app AND

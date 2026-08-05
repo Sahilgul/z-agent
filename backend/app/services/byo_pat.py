@@ -1,4 +1,4 @@
-"""BYO-PAT opt-in (plan §1b Phase 3 upgrade + ADO credentials section).
+"""BYO-PAT opt-in (ADO credentials section).
 
 A teammate may paste their own ADO PAT so push operations can attribute to
 them. Rules from the plan:

@@ -1,4 +1,4 @@
-"""Guardian (plan Phase 4): CI failure on a Zagent PR → a gated fix run, under
+"""Guardian: CI failure on a Zagent PR → a gated fix run, under
 a circuit breaker that is CODE, never prompt (the liver rule — a breaker the
 agent could talk its way past is not a breaker).
 

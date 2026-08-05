@@ -1,7 +1,7 @@
-"""Repo-onboarding service (plan §1b/§7 — repos-as-data).
+"""Repo-onboarding service (repos-as-data).
 
 State machine: registered -> validating -> cloning -> indexing -> ready
-(ready-no-map when the Phase 2 map generator hasn't covered the language yet).
+(ready-no-map when the map generator hasn't covered the language yet).
 ls-remote validation, dedupe by URL, progress as system events, repo_added WS
 event invalidates the repo-list query — no refresh, no restart, ever.
 
@@ -135,7 +135,7 @@ async def onboard(repo_id: int, relay=None) -> None:
             await asyncio.to_thread(subprocess.run, ["git", "-C", str(dest), *args])
 
         _set_status(repo_id, RepoStatus.INDEXING)
-        # Map generator lands Phase 2; until then every onboarded repo is ready-no-map.
+        # Map generator lands later; until then every onboarded repo is ready-no-map.
         session = get_session()
         try:
             row = session.get(Repo, repo_id)

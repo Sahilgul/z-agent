@@ -1,4 +1,4 @@
-"""RD acceptance tests (Phase 10, R34) — P10 exit criteria verbatim:
+"""Acceptance tests — exit criteria verbatim:
 
 1. default bind <=10 schemas
 2. roster fragment <=0.5K tokens
@@ -247,7 +247,7 @@ async def test_tool_search_unknown_names_never_crash(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_mode_request_transitions_after_approval(monkeypatch: pytest.MonkeyPatch,
                                                        tmp_path: Path):
-    """R34: mode_request is approval-routed (MUTATING) — allow -> mode changes."""
+    """mode_request is approval-routed (MUTATING) — allow -> mode changes."""
     from langgraph.checkpoint.memory import MemorySaver
     from langgraph.types import Command
 

@@ -1,4 +1,4 @@
-"""Edit-and-resend via fork_session (plan §1a, verified API path).
+"""Edit-and-resend via fork_session (verified API path).
 
 fork_session lives in claude_agent_sdk._internal (PRIVATE API) and is synchronous —
 this module wraps it in an async helper. The SDK version is PINNED in

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Source of truth for the org's repos and their integration (PR-target) branches. The orchestrator reads this in Phase 0 RECON before creating any worktree. Executors MUST base worktrees on origin/<integrationBranch> after a fresh fetch, NEVER on the local checkout's current branch (which may be a personal/feature branch like 'sahil' or 'treatment/...'). Update this file when a repo's integration branch changes or a new repo is added.",
+  "description": "Source of truth for the org's repos and their integration (PR-target) branches. The orchestrator reads this before creating any worktree. Executors MUST base worktrees on origin/<integrationBranch> after a fresh fetch, NEVER on the local checkout's current branch (which may be a personal/feature branch like 'sahil' or 'treatment/...'). Update this file when a repo's integration branch changes or a new repo is added.",
   "repos": [
     {
       "name": "AIClusterApp",

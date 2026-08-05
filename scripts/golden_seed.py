@@ -1,8 +1,8 @@
-"""Golden seed script (plan §9 Phase 0: "~50 lines, run 10x").
+"""Golden seed script ("~50 lines, run 10x").
 
 Per repo: clone into golden -> checkout origin/<integrationBranch> -> register
 (already done by seed_repos.py) -> profile stub. Golden is FETCH-ONLY from this
-moment on; workspaces stamp self-contained clones from it (plan §3).
+moment on; workspaces stamp self-contained clones from it.
 
 Run (env: FETCH_PAT, ZAGENT_ADO_ORG/PROJECT, ZAGENT_GOLDEN_DIR):
   python golden_seed.py [--only ServerApp]

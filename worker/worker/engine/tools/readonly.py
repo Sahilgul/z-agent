@@ -1,7 +1,7 @@
-"""Read-only tools (plan §6 tools/, Phase 2 scope).
+"""Read-only tools.
 
-Phase 2 ships ONLY read-only tools — writes (file_edit, file_write,
-terminal_exec mutating) arrive in Phase 3 with the approval + verbatim
+Ships ONLY read-only tools — writes (file_edit, file_write,
+terminal_exec mutating) arrive with the approval + verbatim
 contracts. This keeps the ask-mode loop safe to run while the approval
 architecture is still being built.
 
@@ -114,9 +114,9 @@ def file_glob(pattern: str) -> str:
     return "\n".join(sorted(matches)) + f"\n[{len(matches)} files]"
 
 
-# --- terminal_exec (read-only commands only in Phase 2) ---
+# --- terminal_exec (read-only commands only) ---
 
-# Commands that mutate state — blocked in Phase 2 (writes arrive in Phase 3).
+# Commands that mutate state — blocked here (writes arrive with the approval contract).
 _BLOCKED_COMMANDS = re.compile(
     r"\b(rm|mv|cp|mkdir|rmdir|chmod|chown|git\s+(commit|push|merge|rebase|reset|"
     r"checkout|branch|tag|stash)|pip\s+install|npm\s+install|yarn\s+add|"
@@ -133,10 +133,10 @@ _READONLY_COMMANDS = re.compile(
 
 @tool
 def terminal_exec(command: str) -> str:
-    """Run a shell command in the workspace. Phase 2: read-only commands only.
+    """Run a shell command in the workspace. Read-only commands only.
 
     Mutating commands (rm, git commit, pip install, etc.) are blocked until
-    Phase 3 ships the approval contract. Read-only commands (ls, cat, git
+    the approval contract ships. Read-only commands (ls, cat, git
     status, grep, rg, find) run directly.
     """
     if not command or not command.strip():
@@ -173,7 +173,7 @@ async def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     Tools return strings; an "error:" prefix indicates a logical error (the
     tool ran without raising but the operation failed). This matches the
-    Phase 0 spike ToolResult taxonomy so the EventEmitter pairs correctly.
+    ToolResult taxonomy so the EventEmitter pairs correctly.
     """
     t = TOOL_BY_NAME.get(name)
     if t is None:

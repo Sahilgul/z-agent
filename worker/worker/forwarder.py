@@ -1,4 +1,4 @@
-"""StepEvent -> Redis (plan §8 events split).
+"""StepEvent -> Redis (events split).
 
 DURABLE leg: complete StepEvents go to a Redis STREAM (persistent, consumer-group
 ack by the backend ingest — the events table is the PHI-grade system of record and

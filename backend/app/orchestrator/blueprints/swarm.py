@@ -1,4 +1,4 @@
-"""Width-swarm blueprint (plan §4 + Phase 3 — Agent-R&D topology).
+"""Width-swarm blueprint — Agent-R&D topology.
 
 hydrate (deterministic: repo scope + requested fan-out count, capped and said
 so) -> decompose (agentic Lead: N DISTINCT slices + per-thread prompts, never
@@ -10,7 +10,7 @@ never from self-report at collect time) -> synthesize (agentic Lead: rollup
 into one answer; run.auto_summary) -> complete (deterministic: per-thread
 trajectories + gateway-metered cost settle).
 
-All threads are READ-ONLY (§4: width swarms never write; the per-repo write lock
+All threads are READ-ONLY (width swarms never write; the per-repo write lock
 is not engaged). The user talks only to the Lead — Explorer threads report
 Notebook contracts, never chat.
 """
@@ -107,7 +107,7 @@ class SwarmBlueprint(Blueprint):
         ctx.artifacts["requested_fanout"] = requested
         relay = ctx.services.get("relay")
         if relay and ctx.artifacts.get("fanout") and ctx.artifacts["fanout"] > requested:
-            # §4: requests beyond the cap queue deterministically AND THE UI SAYS
+            # Requests beyond the cap queue deterministically AND THE UI SAYS
             # SO — a swarm-scoped thread_status note, not a fake available_action.
             await relay.publish_thread_status(
                 ctx.run.id, "swarm",

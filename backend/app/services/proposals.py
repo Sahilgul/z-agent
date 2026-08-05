@@ -1,4 +1,4 @@
-"""Improvement Inbox (plan §6 Phase 4): ranked proposals from the Janitor
+"""Improvement Inbox: ranked proposals from the Janitor
 (hygiene patrol) and Perfector (product research).
 
 Both patrol threads are READ-ONLY and emit proposals — NEVER unsolicited PRs.

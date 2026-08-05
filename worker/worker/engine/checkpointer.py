@@ -1,9 +1,9 @@
-"""Checkpointer — LangGraph persistence for fork/resume (plan §6 checkpointer.py).
+"""Checkpointer — LangGraph persistence for fork/resume.
 
 BUILD ON: langgraph-checkpoint-postgres AsyncPostgresSaver (durable, supports
 get_state_history for fork). BUILD CUSTOM: a DeltaChannel that mirrors every
 checkpoint to a versioned JSONL file so the transcript is replayable without
-Postgres (the §7a PHI-grade fallback + the edit-and-resend bridge source).
+Postgres (the PHI-grade fallback + the edit-and-resend bridge source).
 
 The checkpointer keys on context_id (= thread_id for top-level threads).
 """
@@ -21,7 +21,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 
 class DeltaChannel:
-    """Mirrors checkpoint deltas to a versioned JSONL file (plan §7a fallback).
+    """Mirrors checkpoint deltas to a versioned JSONL file (the fallback).
 
     Every checkpoint write appends one JSON line: {ts, thread_id, context_id,
     checkpoint_id, metadata}. The file is the replay source when Postgres is
@@ -61,7 +61,7 @@ def make_checkpointer(*, use_postgres: bool = False, conn_string: str | None = N
                       mirror_dir: Path | None = None) -> Any:
     """Build a LangGraph checkpointer synchronously (tests + tools).
 
-    RA: Postgres is the production DEFAULT (plan §23 — MemorySaver = tests
+    Postgres is the production DEFAULT (MemorySaver = tests
     only). This sync factory cannot manage the AsyncPostgresSaver connection
     lifecycle, so production code uses `open_checkpointer()` below. This
     factory remains for unit tests that need a plain saver.
@@ -91,7 +91,7 @@ def open_checkpointer(*, use_postgres: bool | None = None,
                       conn_string: str | None = None) -> Any:
     """Open the production checkpointer as an async context manager.
 
-    RA doctrine (plan §23): Postgres is the DEFAULT. Resolution order:
+    Doctrine: Postgres is the DEFAULT. Resolution order:
       1. explicit use_postgres=... wins;
       2. DATABASE_URL set -> Postgres (langgraph-checkpoint-postgres);
       3. otherwise -> MemorySaver with a loud stderr warning (dev/test only —

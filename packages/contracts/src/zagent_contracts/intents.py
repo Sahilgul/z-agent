@@ -1,4 +1,4 @@
-"""Run stages, action vocabulary, and the UserIntent contract (plan §1a/§8).
+"""Run stages, action vocabulary, and the UserIntent contract.
 
 One intent bus: buttons, classified text, chips, voice, triggers, cron, and webhooks
 all feed POST /runs/{id}/intent. available_actions on the run row is the ONLY legal

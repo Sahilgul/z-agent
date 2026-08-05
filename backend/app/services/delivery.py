@@ -1,15 +1,15 @@
-"""Delivery service (plan §9 Phase 2): branch -> push -> PR -> merge ceremony.
+"""Delivery service: branch -> push -> PR -> merge ceremony.
 
-Branch naming follows plan §9 (agent/<run8>-<slug>, thread suffix when a thread
-stamps it) so ADO branch policies scoped to the agent/* namespace (§10) accept
+Branch naming follows agent/<run8>-<slug> (thread suffix when a thread
+stamps it) so ADO branch policies scoped to the agent/* namespace accept
 the push. The evidence package is built BEFORE the PR opens — a PR without a
 complete package never leaves the station. Merge ceremony identity: the
 human's decision lives in Zagent's evidence trail (merged_by); completion rides
 FLEET_PAT (service account granted bypass-policies-on-complete). When compliance
 disallows policy bypass (settings.merge_native_ui), the merge tap hands off to
-ADO's native complete UI via deep link instead (§9 merge-identity lock).
+ADO's native complete UI via deep link instead (merge-identity lock).
 
-PAT discipline (§10): git push authenticates via the credential helper reading
+PAT discipline: git push authenticates via the credential helper reading
 FLEET_PAT from env — the token never appears in URLs, configs, events, or logs.
 """
 
@@ -44,8 +44,8 @@ class DeliveryError(RuntimeError):
 
 
 def branch_name_for(run: Run, thread: Thread | None = None) -> str:
-    """Plan §9 format agent/<run8>-<slug> — the agent/* namespace is what the
-    ADO branch policies (§10) grant write access to; any other prefix fails."""
+    """Branch format agent/<run8>-<slug> — the agent/* namespace is what the
+    ADO branch policies grant write access to; any other prefix fails."""
     slug = BRANCH_RE.sub("-", run.title.lower())[:32].strip("-") or "change"
     suffix = f"/{thread.id[:8]}" if thread else ""
     return f"agent/{run.id[:8]}-{slug}{suffix}"
@@ -60,7 +60,7 @@ def evidence_sha256(package: dict) -> str:
 
 
 def build_evidence_package(run_id: str) -> dict:
-    """Tamper-proof PR appendix (plan §9): plan, test signals, trajectory, cost.
+    """Tamper-proof PR appendix: plan, test signals, trajectory, cost.
     Assembled from the DB — never from agent self-reports at PR time."""
     session = get_session()
     try:
@@ -144,7 +144,7 @@ async def _git(args: list[str], cwd: str, env_extra: dict[str, str]) -> str:
 
 
 async def sync_before_push(run_id: str, workspace: str, target_branch: str) -> None:
-    """Plan §3 long-run rule: fetch + rebase onto origin/<integrationBranch>
+    """Long-run rule: fetch + rebase onto origin/<integrationBranch>
     inside the workspace BEFORE the push, so the PR diffs against current code.
     A conflict raises DeliveryError — rebasing is deterministic, resolving is not."""
     settings = get_settings()
@@ -171,7 +171,7 @@ async def push_branch(run_id: str, repo: Repo, workspace: str, branch: str) -> N
 
 async def open_pr(run_id: str, repo_name: str, workspace: str,
                   ado_client: AdoClient | None = None) -> PrLink:
-    """Evidence-gated PR open (§9): package first, gaps block, then push+create."""
+    """Evidence-gated PR open: package first, gaps block, then push+create."""
     package = build_evidence_package(run_id)
     gaps = evidence_complete(package)
     if gaps:
@@ -230,7 +230,7 @@ async def open_pr(run_id: str, repo_name: str, workspace: str,
 
 def pr_web_url(repo: Repo, pr_id: int) -> str:
     """Deep link into ADO's native PR UI — the merge handoff target when the
-    service account may not bypass policies (§9 merge-identity lock)."""
+    service account may not bypass policies (merge-identity lock)."""
     settings = get_settings()
     return (f"https://dev.azure.com/{settings.ado_org}/{settings.ado_project}"
             f"/_git/{repo.ado_repo_id or repo.name}/pullrequest/{pr_id}")

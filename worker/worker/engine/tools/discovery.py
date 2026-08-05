@@ -1,8 +1,8 @@
-"""Two-tier tool surface (Phase 10, R34): deferred discovery.
+"""Two-tier tool surface: deferred discovery.
 
 Tier 0 — DEFAULT_TOOLS (8) bound every turn; everything else DEFERRED behind
 tool_search. This module is the codex-style index + kimi-style exact-name
-load + the D6 roster fragment renderer.
+load + the roster fragment renderer.
 
 Index entries tokenize: name + name-with-spaces + description + recursive
 JSON-schema property names + capability/mode tags. MCP catalog folds into
@@ -18,7 +18,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 MAX_RESULTS_DEFAULT = 5
-# D6 roster fragment budget: <=0.5K tokens (~4 chars/token conservative)
+# roster fragment budget: <=0.5K tokens (~4 chars/token conservative)
 ROSTER_CHAR_BUDGET = 1800
 
 
@@ -112,7 +112,7 @@ def _modes_for_mcp() -> list[str]:
 
 
 def visible_index(mode: str) -> dict[str, IndexEntry]:
-    """Fail-closed (R34): mode-denied tools are absent from the index."""
+    """Fail-closed: mode-denied tools are absent from the index."""
     from worker.engine.tools import mode_allowed
     return {n: e for n, e in build_index().items()
             if mode_allowed(resolve_alias(n), mode)}
@@ -162,7 +162,7 @@ def full_schemas(names: list[str], *, mode: str) -> dict[str, dict[str, Any]]:
             for n in names if n in index}
 
 
-# --- D6 roster fragment (deferred names + one-liners, <=0.5K tokens) ---
+# --- roster fragment (deferred names + one-liners, <=0.5K tokens) ---
 
 def roster_fragment(mode: str, *, bound: list[str], char_budget: int = ROSTER_CHAR_BUDGET) -> str:
     bound_set = {resolve_alias(n) for n in bound}

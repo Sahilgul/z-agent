@@ -1,5 +1,5 @@
-"""Ideas routes (plan §6): team-wide threads + comments, Ask Counsel, Lead
-summarize, Promote to Plan. No per-user scoping — the Ideas space is the §7a
+"""Ideas routes: team-wide threads + comments, Ask Counsel, Lead
+summarize, Promote to Plan. No per-user scoping — the Ideas space is the
 shared-by-design exception.
 """
 

@@ -1,11 +1,11 @@
 name: zagent
 
-# Phase 0-3 local-era stack (plan §8):
+# Local-era stack:
 #   redis (AOF everysec) — Streams durability across restarts
 #   gateway + gateway-db — LiteLLM (virtual keys/budgets REQUIRE Postgres;
 #     gateway-db is LiteLLM-internal ONLY, disposable, re-mint keys to recreate)
 #   backend — FastAPI control plane; hosts fetch loop + jobs IN-PROCESS (SQLite era)
-# App data stays on the SQLite volume. App Postgres is added at the VM move (Phase 4 gate).
+# App data stays on the SQLite volume. App Postgres is added at the VM move.
 
 networks:
   internal:
@@ -14,7 +14,7 @@ networks:
   egress:
     driver: bridge
   lane:
-    # Worker lane lockdown (plan §10): NO internet route. Lanes reach ONLY the
+    # Worker lane lockdown: NO internet route. Lanes reach ONLY the
     # gateway (LLM) and redis (events/control). Git remotes never resolve —
     # read-only golden mounts are the repos; writable stamps push via the
     # backend-mediated flow, never direct from a lane.
@@ -104,7 +104,7 @@ services:
     networks: [internal, lane]
     restart: unless-stopped
 
-  # Package-registry egress for lanes (plan §10 Phase 2): allowlisting squid —
+  # Package-registry egress for lanes: allowlisting squid —
   # pypi/npm only. Lanes get HTTP(S)_PROXY from the sandbox manager; their
   # network stays internal-only, so this proxy is the whole internet they see.
   pkgproxy:
@@ -126,7 +126,7 @@ volumes:
   pip-cache:
   npm-cache:
   # Named volumes land on the WSL2 Linux fs under Docker Desktop — never NTFS
-  # (plan §10: heavy small-file IO, git ops inside Linux).
+  # (heavy small-file IO, git ops inside Linux).
   golden:
   sessions:
   workspaces:

@@ -1,4 +1,4 @@
-"""Triggers engine tests (plan §6 Phase 4): normalizer, dedupe, fail-closed
+"""Triggers engine tests: normalizer, dedupe, fail-closed
 identity, and all four guardrails — loop prevention, state flapping, bulk-edit
 rate limit (queue + drain), gated-only trust. run_manager is a fake.
 """

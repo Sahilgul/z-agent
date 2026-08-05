@@ -1,4 +1,4 @@
-"""Seed (plan §8 standing rule): the `system` user, the shipping modes, a seeded
+"""Seed: the `system` user, the shipping modes, a seeded
 COMPLETED demo Ask-mode run (replayable glass box, zero spend — replay is the
 perfect tutorial because it's the same EventStream), and the Welcome idea-thread
 fixture. Idempotent — safe on every boot.
@@ -65,7 +65,7 @@ AGENT_RND_PERSONA = (
     "questions — citing their file:line evidence. You are read-only: you never modify files."
 )
 
-# Permissions scope (plan §6 — modes as data): which repos a thread under this mode may
+# Permissions scope (modes as data): which repos a thread under this mode may
 # stamp a writable clone for. Empty = read-only. ``repos`` is an allowlist; ``writable``
 # gates whether the thread gets a writable mount at all.
 READ_ONLY_PERMS = {"writable": False, "repos": []}
@@ -95,7 +95,7 @@ def seed() -> None:
                              pin_hash="!locked"))
             session.commit()
 
-        # First-admin bootstrap (plan §1b chicken-and-egg, local-dev path):
+        # First-admin bootstrap (chicken-and-egg, local-dev path):
         # seed creates the configured admin ACTIVE so a fresh clone can log in
         # without the add_user CLI. No-op once the user exists.
         settings = get_settings()
@@ -110,7 +110,7 @@ def seed() -> None:
             ))
             session.commit()
 
-        # modes are DB rows — Phase 1 ships Ask; P2+ add plan/development/debug.
+        # modes are DB rows — ships Ask; later phases add plan/development/debug.
         if session.query(Mode).filter_by(name="ask").one_or_none() is None:
             session.add(Mode(
                 name="ask", persona_prompt=ASK_PERSONA, permission_mode="default",
@@ -147,7 +147,7 @@ def seed() -> None:
                                    "ci_green": False, "screenshots": False},
             ))
             session.commit()
-        # Phase 3 (plan §4/§6): Agent-R&D = width-swarm topology, read-only always.
+        # Agent-R&D = width-swarm topology, read-only always.
         if session.query(Mode).filter_by(name="agent-rnd").one_or_none() is None:
             session.add(Mode(
                 name="agent-rnd", persona_prompt=AGENT_RND_PERSONA,
@@ -199,7 +199,7 @@ def _seed_demo_run(session) -> None:
 
 
 def _seed_welcome_thread(session) -> None:
-    """Welcome idea-thread fixture: 4 member comments, so Phase 3's Ideas exit is
+    """Welcome idea-thread fixture: 4 member comments, so the Ideas exit is
     demoable solo."""
     if session.query(IdeaThread).filter_by(title="Welcome to Zagent — what should the fleet learn first?").one_or_none():
         return
@@ -228,8 +228,8 @@ def _seed_welcome_thread(session) -> None:
 
 
 def _seed_triggers(session) -> None:
-    """Triggers-as-data defaults (plan §6): the ADO state vocabulary and the
-    Phase 4 autonomous flows live in ROWS — a new state is config, not a deploy."""
+    """Triggers-as-data defaults: the ADO state vocabulary and the
+    autonomous flows live in ROWS — a new state is config, not a deploy."""
     from app.db.models.trigger import Trigger
     defaults = [
         # New → zagent-plan auto-starts a Plan run attributed to whoever moved it.

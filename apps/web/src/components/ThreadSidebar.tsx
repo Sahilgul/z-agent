@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
 
-/** The thread sidebar (plan §19) — the left rail listing all threads in the
+/** The thread sidebar — the left rail listing all threads in the
  *  run. Each thread is a row: status LED, persona label, repo scope, step
  *  count, budget bar. Clicking selects the thread (filters the feed). The
- *  critical-path thread (plan §4) is highlighted. */
+ *  critical-path thread is highlighted. */
 
 export interface SidebarThread {
   id: string;

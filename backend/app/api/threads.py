@@ -1,6 +1,6 @@
 """Thread control routes: stop/nudge/pin on tiles (control actions, NOT chats —
 the user talks only to the Lead; every intervention becomes an event the Lead
-consumes, plan §4).
+consumes).
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ async def stop_thread(thread_id: str, body: LaneActionBody, request: Request,
 @router.post("/{thread_id}/pin")
 async def pin_finding(thread_id: str, body: LaneActionBody, request: Request,
                       user: User = Depends(current_user)):
-    """Pin = flag the thread's notebook-so-far for the Lead's synthesis. Phase 3
-    wires this into the knowledge inbox; Phase 1 records the intent as an event."""
+    """Pin = flag the thread's notebook-so-far for the Lead's synthesis. Later
+    phases wire this into the knowledge inbox; for now records the intent as an event."""
     if load_run_for_user(body.run_id, user.id) is None:
         raise HTTPException(status_code=404, detail="run not found")
     relay = request.app.state.relay

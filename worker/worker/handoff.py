@@ -1,8 +1,8 @@
-"""Long-run handoff: handoff.md + git checkpoint (plan §8 worker).
+"""Long-run handoff: handoff.md + git checkpoint.
 
 Written into the writable stamp so a kill-and-replace lane (or a human) can pick
 up exactly where the previous container stopped. The 'living artifact' memory
-faculty (plan §6) — an organ the next context READS.
+faculty — an organ the next context READS.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def write_handoff(workspace: Path, run_id: str, thread_id: str, summary: str,
 def git_checkpoint(workspace: Path, message: str = "zagent checkpoint") -> str | None:
     """Commit WIP inside the disposable stamp so a replacement thread re-stamps
     with context — the stamp is disposable, but checkpoints ride pushed branches
-    for survivors (plan §3)."""
+    for survivors."""
     add = subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True, check=False)
     if add.returncode != 0:
         return None

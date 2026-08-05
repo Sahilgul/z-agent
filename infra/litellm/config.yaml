@@ -1,5 +1,5 @@
 # LiteLLM gateway config — Anthropic-compatible facade in front of Azure AI Foundry.
-# Model routing is PURE CONFIG (plan §1): Kimi now; Claude-on-Foundry later = add a
+# Model routing is PURE CONFIG: Kimi now; Claude-on-Foundry later = add a
 # model_list entry, zero architecture changes.
 
 model_list:
@@ -20,7 +20,7 @@ model_list:
       additional_drop_params: ["reasoning", "reasoning_effort", "thinking"]
     model_info:
       # EXPLICIT pricing — LiteLLM's registry may not price Kimi and the
-      # spend-readback data path (plan §4) depends on correct numbers.
+      # spend-readback data path depends on correct numbers.
       # CONFIRM against the Foundry billing page on day 1; these are placeholders.
       input_cost_per_token: 0.0000006        # $0.60 / 1M input
       output_cost_per_token: 0.0000025       # $2.50 / 1M output
@@ -28,7 +28,7 @@ model_list:
       max_tokens: 8192
       mode: chat
 
-  # Second open model route for the Phase 0 gate (plan §4: ≥2 open models).
+  # Second open model route for the open-models gate (≥2 open models).
   # The matrix passes ONLY if ≥2 models pass ALL of a–g. Add a Qwen or Llama
   # variant deployment here; FOUNDRY_MODEL_2 carries the provider prefix +
   # deployment name, e.g. openai/Qwen2.5-Coder-32B.

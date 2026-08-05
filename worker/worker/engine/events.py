@@ -1,12 +1,12 @@
-"""Event emitter — engine state -> canonical StepEvents (plan §6 events.py).
+"""Event emitter — engine state -> canonical StepEvents.
 
-The single bridge from the LangGraph loop to the StepEvent contract (Phase 1).
+The single bridge from the LangGraph loop to the StepEvent contract.
 Every tool call, assistant message, and turn boundary becomes exactly one
 StepEvent. Tool outputs are redacted HERE (not inside tools) so the agent
 keeps raw outputs for reasoning while events carry only redacted text.
 
-This is the Phase 2 read-only emitter; Phase 3 adds the approval-card event
-type and the two-phase verbatim approval flow.
+This is the read-only emitter; the approval-card event
+type and the two-phase verbatim approval flow extend it.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class EventEmitter:
         self._seq += 1
         return event
 
-    # --- RF: dedicated approval StepKind + action_id pairing ---
+    # --- Dedicated approval StepKind + action_id pairing ---
 
     def approval_card(self, payload: dict[str, Any], task_id: str | None) -> StepEvent:
         """The approval-card StepEvent — kind=APPROVAL (replaces the old

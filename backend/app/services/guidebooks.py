@@ -1,4 +1,4 @@
-"""Guidebook seeding (plan §3 Layer 2 + Phase 3): root AGENTS.md PR'd into each
+"""Guidebook seeding (Layer 2): root AGENTS.md PR'd into each
 fleet repo.
 
 The generator is PURE and deterministic — content derives from the curated

@@ -1,4 +1,4 @@
-# Zagent backend on AKS (plan Phase 5 production hardening).
+# Zagent backend on AKS (production hardening).
 # Secrets come from Key Vault via the CSI driver (BYO-PAT + gateway keys +
 # VAPID) — never from ConfigMaps, never baked into the image.
 apiVersion: v1

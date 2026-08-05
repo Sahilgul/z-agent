@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Source of truth for the org's inter-service dependencies (code-verified). The planner reads this in Phase 1 to compute blast radius. ONLY live flows are listed — stale/dead flows are deliberately omitted to avoid context-window bloat. Update when wiring changes.",
+  "description": "Source of truth for the org's inter-service dependencies (code-verified). The planner reads this to compute blast radius. ONLY live flows are listed — stale/dead flows are deliberately omitted to avoid context-window bloat. Update when wiring changes.",
   "callChain": "ClientApp -> ServerApp (REST + Socket.io) -> AIClusterApp (HTTP, BACKEND_*_ENDPOINT, v2) -> {ClinicalAIServices /score | Billing-Engine /icd,/cpt,/nbq | AIMedVision /message | PromptFlowApp intake-summary + after-visit-summary ONLY}. Separately: ClientApp -> LiveKit cloud (WebRTC, token from ServerApp) -> LivekitAgents (dispatch by agentName).",
   "liveServices": ["ClientApp", "ServerApp", "AIClusterApp", "ClinicalAIServices", "Billing-Engine", "LivekitAgents", "AIMedVision", "LLMQuality"],
   "legacyServicesStillPartiallyLive": ["PromptFlowApp"],

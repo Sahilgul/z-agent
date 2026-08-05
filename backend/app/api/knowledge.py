@@ -1,6 +1,6 @@
-"""Knowledge routes (plan §3/§7): corpus browsing (shared + own), the team-wide
+"""Knowledge routes: corpus browsing (shared + own), the team-wide
 draft inbox (the PHI checkpoint), and approve/reject decisions. The corpus and
-its approval cards are the §7a shared-by-design exception — no per-user hiding.
+its approval cards are the shared-by-design exception — no per-user hiding.
 """
 
 from __future__ import annotations

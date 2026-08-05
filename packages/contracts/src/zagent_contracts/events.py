@@ -1,7 +1,7 @@
 """Canonical StepEvent schema — normalized at the worker edge, consumed by DB,
 WebSocket relay, UI EventStream, drift detection, critical-path math, and fleet-bench.
 
-Hard rules (plan §1b):
+Hard rules:
 - A StepEvent is emitted ONCE, COMPLETE, at step end — the only thing ever stored.
 - Live typing effects ride TypingDelta over pub/sub only (never stored, no seq).
 - seq is monotonic per thread; WS relay and UI render strictly by seq.
@@ -9,7 +9,7 @@ Hard rules (plan §1b):
   NULL = non-message / pre-instrumentation event; fork treats missing UUID as
   "cannot fork before this event"; replay handles null forever.
 
-Protocol versioning (Plan Phase 1 — the schema is PINNED at v1):
+Protocol versioning — the schema is PINNED at v1:
 - `schema_version` is monotonic. Breaking changes (field rename, type change,
   field removal) bump it; additive changes (new optional field) may stay.
 - Consumers MUST guard on schema_version before reading any field not present
@@ -18,7 +18,7 @@ Protocol versioning (Plan Phase 1 — the schema is PINNED at v1):
   guard in the same release.
 
 Identifier contract (see identifiers.py): run_id → thread_id → context_id → task_id.
-- thread_id replaces the former lane_id (Plan Phase 1 rename).
+- thread_id replaces the former lane_id (rename locks in before any field is shipped).
 - context_id == thread_id for top-level threads; derived for subagents.
 - task_id identifies the turn within a context (the resumption/interrupt unit).
 """
@@ -44,7 +44,7 @@ class StepKind(str, Enum):
     MESSAGE = "message"
     NOTEBOOK = "notebook"
     STATUS = "status"
-    APPROVAL = "approval"  # RF: dedicated approval kind (replaces STATUS/seq=0 cards)
+    APPROVAL = "approval"  # dedicated approval kind (replaces STATUS/seq=0 cards)
 
 
 class StepEvent(BaseModel):

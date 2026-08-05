@@ -1,4 +1,4 @@
-"""Cross-host session store tests (plan Phase 5): pack/unpack round trip,
+"""Cross-host session store tests: pack/unpack round trip,
 upload/materialize/purge with an injected dict client, failure tolerance,
 tar-slip safety on untrusted archives.
 """

@@ -1,4 +1,4 @@
-"""Knowledge flywheel service tests (plan §3 G-1 fix + §7): PHI-checkpoint
+"""Knowledge flywheel service tests: PHI-checkpoint
 drafts, team-wide inbox, approval promotion, retrieval search space, and the
 rerank path (injected rankers only — no gateway sockets in unit tests).
 """

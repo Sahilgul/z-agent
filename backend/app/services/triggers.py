@@ -1,4 +1,4 @@
-"""Triggers engine (plan §6 triggers-as-data + Phase 4).
+"""Triggers engine (triggers-as-data).
 
 ONE generic ingress normalizes sources into contracts.TriggerEvent; the engine
 matches events against `triggers` ROWS — the ADO state vocabulary lives in row

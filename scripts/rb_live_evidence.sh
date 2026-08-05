@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RB live evidence: bring up the local stack (redis + mock gateway + Postgres
+# Live evidence: bring up the local stack (redis + mock gateway + Postgres
 # checkpointer + backend) and drive a LIVE API-created ask thread on the custom
 # engine, asserting StepEvents reach the console feed endpoint.
 #

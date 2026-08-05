@@ -1,4 +1,4 @@
-"""Engine ops metrics (plan §16) — counters/histograms, NOT OTel (R22 stands).
+"""Engine ops metrics — counters/histograms, NOT OTel.
 
 In-process registry, created per-run by the runner and carried in the graph
 config. Nodes record as they go; the runner flushes a snapshot to the

@@ -1,16 +1,16 @@
-"""Mutating tools (plan §6 tools/, Phase 3) + MULTI-ACTOR CONTRACTS §2/§3.
+"""Mutating tools + MULTI-ACTOR CONTRACTS: read-before-edit + two-phase verbatim.
 
 file_edit / file_write / terminal_exec (full) — the mutating surface. These
 implement:
 
-  §2 Read-before-edit: every edit/write carries an expected content hash; the
+  Read-before-edit: every edit/write carries an expected content hash; the
      tool computes the actual hash and REFUSES on mismatch (returns current
      content so the agent re-reads before retrying).
-  §3 Two-phase verbatim approval: in SUPERVISED/GATED, mutating calls are
+  Two-phase verbatim approval: in SUPERVISED/GATED, mutating calls are
      intercepted by the approval gate (approvals.py) BEFORE execution. The
      tool only ever sees the verbatim args the human approved.
 
-Phase 2's terminal_exec blocked mutating commands; this module's terminal_exec
+The read-only terminal_exec blocked mutating commands; this module's terminal_exec
 allows them (after approval, when the gate lets them through).
 """
 
@@ -27,7 +27,7 @@ from langchain_core.tools import tool
 
 _BASH_TIMEOUT_S = 120.0
 _BASH_MAX_OUTPUT = 32 * 1024
-_BG_TIMEOUT_S = 2 * 60 * 60  # 2h cap for background commands (plan §4 fan-out)
+_BG_TIMEOUT_S = 2 * 60 * 60  # 2h cap for background commands (fan-out)
 
 
 def _workspace() -> Path:
@@ -40,7 +40,7 @@ def _resolve(file_path: str) -> Path:
 
 
 def content_hash(text: str) -> str:
-    """sha256 of file content, hex, truncated to 16 chars (the §2 contract)."""
+    """sha256 of file content, hex, truncated to 16 chars (the read-before-edit contract)."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
@@ -55,7 +55,7 @@ def file_edit(file_path: str, old_string: str, new_string: str,
         file_path: path relative to workspace root, or absolute.
         old_string: the exact text to replace (must appear exactly once).
         new_string: the replacement text.
-        expected_hash: optional content hash guard (§2 read-before-edit). If
+        expected_hash: optional content hash guard (read-before-edit). If
             provided and the file's current hash differs, the edit is REFUSED
             and the current content is returned so the caller re-reads first.
     """
@@ -67,7 +67,7 @@ def file_edit(file_path: str, old_string: str, new_string: str,
     except OSError as exc:
         return f"error: {exc}"
 
-    # §2 read-before-edit guard
+    # Read-before-edit guard
     if expected_hash is not None and content_hash(current) != expected_hash:
         return (f"error: content hash mismatch — the file changed since you read it. "
                 f"Re-read {file_path} and retry. Current hash: {content_hash(current)}\n"
@@ -97,7 +97,7 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
     Args:
         file_path: path relative to workspace root, or absolute.
         content: the full file content to write.
-        expected_hash: §2 guard. If null, the file must NOT exist (create-new).
+        expected_hash: read-before-edit guard. If null, the file must NOT exist (create-new).
             If provided, the file must exist with that hash (overwrite).
     """
     p = _resolve(file_path)
@@ -121,7 +121,7 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
         p.write_text(content, encoding="utf-8")
     except OSError as exc:
         return f"error: write failed: {exc}"
-    # §7 diagnostics hook: ERROR-only, bounded, never fails the write.
+    # Diagnostics hook: ERROR-only, bounded, never fails the write.
     from worker.engine.tools.diagnostics import diagnostics_block
     return (f"wrote {file_path} ({len(content)} chars). new hash: {content_hash(content)}"
             + diagnostics_block(p))
@@ -129,7 +129,7 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
 
 # --- terminal_exec (full, mutating allowed after approval) ---
 
-# Commands that are DESTRUCTIVE — never eligible for always_allow (§3).
+# Commands that are DESTRUCTIVE — never eligible for always_allow.
 # No trailing \b: commands can end in non-word chars (e.g. "rm -rf /").
 DESTRUCTIVE_COMMANDS = re.compile(
     r"\b("
@@ -152,7 +152,7 @@ def terminal_exec(command: str, background: bool = False,
     """Run a shell command in the workspace. Mutating commands allowed (after
     approval, when the gate lets them through).
 
-    Background contract (R24#1): commands outliving the 30s foreground window
+    Background contract: commands outliving the 30s foreground window
     auto-background — you get a job id and the command keeps running; poll its
     output or wait on it instead of retrying the same command.
 
@@ -188,7 +188,7 @@ async def terminal_exec_async(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def is_destructive_command(command: str) -> bool:
-    """§3: destructive commands never get always_allow — verbatim every time."""
+    """Destructive commands never get always_allow — verbatim every time."""
     return bool(DESTRUCTIVE_COMMANDS.search(command))
 
 
@@ -200,7 +200,7 @@ MUTATING_TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in MUTATING_TOOLS}
 
 async def call_mutating_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Async shim for mutating tools — same error-prefix convention as readonly.
-    terminal_exec routes through the R24#1 background contract manager."""
+    terminal_exec routes through the background contract manager."""
     if name == "terminal_exec":
         return await terminal_exec_async(args)
     t = MUTATING_TOOL_BY_NAME.get(name)

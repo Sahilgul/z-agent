@@ -1,4 +1,4 @@
-"""Sleep-Time Distiller tests (plan Phase 5): unmined-window bookkeeping, LLM
+"""Sleep-Time Distiller tests: unmined-window bookkeeping, LLM
 consolidation (injected), bench gate (drop regressions, neutral without pool),
 nightly orchestration drafting user-scoped knowledge with bench deltas.
 """

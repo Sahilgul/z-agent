@@ -29,7 +29,7 @@ self.addEventListener("fetch", (e) => {
   );
 });
 
-/* Push (Phase 4): the payload carries a deep link to the specific action
+/* Push: the payload carries a deep link to the specific action
    card — a tap lands on the approval, not the inbox. */
 self.addEventListener("push", (e) => {
   let data = { title: "zagent", body: "", url: "/" };

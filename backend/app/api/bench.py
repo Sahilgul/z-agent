@@ -1,4 +1,4 @@
-"""fleet-bench API (plan §9 Phase 5): case mining + eval runs are admin-gated
+"""fleet-bench API: case mining + eval runs are admin-gated
 (they spend money); reports are team-visible — the compounding proof belongs
 to everyone."""
 

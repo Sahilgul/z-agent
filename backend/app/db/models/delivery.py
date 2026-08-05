@@ -1,4 +1,4 @@
-"""deliveries (run groups) + pr_links (plan §7)."""
+"""deliveries (run groups) + pr_links."""
 
 from __future__ import annotations
 

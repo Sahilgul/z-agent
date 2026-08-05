@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Sandbox-side agent runner: custom LangGraph engine (replacing Claude Agent SDK), StepEvent normalizer, Redis forwarder, control listener"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # --- Custom LangGraph engine (Phase 0+ replacement for claude-agent-sdk) ---
-    # Pins per plan §4. Bump only with the Phase 0 gate green (worker/spike/matrix.py).
+    # --- Custom LangGraph engine (replacement for claude-agent-sdk) ---
+    # Pins are deliberate. Bump only with the gate green (worker/spike/matrix.py).
     "langgraph==1.2.10",
     "langgraph-checkpoint==4.1.1",
     "langgraph-checkpoint-postgres==3.1.1",
@@ -21,8 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Legacy CAS runtime — kept ONLY for the dual-runtime soak (Phase 5) and as the
-# fallback target if the Phase 0 gate forces the hand-rolled loop. Removed from
+# Legacy CAS runtime — kept ONLY for the dual-runtime soak and as the
+# fallback target if the gate forces the hand-rolled loop. Removed from
 # the default install once the seam is cut.
 cas = [
     # SDK PINNED — fork_session lives in _internal (private API). Bump only with

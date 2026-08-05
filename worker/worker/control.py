@@ -1,7 +1,7 @@
-"""Per-thread Redis control channel listener (plan §4).
+"""Per-thread Redis control channel listener.
 
 Controls: interrupt (stop, immediate) | nudge (graceful interrupt + inject +
-resume — queued delivery would land AFTER the work, plan §8) | mode
+resume — queued delivery would land AFTER the work) | mode
 (set_permission_mode) | kill. Messages arrive on thread:{thread_id}:control and are
 applied by the runtime's control task.
 """

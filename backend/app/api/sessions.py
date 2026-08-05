@@ -1,4 +1,4 @@
-"""Session browser routes (plan §7a): replay + resume. Replay hydrates the SAME
+"""Session browser routes: replay + resume. Replay hydrates the SAME
 EventStream in read-only mode; Resume appears only while the session volume
 exists (30d TTL; after expiry the run is replay-only).
 """
@@ -81,7 +81,7 @@ async def resume(run_id: str, request: Request, user: User = Depends(current_use
     run = load_run_for_user(run_id, user.id)
     if run is None:
         raise HTTPException(status_code=404, detail="session not found")
-    # Phase 1: resume restarts the blueprint with thread session_ids intact — the
+    # Resume restarts the blueprint with thread session_ids intact — the
     # worker picks RESUME_SESSION_ID up from its env (sandbox/manager.thread_env).
     run_manager = request.app.state.run_manager
     new_run = await run_manager.create_run(

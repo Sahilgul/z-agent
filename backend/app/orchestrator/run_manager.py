@@ -1,4 +1,4 @@
-"""Run manager — the ONE run-creation path (plan §8 standing rule).
+"""Run manager — the ONE run-creation path.
 
 ALL run creation (UI tap, typed intent, chip, voice, cron, webhook) flows through
 runs_create(source, initiated_by, mode, context): the day a second path appears,
@@ -58,7 +58,7 @@ class RunManager:
                          task: str, repo: str | None = None,
                          work_item_id: int | None = None, autonomy: str | None = None,
                          fanout: int | None = None, delivery_id: int | None = None) -> Run:
-        # Deterministic title hydration (plan §2/WU5, THE one place it happens):
+        # Deterministic title hydration (THE one place it happens):
         # a generic typed title resolves from the ADO work item so the inbox
         # card reads the ticket's real title, not "42" or an empty string.
         if work_item_id is not None and _title_is_generic(task, work_item_id):
@@ -174,7 +174,7 @@ class RunManager:
         await self.relay.publish_run_stage(run_id, RunStage.ABANDONED.value, [])
 
     async def nudge_thread(self, run_id: str, thread_id: str, text: str) -> None:
-        """Typed Lead-nudge: stays enabled while the agent works (§1a carve-out).
+        """Typed Lead-nudge: stays enabled while the agent works (carve-out).
         Worker semantics: graceful interrupt + inject + resume."""
         await self.control.nudge(thread_id, text)
         session = get_session()
@@ -187,7 +187,7 @@ class RunManager:
             session.close()
         await self.relay.publish_thread_status(run_id, thread_id, "running")
 
-    # ------------------------------------------------------------ thread controls (§4)
+    # ------------------------------------------------------------ thread controls
     async def stop_thread(self, run_id: str, thread_id: str) -> None:
         """Per-thread stop from the swarm view: immediate interrupt, trace kept,
         the rest of the swarm runs on. Safe + reversible — no confirmation."""
@@ -204,8 +204,8 @@ class RunManager:
         await self.relay.publish_thread_status(run_id, thread_id, "stopped")
 
     async def pin_finding(self, run_id: str, thread_id: str, note: str = "") -> None:
-        """Pin a finding from a thread overlay (§4): lands as a run event the
-        knowledge flywheel's approval inbox (Phase 3) picks up as a candidate."""
+        """Pin a finding from a thread overlay: lands as a run event the
+        knowledge flywheel's approval inbox picks up as a candidate."""
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
@@ -222,7 +222,7 @@ class RunManager:
         await self.relay.publish_thread_status(run_id, thread_id, "pinned")
 
     async def kill_replace_thread(self, run_id: str, thread_id: str) -> Thread:
-        """Kill-and-replace (§4): the old thread dies; a FRESH thread spawns with the
+        """Kill-and-replace: the old thread dies; a FRESH thread spawns with the
         SAME spawn context (stored at spawn — never re-derived from the
         blueprint). The session volume survives the container, so the
         replacement resumes where the killed thread left off — now actually
@@ -265,7 +265,7 @@ class RunManager:
 
     # ------------------------------------------------------------ plan HITL chains
     async def continue_to_development(self, run_id: str) -> None:
-        """approve_plan chain (plan §2/§9): a run that approved its plan continues
+        """approve_plan chain: a run that approved its plan continues
         into the development blueprint. The run keeps its mode; the development
         blueprint loads the approved Plan + steps from the DB by run_id."""
         await self._run_blueprint(run_id, "development")
@@ -276,7 +276,7 @@ class RunManager:
         await self._run_blueprint(run_id, "plan", extra_artifacts={"critic_notes": notes})
 
     async def start_plan(self, run_id: str) -> None:
-        """start_plan intent (WU4): promote a debug run's proposed fix into a plan.
+        """start_plan intent: promote a debug run's proposed fix into a plan.
         Loads the debug run's latest draft Plan and chains into the plan blueprint
         with it as a ``seed_plan`` — the planner thread is skipped (the debug proposal
         IS the draft) and the critic verifies it fresh. The run keeps its id; its
@@ -317,7 +317,7 @@ class RunManager:
         self._tasks[run_id] = asyncio.create_task(self._guarded_execute(run_id, ctx, blueprint))
 
     async def switch_mode(self, run_id: str, mode_name: str) -> None:
-        """Mid-session mode switch (plan §6): validate the Mode row is
+        """Mid-session mode switch: validate the Mode row is
         enabled, set run.mode, and relay. Deliberately does NOT touch
         in-flight work — the switch takes effect on the next send_message,
         which chains the new blueprint (respawning the thread on the prior
@@ -337,7 +337,7 @@ class RunManager:
 
     # ------------------------------------------------------------ delivery HITL
     async def create_pr(self, run_id: str) -> None:
-        """create_pr intent (plan §9): open the evidence-gated PR, then stage the
+        """create_pr intent: open the evidence-gated PR, then stage the
         run at pr_ready (available_actions = review_diff + merge_pr). The thread
         workspace path is the develop thread's stamped clone, persisted on
         Run.session_volume_path when the develop thread started (deterministic
@@ -387,7 +387,7 @@ class RunManager:
     # -------------------------------------------------------- reconciliation
 
     async def reconcile_on_boot(self) -> int:
-        """Boot-time sweep (plan §4): every run whose threads are gone is marked
+        """Boot-time sweep: every run whose threads are gone is marked
         interrupted with an Inbox card offering resume — no silent zombies."""
         session = get_session()
         try:

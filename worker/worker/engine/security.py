@@ -1,4 +1,4 @@
-"""Security contracts (plan §6 security.py, §7 quarantine).
+"""Security contracts — secrets redaction + quarantine.
 
 Two load-bearing security surfaces:
 
@@ -93,7 +93,7 @@ def is_sensitive_path(path: str) -> bool:
     return any(s in lower for s in ("/.ssh/", "/.aws/credentials", "id_rsa", "id_ed25519", "id_ecdsa"))
 
 
-# --- Quarantine (plan §7 — terminal_exec sensitive writes) ---
+# --- Quarantine (terminal_exec sensitive writes) ---
 
 class QuarantineError(RuntimeError):
     """Raised when a sensitive write cannot be quarantined (disk full, etc.)."""
@@ -124,7 +124,7 @@ def quarantine_file(src: Path, workspace: Path, *, reason: str) -> Path:
     return dest
 
 
-# --- Injection quarantine boundary markers (plan §12, R31) ---
+# --- Injection quarantine boundary markers ---
 #
 # web_fetch/web_search results, AGENTS.md content, MCP tool outputs, file
 # contents, and teammate messages are DATA, never instructions. The tool layer
@@ -137,7 +137,7 @@ UNTRUSTED_CLOSE = "</untrusted_content>"
 
 
 def wrap_untrusted(text: str, source: str) -> str:
-    """Wrap untrusted tool output in typed boundary markers (§12).
+    """Wrap untrusted tool output in typed boundary markers.
 
     `source` names the provenance (web_fetch, mcp__server, agents_md, file,
     teammate). Nested markers from the content itself are neutralized so a

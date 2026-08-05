@@ -1,15 +1,16 @@
-"""Memory tiers (plan §6 memory.py, Phase 4) — T2 artifact + T3 episodic FTS.
+"""Memory tiers — thread artifact + episodic FTS.
 
-T0 Working  = the live context window (messages) — managed by compaction.py.
-T1 Session = the run's ephemeral state (mode, budget, task tracker) — EngineState.
-T2 Thread artifact = handoff.md — the living organ the next context READS.
+Working     = the live context window (messages) — managed by compaction.py.
+Session     = the run's ephemeral state (mode, budget, task tracker) — EngineState.
+Thread artifact = handoff.md — the living organ the next context READS.
               (worker/handoff.py writes it; this module reads + indexes it.)
-T3 Episodic = per-turn summaries, full-text searchable for memory.search.
-T4 Knowledge = the team knowledge base (proposals, playbooks) — backend-side.
-T5 Procedural = skills (.cursor/skills) — loaded into the prompt, not here.
+Episodic    = per-turn summaries, full-text searchable for memory.search.
+Knowledge   = the team knowledge base (proposals, playbooks) — backend-side.
+Procedural = skills (.cursor/skills) — loaded into the prompt, not here.
 
-This module owns T2 indexing + T3 FTS + the memory.search tool. T4/T5 are
-served by the backend; the engine queries them via the gateway at turn start.
+This module owns thread-artifact indexing + episodic FTS + the memory.search
+tool. Knowledge/Procedural are served by the backend; the engine queries them
+via the gateway at turn start.
 """
 
 from __future__ import annotations
@@ -24,11 +25,11 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-# --- T3 episodic store (SQLite FTS5, per-thread) ---
+# --- episodic store (SQLite FTS5, per-thread) ---
 
 @dataclass
 class EpisodicMemory:
-    """Per-thread episodic memory with full-text search (T3)."""
+    """Per-thread episodic memory with full-text search."""
     db_path: Path
     _db: Any = field(default=None, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -129,10 +130,10 @@ class EpisodicMemory:
         self._db.close()
 
 
-# --- T2 artifact reader (handoff.md) ---
+# --- thread-artifact reader (handoff.md) ---
 
 def read_handoff(workspace: Path) -> str | None:
-    """Read the T2 living artifact (handoff.md) if it exists."""
+    """Read the living artifact (handoff.md) if it exists."""
     handoff = workspace / "handoff.md"
     if not handoff.exists():
         return None
@@ -152,7 +153,7 @@ def set_episodic_memory(ep: EpisodicMemory) -> None:
 
 @tool
 def memory_search(query: str, limit: int = 5) -> str:
-    """Search the thread's episodic memory (T3) for past turns matching the query.
+    """Search the thread's episodic memory for past turns matching the query.
 
     Use this when you need to recall what was investigated or decided in an
     earlier turn of this thread. Returns ranked matches with turn numbers and

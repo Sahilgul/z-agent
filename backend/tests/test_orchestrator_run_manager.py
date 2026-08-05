@@ -344,7 +344,7 @@ async def test_merge_pr_handoff_keeps_run_pr_ready(session, make_user, monkeypat
     assert stayed.finished_at is None
 
 
-# --------------------------------------------------------------- thread controls (§4)
+# --------------------------------------------------------------- thread controls
 async def test_stop_thread_interrupts_and_marks_stopped(session, make_user):
     u = make_user("a")
     rm, _, relay, control = _make_manager()

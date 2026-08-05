@@ -1,12 +1,12 @@
-"""MCP integration (plan §7 mcp_engine, R24#7 contract).
+"""MCP integration (mcp_engine).
 
 Catalog snapshot at startup + runtime re-discovery; lazy auth (once, on
 needsAuth/401); connect retry 250ms/1s x3; per-server isolation + timeouts;
-PARTIAL SUCCESS (R31): results are per-server — one server's failure never
+PARTIAL SUCCESS: results are per-server — one server's failure never
 fails the batch, failures are their own typed results.
 
 MCP tools surface as `mcp__<server>__<tool>` and are NEVER bound by default
-(R34): they fold into the tool_search index in RD; here they are resolvable
+— they fold into the tool_search index; here they are resolvable
 via the registry so discovery can load them.
 
 Server config comes from env MCP_SERVERS (JSON list):
@@ -22,7 +22,7 @@ import json
 import os
 from typing import Any
 
-CONNECT_RETRY_DELAYS = (0.25, 1.0, 1.0)  # 250ms/1s x3 (R24#7)
+CONNECT_RETRY_DELAYS = (0.25, 1.0, 1.0)  # 250ms/1s x3
 CALL_TIMEOUT_S = 60.0
 
 
@@ -47,11 +47,11 @@ class MCPManager:
         self._clients: dict[str, Any] = {}
         self._authed: set[str] = set()
 
-    # --- catalog snapshot + re-discovery (R24#7) ---
+    # --- catalog snapshot + re-discovery ---
 
     async def refresh(self, server: str | None = None) -> dict[str, Any]:
         """(Re)load tool catalogs. Per-server results — partial success:
-        one server's failure is reported, never fails the batch (R31)."""
+        one server's failure is reported, never fails the batch."""
         names = [server] if server else list(self.status)
         results: dict[str, Any] = {}
         for name in names:
@@ -112,7 +112,7 @@ class MCPManager:
 
     async def _lazy_auth(self, name: str, cfg: dict[str, Any]) -> None:
         hook = cfg.get("auth_hook")  # async callable supplied by the platform
-        self._authed.add(name)  # once, even if the hook fails (R24#7: lazy ONCE)
+        self._authed.add(name)  # once, even if the hook fails (lazy ONCE)
         if callable(hook):
             await hook(name)
 
@@ -147,7 +147,7 @@ class MCPManager:
                     "tool": exposed_name, "args": args}
 
     def catalog(self) -> dict[str, list[str]]:
-        """The folded-in catalog snapshot for the RD tool_search index."""
+        """The folded-in catalog snapshot for the tool_search index."""
         return {name: sorted(st.tools) for name, st in self.status.items() if st.connected}
 
 

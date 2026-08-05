@@ -1,4 +1,4 @@
-/** Per-run WebSocket with capped backoff reconnect (plan §8 lib/ws.ts).
+/** Per-run WebSocket with capped backoff reconnect.
  *  Cookie-authenticated — same-origin, no token handling here. */
 
 import type { WsMessage } from "../types";

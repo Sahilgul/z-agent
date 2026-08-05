@@ -1,4 +1,4 @@
-"""Multi-thread run contracts (plan §4 — width fan-out; was "swarm").
+"""Multi-thread run contracts (width fan-out; was "swarm").
 
 Decomposition is the Lead's structured output in the decompose node: N DISTINCT
 slices (by angle/module/concern — equal in count, never arithmetic clones of

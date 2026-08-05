@@ -1,4 +1,4 @@
-"""P1 validation smoke: app factory + seed + services import."""
+"""Validation smoke: app factory + seed + services import."""
 import sys
 from pathlib import Path
 

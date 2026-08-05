@@ -1,4 +1,4 @@
-"""Guardian + Responder tests (plan Phase 4): normalizers, circuit breaker
+"""Guardian + Responder tests: normalizers, circuit breaker
 (max attempts + repeated-signature halt), comment routing (unknown PR, nudge
 active thread, resume finished thread from session volume). run_manager is a fake.
 """

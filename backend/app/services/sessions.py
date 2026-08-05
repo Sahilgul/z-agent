@@ -1,4 +1,4 @@
-"""Session browser services (plan §7a): replay hydration, resume, edit-and-resend.
+"""Session browser services: replay hydration, resume, edit-and-resend.
 
 Replay = hydrate the SAME EventStream from the events table in read-only mode —
 normalization at the edge means replay and live are one code path. Resume
@@ -19,7 +19,7 @@ from app.sandbox.manager import session_subpath
 
 def replay_events(run_id: str, user_id: int, thread_id: str | None = None,
                   after_seq: int | None = None, limit: int = 500) -> list[dict]:
-    """Ordered by per-thread seq (§1b ordering rule). Hard-scoped to the owner."""
+    """Ordered by per-thread seq (monotonic ordering rule). Hard-scoped to the owner."""
     session = get_session()
     try:
         run = session.get(Run, run_id)

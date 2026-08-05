@@ -1,4 +1,4 @@
-/** Phase 9 console workspace — the 11 card types (plan §19).
+/** The console workspace — the 15 card types.
  *
  * Each card type has a rail color, an icon glyph, and a disclosure policy
  * (inline / click-through). The feed renders every agent step the SAME way
@@ -78,14 +78,14 @@ export const DISCLOSURE: Record<CardKind, DisclosurePolicy> = {
 };
 
 /** The inline preview clip limit — how many lines show before the "N more"
- *  counter. Plan §19 two-tier disclosure: "feed ≤10 clipped diff lines +
- *  `+... (N more)`" (RF: raised 6 → 10 to match the locked contract). */
+ *  counter. Two-tier disclosure: "feed ≤10 clipped diff lines +
+ *  `+... (N more)`" (raised 6 → 10 to match the locked contract). */
 export const PREVIEW_CLIP_LINES = 10;
 
 /** The character cap for the inline preview body. */
 export const PREVIEW_CLIP_CHARS = 600;
 
-/** RF viewer-threshold decision (aligned to §19): the feed renders from
+/** Viewer-threshold decision: the feed renders from
  *  payloads the engine has ALREADY bounded (edit-preview hunks ≤10 lines,
  *  truncated tool outputs) and preview-policy cards are always click-through
  *  to the viewer — so the 4000-char threshold is a FALLBACK for oversize

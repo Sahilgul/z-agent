@@ -1,4 +1,4 @@
-"""Identifier contract — the one-way door (Plan Phase 1, decided before any rename locks in).
+"""Identifier contract — the one-way door (decided before any rename locks in).
 
 The z-agent harness has FOUR identifier layers. They are NOT interchangeable;
 each has a specific scope, lifetime, and persistence surface. Getting this
@@ -20,7 +20,7 @@ Hierarchy (outer → inner):
 
   context_id  — the CONVERSATION context identifier = the LangGraph checkpoint
                 namespace. For a top-level thread, context_id == thread_id.
-                For a subagent/worker (fan-out, Phase 6), context_id is DERIVED:
+                For a subagent/worker (fan-out), context_id is DERIVED:
                 `{thread_id}::worker-{n}` — isolated conversation state, but
                 traceable to the parent thread for budget + audit.
                 Lifetime: same as the owning thread (or worker run).

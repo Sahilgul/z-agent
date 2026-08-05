@@ -1,4 +1,4 @@
-"""App factory (plan §8): lifespan, routers, WS mount. Routers stay thin;
+"""App factory: lifespan, routers, WS mount. Routers stay thin;
 all domain logic lives in services/ and orchestrator/ (no FastAPI imports there).
 """
 
