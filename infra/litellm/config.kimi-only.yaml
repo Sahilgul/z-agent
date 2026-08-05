@@ -1,0 +1,25 @@
+# Single-model variant of config.yaml for the RG recorded gate while only one
+# Foundry slot is configured. Same routing rules as config.yaml; the
+# qwen-foundry entry is omitted because its os.environ/ vars are unset (a
+# missing env var fails the whole LiteLLM config load).
+model_list:
+  - model_name: kimi-foundry
+    litellm_params:
+      model: os.environ/FOUNDRY_MODEL
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+      additional_drop_params: ["reasoning", "reasoning_effort", "thinking"]
+    model_info:
+      input_cost_per_token: 0.0000006
+      output_cost_per_token: 0.0000025
+      cache_read_input_token_cost: 0.00000015
+      max_tokens: 200000
+      mode: chat
+
+litellm_settings:
+  drop_params: true
+  num_retries: 2
+  request_timeout: 600
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
