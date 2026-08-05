@@ -21,6 +21,11 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.types import Command, interrupt
 
+try:
+    from langgraph.errors import GraphInterrupt
+except ImportError:  # older langgraph
+    GraphInterrupt = type(None)  # noqa: N816 — sentinel; never raised/matched
+
 from spike.agent_loop import SYSTEM_PROMPT, AgentRecorder, make_llm
 from spike.checks import NUDGE_CANARY, NUDGE_TEXT, SOAK_PROMPT, stamp_workspace
 from spike.spike_tools import SPIKE_TOOLS, call_tool
@@ -142,9 +147,23 @@ async def run_interrupt_check(golden: Any, model: str, results_dir: Any) -> dict
     # Run until it hits the interrupt.
     try:
         await graph.ainvoke(initial_state, config=config)
-    except Exception as exc:  # noqa: BLE001
+    except GraphInterrupt:
         # The interrupt surfaces as a GraphInterrupt in some versions; resume below.
-        recorder.events.append({"kind": "interrupt_exception", "error": str(exc)})
+        recorder.events.append({"kind": "interrupt_exception", "error": "GraphInterrupt"})
+    except Exception as exc:  # noqa: BLE001
+        # M-22: a REAL error (tool crash, graph bug) used to be swallowed here
+        # as "interrupt_exception" and then the code RESUMED a graph that was
+        # never interrupted — a no-op that masked the failure as a passing
+        # interrupt-resume check. Record it distinctly and skip the resume.
+        recorder.events.append({"kind": "invoke_error", "error": str(exc)})
+        recorder.is_error = True
+        summary = recorder.finish()
+        summary["check"] = "interrupt"
+        summary["nudge_incorporated"] = recorder.nudge_incorporated
+        summary["state_lost"] = True
+        summary["interrupt_resume_works"] = False
+        summary["engine_error"] = str(exc)
+        return summary
 
     # Resume with the nudge (the canary is appended inside _agent_node).
     try:

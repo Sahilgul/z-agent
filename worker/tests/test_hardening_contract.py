@@ -96,26 +96,44 @@ def _resume_initial(prompt: str = "do the work") -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_redis_stream_survives_consumer_disconnect():
-    """Events written to the Redis stream survive even if the consumer
-    disconnects mid-replay. The stream is the durable leg; pub/sub is lossy."""
-    # fakeredis in place of real Redis
+    """Events written via the ENGINE's Forwarder.publish_events survive even
+    if the consumer disconnects mid-replay. The stream is the durable leg;
+    pub/sub is lossy.
+
+    M-26: the old test called fakeredis.xadd/xread directly — it tested
+    fakeredis's stream behavior, NOT the engine's publish path. Drive the
+    real Forwarder (with a fakeredis backend injected) so the durability
+    contract is verified against the code that actually publishes events
+    (pipeline + xadd + JSON payload)."""
     pytest.importorskip("fakeredis.aioredis")
     import fakeredis.aioredis as fake_mod
-    r = fake_mod.FakeRedis()
+    from worker.forwarder import Forwarder
+    from worker.engine.events import EventEmitter
 
-    stream_key = "events:run-1"
-    # Producer writes 5 events
-    for i in range(5):
-        await r.xadd(stream_key, {"thread_id": "t1", "seq": i, "payload": f"event-{i}"})
+    r = fake_mod.FakeRedis(decode_responses=True)
+    # Inject the fakeredis backend into a REAL Forwarder so we exercise the
+    # engine's publish path (pipeline + xadd), not fakeredis in isolation.
+    fwd = Forwarder("redis://fake", "run-1", "t1")
+    fwd.redis = r
 
-    # Consumer reads some, then "disconnects" (we just stop reading)
-    first_batch = await r.xread({stream_key: "0"}, count=2, block=100)
+    # Build events through the real EventEmitter (the engine's event factory).
+    em = EventEmitter("run-1", "t1")
+    events = [em._next(StepKind.STATUS, f"event-{i}", {"i": i}, None, None)
+              for i in range(5)]
+    await fwd.publish_events(events)
+
+    # Consumer reads some, then "disconnects" (we just stop reading).
+    first_batch = await r.xread({fwd.stream_key: "0"}, count=2, block=100)
     assert len(first_batch) == 1 and len(first_batch[0][1]) == 2
 
     # The remaining events are still in the stream. Read all and verify the
     # unconsumed ones are present (fakeredis doesn't support exclusive min).
-    all_entries = await r.xrange(stream_key)
+    all_entries = await r.xrange(fwd.stream_key)
     assert len(all_entries) == 5  # all 5 still in the stream
+    # M-26: verify the payloads round-trip through the engine's JSON encoding
+    # (the real publish path writes json.dumps(event.model_dump())).
+    payloads = [json.loads(e[1]["payload"]) for e in all_entries]
+    assert [p["seq"] for p in payloads] == [0, 1, 2, 3, 4]
     await r.aclose()
 
 

@@ -182,8 +182,13 @@ async def _invoke_servicing_approvals(graph: Any, config: dict[str, Any],
     """The runner's interrupt pump with an auto-allow (or scripted) posture."""
     scripted = list(resumes or [])
     interrupt_count = 0
+    # M-24: a buggy graph that keeps re-interrupting (or a scripted decision
+    # list that never satisfies the gate) made this `while True` loop spin
+    # forever, hanging the spike matrix. Cap the resume iterations and bail
+    # with the partial result instead of looping indefinitely.
+    MAX_RESUMES = 50
     result = await graph.ainvoke(input_or_none, config)
-    while True:
+    for _ in range(MAX_RESUMES):
         snap = await graph.aget_state(config)
         interrupts = [i for task in snap.tasks for i in task.interrupts]
         if not interrupts:
@@ -191,6 +196,8 @@ async def _invoke_servicing_approvals(graph: Any, config: dict[str, Any],
         interrupt_count += len(interrupts)
         decision = scripted.pop(0) if scripted else {"decision": "allow"}
         result = await graph.ainvoke(Command(resume=decision), config)
+    # Cap hit — interrupts still firing; return the partial result.
+    return result or {}, interrupt_count
 
 
 async def run_engine_turn(prompt: str, mode: Mode, autonomy: Autonomy,

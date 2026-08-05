@@ -39,6 +39,14 @@ TOOL_KIND_MAP = {
     "Glob": StepKind.COMMAND,
 }
 
+# M-21: MCP test-runner tools (mcp__pytest__run, mcp__vitest__run, …) used to
+# all classify as MCP_CALL, so the UI never rendered them as test runs. Match
+# these tokens in the mcp__ tool name and classify as TEST_RUN. Avoid bare
+# "test" (matches "latest", "contest", …).
+_MCP_TEST_TOKENS = (
+    "pytest", "vitest", "jest", "test_runner", "run_tests", "test_run", "run_test",
+)
+
 # System subtypes that fire once per turn and carry no investigative value —
 # they're plumbing, not progress, so they never become transcript lines.
 _NOISY_SYSTEM_SUBTYPES = {"init", "thinking_tokens"}
@@ -46,6 +54,10 @@ _NOISY_SYSTEM_SUBTYPES = {"init", "thinking_tokens"}
 
 def _tool_kind(name: str) -> StepKind:
     if name.startswith("mcp__"):
+        # M-21: classify MCP test-runner tools as TEST_RUN (was MCP_CALL).
+        lower = name.lower()
+        if any(tok in lower for tok in _MCP_TEST_TOKENS):
+            return StepKind.TEST_RUN
         return StepKind.MCP_CALL
     return TOOL_KIND_MAP.get(name, StepKind.COMMAND)
 

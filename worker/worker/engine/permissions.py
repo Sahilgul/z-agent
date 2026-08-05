@@ -57,8 +57,15 @@ def evaluate(tool_name: str, args: dict[str, Any] | None,
     winner: Effect | None = None
     for rule in rulesets:
         if _matches(rule, tool_name, args or {}):
+            # M-18: a rule missing the `effect` key used to raise KeyError
+            # here, which escapes the `except ValueError` and crashes the
+            # turn — contradicting the docstring ("malformed rule: skip,
+            # never crash a turn"). Read defensively and skip missing/None.
+            effect = rule.get("effect")
+            if effect is None:
+                continue  # malformed rule (no effect): skip
             try:
-                winner = Effect(rule["effect"])
+                winner = Effect(effect)
             except ValueError:
                 continue  # malformed rule: skip, never crash a turn
     return winner

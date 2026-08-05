@@ -266,7 +266,15 @@ class TestTerminalBackground:
         while job.running:
             await asyncio.sleep(0.1)
         notes = mgr.completed_notifications()
-        assert any("watch matched" in n for n in notes)
+        # M-25: the old test asserted `any("watch matched" in n)` — "at least
+        # one" — which passes even if the debounce is broken and BOTH matches
+        # fire. The debounce (WATCH_DEBOUNCE_S) must coalesce the two matches
+        # (fired in the same command, within one debounce window) into a
+        # SINGLE hit. Assert exactly one watch notification.
+        watch_notes = [n for n in notes if "watch matched" in n]
+        assert len(watch_notes) == 1, (
+            f"debounce should coalesce both matches into one hit; got {watch_notes}"
+        )
 
     @pytest.mark.asyncio
     async def test_kill_process_tree(self, tmp_path: Path, monkeypatch):

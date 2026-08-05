@@ -187,13 +187,20 @@ class Compactor:
         result.after_tokens = self._estimate_tokens(new_messages)
         result.summarized_count = 1
 
-        # HONESTY VALIDATOR — no protected message was dropped.
-        protected_before = [i for i, m in enumerate(messages) if self._origin_of(m) in _PROTECTED_ORIGINS]
-        protected_after = [m for m in new_messages if self._origin_of(m) in _PROTECTED_ORIGINS]
-        if len(protected_after) != len(protected_before):
+        # HONESTY VALIDATOR — no protected message was dropped OR replaced.
+        protected_before = [m for m in messages if self._origin_of(m) in _PROTECTED_ORIGINS]
+        # M-16: the old validator compared COUNTS only, so a protected message
+        # REPLACED by a different protected message (same count) passed —
+        # the original verbatim content was silently dropped. Require each
+        # protected message to survive as the SAME object (identity), not just
+        # a count match.
+        missing = [m for m in protected_before
+                   if not any(m is nm for nm in new_messages)]
+        if missing:
             result.rolled_back = True
             result.rollback_reason = (
-                f"protected message count changed: {len(protected_before)} -> {len(protected_after)}"
+                f"protected message changed/dropped: {len(protected_before)} protected, "
+                f"{len(missing)} missing after compaction"
             )
             result.after_tokens = result.before_tokens
             return messages, result

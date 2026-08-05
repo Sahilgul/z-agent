@@ -76,6 +76,11 @@ class MCPManager:
                         "attempts": attempt + 1}
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
+                # M-19: a dead MCP subprocess leaves a stale cached client
+                # here; every retry reused it -> permanent outage (the
+                # server could never recover until the worker restarted). Drop
+                # the cache so the next attempt builds a fresh client.
+                self._clients.pop(name, None)
                 if _is_auth_error(exc) and name not in self._authed:
                     st.needs_auth = True
                     await self._lazy_auth(name, cfg)

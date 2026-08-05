@@ -16,6 +16,8 @@ via the gateway at turn start.
 from __future__ import annotations
 
 import json
+import contextvars
+import logging
 import sqlite3
 import threading
 import time
@@ -26,6 +28,9 @@ from typing import Any
 from langchain_core.tools import tool
 
 # --- episodic store (SQLite FTS5, per-thread) ---
+
+log = logging.getLogger(__name__)
+
 
 @dataclass
 class EpisodicMemory:
@@ -105,8 +110,15 @@ class EpisodicMemory:
             params.append(limit)
             try:
                 rows = self._db.execute(sql, params).fetchall()
-            except sqlite3.OperationalError:
-                # FTS5 unavailable — fall back to LIKE
+            except sqlite3.OperationalError as exc:
+                # M-20 (related hardening): only "no such table" means FTS5 is
+                # unavailable (the CREATE at init failed) -> fall back to LIKE.
+                # Any OTHER OperationalError is a real query failure; the old
+                # code silently masked it as "no results". Log it so the
+                # failure is visible, then degrade to LIKE (graceful).
+                if "no such table" not in str(exc).lower():
+                    log.warning("episodic FTS5 search failed — degrading to LIKE",
+                                query=query, error=str(exc))
                 like = f"%{query}%"
                 # H-13: parenthesize the OR so the run_id/thread_id AND filters
                 # apply to the whole match group. The old unparenthesized form
@@ -150,13 +162,20 @@ def read_handoff(workspace: Path) -> str | None:
 
 # --- memory.search tool (exposed to the agent) ---
 
-_global_episodic: EpisodicMemory | None = None
+# M-20: the episodic store is per-thread state, NOT a process-wide singleton.
+# The old module global leaked across runs sharing a process (the spike
+# matrix runs models sequentially in one process; tests reuse the process)
+# — a later run's memory_search read the PREVIOUS run's episodic store (coord
+# point B). Scope it via a ContextVar; the runner sets it per run and the
+# dispatcher (graph.py call_tool_direct) propagates it to the executor thread
+# via copy_context().run().
+_episodic_var: contextvars.ContextVar[EpisodicMemory | None] = contextvars.ContextVar(
+    "episodic_memory", default=None)
 
 
 def set_episodic_memory(ep: EpisodicMemory) -> None:
     """Wire the per-thread episodic store so the @tool can find it."""
-    global _global_episodic
-    _global_episodic = ep
+    _episodic_var.set(ep)
 
 
 @tool
@@ -167,9 +186,10 @@ def memory_search(query: str, limit: int = 5) -> str:
     earlier turn of this thread. Returns ranked matches with turn numbers and
     summaries.
     """
-    if _global_episodic is None:
+    ep = _episodic_var.get()
+    if ep is None:
         return "episodic memory not available for this thread"
-    results = _global_episodic.search(query, limit=limit)
+    results = ep.search(query, limit=limit)
     if not results:
         return "no matches"
     lines = []

@@ -128,7 +128,13 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
         result.is_error = True
 
     result.turns = emitter._seq
-    result.events_emitted = len(events)
+    # M-17: events_lost was never set, so the "no event loss" SLO was
+    # vacuously green (0/0). Measure it for real: events_emitted is what the
+    # EMITTER created (emitter._seq); events is what the SINK received. The
+    # difference is actual loss (a sink that dropped events now makes the
+    # SLO fail instead of passing by default).
+    result.events_emitted = emitter._seq
+    result.events_lost = max(0, emitter._seq - len(events))
     # Count tool calls + ok from events
     tool_events = [e for e in events if e.detail.get("tool")]
     result.tool_calls = len(tool_events)

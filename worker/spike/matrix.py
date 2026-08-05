@@ -133,7 +133,10 @@ def render_matrix(all_results: dict[str, Any], gate: dict[str, Any]) -> str:
         all_pass = "PASS" if all(verdicts.values()) else "FAIL"
         lines.append(f"| {model} | " + " | ".join(cells) + f" | {all_pass} |")
     lines.append("")
-    lines.append(f"**Gate passed:** {gate['gate_passed']}")
+    # M-23: render None (not evaluated, partial run) distinctly from False.
+    _gp = gate['gate_passed']
+    gate_label = "N/A (not evaluated)" if _gp is None else str(_gp)
+    lines.append(f"**Gate passed:** {gate_label}")
     lines.append(f"**Passing models:** {', '.join(gate['passing_models']) or '(none)'}")
     rendered += "\n".join(lines) + "\n"
     return rendered
@@ -145,7 +148,10 @@ def write_matrix(all_results: dict[str, Any], gate: dict[str, Any]) -> Path:
     out = RESULTS_DIR / "DECISION_MATRIX.md"
     out.write_text(render_matrix(all_results, gate))
     print(f"[spike] decision matrix -> {out}")
-    print(f"[spike] gate passed: {gate['gate_passed']} (passing models: {', '.join(gate['passing_models']) or 'none'})")
+    # M-23: print None distinctly from a failed gate.
+    _gp = gate['gate_passed']
+    _gp_label = "n/a (partial run)" if _gp is None else str(_gp)
+    print(f"[spike] gate passed: {_gp_label} (passing models: {', '.join(gate['passing_models']) or 'none'})")
     return out
 
 
@@ -175,7 +181,11 @@ async def main() -> int:
     gate = evaluate_gate(all_results) if args.command == "all" else {
         "model_verdicts": {},
         "passing_models": [],
-        "gate_passed": False,
+        # M-23: a partial run never evaluates the gate, but wrote
+        # `gate_passed: False` — indistinguishable from a gate that RAN and
+        # FAILED. Use None ("not evaluated") so the matrix doesn't record a
+        # false negative.
+        "gate_passed": None,
         "note": "partial run — gate only evaluated on 'all'",
     }
     write_matrix(all_results, gate)

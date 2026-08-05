@@ -148,10 +148,18 @@ def test_mutating_tools_need_approval():
     assert needs_approval("file_edit", "autonomous") is False
 
 
-def test_all_tools_registry_has_seven():
+def test_all_tools_registry_has_six_unique_names():
+    # M-27: the test was named "..._has_seven" but asserted SIX unique names —
+    # terminal_exec is registered in BOTH readonly and mutating, so
+    # ALL_TOOLS (READONLY_TOOLS + MUTATING_TOOLS) has 7 entries but only 6
+    # UNIQUE names after dedup. The name lied about the count. Rename to match
+    # the actual dedup contract and keep the (correct) six-name assertion.
     names = {t.name for t in ALL_TOOLS}
     assert names == {"file_read", "file_search", "file_glob", "terminal_exec",
                      "file_edit", "file_write"}
+    # And confirm the 7-entry / 6-unique shape explicitly.
+    assert len(ALL_TOOLS) == 7
+    assert len(names) == 6
 
 
 @pytest.mark.asyncio

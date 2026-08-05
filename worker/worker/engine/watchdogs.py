@@ -124,6 +124,11 @@ class BudgetWatchdog:
         pct = used / cap
         if pct >= 0.80 and thread_id not in self.fired_80:
             self.fired_80.add(thread_id)
+            # M-15: crossing 80% also crossed 50%. The old code only marked
+            # fired_80, so a later check (still >80%) fell through to the 50%
+            # branch and fired a SPURIOUS 50% reminder after the 80% one.
+            # Mark both on the 80% fire to suppress the later 50%.
+            self.fired_50.add(thread_id)
             return BudgetReminder(thread_id, pct, "80")
         if pct >= 0.50 and thread_id not in self.fired_50:
             self.fired_50.add(thread_id)
