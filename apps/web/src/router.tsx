@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
-import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
@@ -80,6 +80,10 @@ function AdminRoute({ children }: { children: ReactNode }) {
  *  once a session exists. The Suspense boundary here catches lazy route
  *  suspensions inside the transition the data router already started. */
 function AuthedShell() {
+  // C-18: key the error boundary to the current pathname so a screen error
+  // resets when the user navigates away — otherwise one crash traps the
+  // whole session until a full reload.
+  const location = useLocation();
   return (
     <>
       <SkipLink />
@@ -87,7 +91,7 @@ function AuthedShell() {
         <SideRail />
         <div className="flex min-w-0 flex-1 flex-col">
           <main id="main" className="min-h-0 flex-1 overflow-hidden max-[700px]:pb-[56px]">
-            <ErrorBoundary>
+            <ErrorBoundary resetKey={location.pathname}>
               <Suspense fallback={<ScreenSkeleton />}>
                 <Outlet />
               </Suspense>

@@ -106,6 +106,14 @@ async def test_status_none_does_not_update_last_status(session, make_user, monke
     h = await _persist_with_clock(monkeypatch, [0.0, 1.0, 2.0])
 
     h._persist("l1", "running")
+    session.expire_all()
+    # Capture the heartbeat AFTER the first write, BEFORE the throttled third
+    # call — the old test captured it after the third call, so the final
+    # assert was `heartbeat_at == heartbeat_at` (always True, a vacuous
+    # tautology that could never catch a throttle regression) (C-17).
+    first_hb = session.get(Thread, "l1").heartbeat_at
+    assert first_hb is not None
+
     # No-status ping inside the window — must NOT update _last_status.
     h._persist("l1", None)
     assert h._last_status.get("l1") == "running"
@@ -115,5 +123,4 @@ async def test_status_none_does_not_update_last_status(session, make_user, monke
     h._persist("l1", "running")
     session.expire_all()
     # heartbeat_at should reflect only the first write, not the third call.
-    first_hb = session.get(Thread, "l1").heartbeat_at
     assert session.get(Thread, "l1").heartbeat_at == first_hb

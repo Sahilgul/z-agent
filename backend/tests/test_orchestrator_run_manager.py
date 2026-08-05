@@ -113,6 +113,11 @@ async def test_stop_run_interrupts_and_cancels_task(session, make_user):
     await asyncio.sleep(0)
     session.expire_all()
     assert session.get(Run, "r1").stage == RunStage.INTERRUPTED.value
+    # C-15: stop_run must write the Thread DB status to "stopped" so the
+    # capacity semaphore releases the slot — the relay-only publish left the
+    # row at "running" and the slot leaked forever.
+    assert session.get(Thread, "l1").status == "stopped"
+    assert session.get(Thread, "l1").finished_at is not None
     assert "l1" in control.interrupted
     assert relay.threads[-1] == ("r1", "l1", "stopped")
     assert relay.stages[-1][1] == RunStage.INTERRUPTED.value
@@ -162,6 +167,34 @@ async def test_nudge_thread_missing_thread_is_noop(session, make_user):
     session.add(run); session.commit()
     await rm.nudge_thread("r1", "ghost", "x")
     assert control.nudged == [("ghost", "x")]
+
+
+async def test_nudge_thread_refuses_to_resurrect_terminal_thread(session, make_user):
+    """C-16: nudge_thread must NOT flip a terminal thread back to "running".
+    The old code set status="running" unconditionally, resurrecting
+    stopped/completed/replaced/timed_out threads and leaking capacity."""
+    from app.orchestrator.semaphores import ACTIVE_STATUSES
+    u = make_user("a")
+    rm, _, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    for terminal in ("stopped", "completed", "replaced", "timed_out", "failed"):
+        session.add(Thread(
+            id=f"l-{terminal}", run_id="r1", persona="researcher", status=terminal))
+    session.add(run); session.commit()
+    for terminal in ("stopped", "completed", "replaced", "timed_out", "failed"):
+        tid = f"l-{terminal}"
+        await rm.nudge_thread("r1", tid, "hurry up")
+        session.expire_all()
+        # status unchanged — the dead thread was NOT resurrected
+        assert session.get(Thread, tid).status == terminal, (
+            f"nudge resurrected a {terminal} thread")
+        # the control channel was NOT nudged (the thread is dead)
+        assert (tid, "hurry up") not in control.nudged
+    # relay should not publish "running" for any terminal thread
+    assert not any(t == "running" for _, _, t in relay.threads)
+    # sanity: ACTIVE_STATUSES does not include any terminal status
+    assert all(terminal not in ACTIVE_STATUSES
+               for terminal in ("stopped", "completed", "replaced", "timed_out", "failed"))
 
 
 async def test_reconcile_on_boot_interrupts_active_runs(session, make_user):

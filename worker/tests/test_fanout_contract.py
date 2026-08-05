@@ -32,18 +32,39 @@ def test_spawn_agent_succeeds_when_worker_idle(monkeypatch: pytest.MonkeyPatch):
     assert reg.live_count() == 1
 
 
-def test_spawn_agent_vetoed_when_worker_saturated():
-    """The engine-side veto refuses spawns when the worker pool is saturated."""
+def test_spawn_agent_vetoed_when_worker_saturated(monkeypatch: pytest.MonkeyPatch):
+    """The engine-side veto refuses spawns when the worker pool is saturated.
+
+    Driven END-TO-END through the tool (not _veto in isolation): the old test
+    called `_veto(req, worker_idle=False)` directly, which codified the C-03
+    bypass — the call sites defaulted worker_idle=True and never consulted the
+    registry, so a saturated pool still accepted spawns. The tool itself must
+    refuse when the registry is saturated."""
+    monkeypatch.setenv("THREAD_ID", "thread-1")
     reg = get_registry()
     # Saturate the registry
     for i in range(SWARM_MAX_SLICES):
         reg.register(f"s{i}", "swarm", "thread-1", f"ctx-{i}", "p")
-    # Now spawn_agent should be vetoed (worker idle = false)
-    from worker.engine.fanout import SpawnRequest, _veto
-    req = SpawnRequest(kind="agent", prompt="x")
-    allowed, reason = _veto(req, worker_idle=False)
-    assert allowed is False
-    assert "saturated" in reason
+    assert reg.is_saturated()
+    # Now spawn_agent itself must be vetoed (worker_idle derived from the registry).
+    result = spawn_agent.invoke({"prompt": "should be refused"})
+    assert result.startswith("error: spawn vetoed")
+    assert "saturated" in result
+    # No new spawn registered — the gate refused it.
+    assert reg.live_count() == SWARM_MAX_SLICES
+
+
+def test_spawn_swarm_vetoed_when_worker_saturated(monkeypatch: pytest.MonkeyPatch):
+    """A saturated worker pool refuses swarm spawns too (same gate as spawn_agent)."""
+    monkeypatch.setenv("THREAD_ID", "thread-1")
+    reg = get_registry()
+    for i in range(SWARM_MAX_SLICES):
+        reg.register(f"s{i}", "swarm", "thread-1", f"ctx-{i}", "p")
+    slices = [{"title": "a", "prompt": "distinct prompt"}]
+    result = spawn_swarm.invoke({"slices": slices})
+    assert result.startswith("error: swarm vetoed")
+    assert "saturated" in result
+    assert reg.live_count() == SWARM_MAX_SLICES
 
 
 def test_spawn_swarm_rejects_duplicate_slices(monkeypatch: pytest.MonkeyPatch):
@@ -131,6 +152,48 @@ async def test_timeout_watchdog_skips_finished_spawn():
     reg.spawns["spawn-y"]["status"] = "completed"
     result = await enforce_timeout("spawn-y", timeout_s=0.01)
     assert "already finished" in result
+
+
+@pytest.mark.asyncio
+async def test_spawn_arms_2h_watchdog_via_dispatch(monkeypatch: pytest.MonkeyPatch):
+    """C-04: a successful spawn must arm the 2h hard-cap watchdog. The sync
+    spawn tool runs in an executor thread with no running loop, so the watchdog
+    is armed by the async dispatch path (call_tool_direct -> _call_extra_tool)
+    once back on the loop thread. Before this fix `enforce_timeout` was never
+    scheduled and the 2h cap was never armed."""
+    monkeypatch.setenv("THREAD_ID", "thread-1")
+    from worker.engine.tools import call_tool_direct
+
+    result = await call_tool_direct("spawn_agent", {"prompt": "investigate the dedupe bug"})
+    assert result["ok"] is True
+    reg = get_registry()
+    live = [sid for sid, sp in reg.spawns.items() if sp["status"] == "running"]
+    assert len(live) == 1
+    sp = reg.spawns[live[0]]
+    assert sp["watchdog"] is not None, "2h watchdog was not armed"
+    assert not sp["watchdog"].done()
+    # Cancel the real 2h watchdog so it doesn't linger past the test.
+    sp["watchdog"].cancel()
+
+
+@pytest.mark.asyncio
+async def test_cascade_drain_cancels_watchdog(monkeypatch: pytest.MonkeyPatch):
+    """C-04: cascade drain must cancel the watchdog of every drained spawn
+    (the 2h cap is moot once the parent stops the spawn)."""
+    monkeypatch.setenv("THREAD_ID", "thread-1")
+    from worker.engine.tools import call_tool_direct
+
+    await call_tool_direct("spawn_agent", {"prompt": "child 1"})
+    await call_tool_direct("spawn_agent", {"prompt": "child 2"})
+    reg = get_registry()
+    live = [sid for sid, sp in reg.spawns.items() if sp["status"] == "running"]
+    assert all(reg.spawns[sid]["watchdog"] is not None for sid in live)
+    drained = reg.drain("thread-1")
+    assert len(drained) == 2
+    assert reg.live_count() == 0
+    for sid in drained:
+        # watchdog cancelled (popped) on drain
+        assert "watchdog" not in reg.spawns[sid]
 
 
 def test_stagger_constant_is_2s():

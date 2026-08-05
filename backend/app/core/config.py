@@ -7,7 +7,12 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Known-insecure shipped secrets — rejected in any non-dev deployment.
+_INSECURE_JWT_SECRETS = frozenset({"", "dev-only-change-me"})
 
 
 class Settings(BaseSettings):
@@ -48,14 +53,19 @@ class Settings(BaseSettings):
     pip_cache_volume: str = "zagent_pip-cache"
     npm_cache_volume: str = "zagent_npm-cache"
 
-    jwt_secret: str = "dev-only-change-me"
+    jwt_secret: str = ""  # no shipped default — set ZAGENT_JWT_SECRET (C-13)
     jwt_ttl_seconds: int = 60 * 60 * 24 * 14
     admin_usernames: str = "sahil"
     # First-admin bootstrap (chicken-and-egg): seed creates this ACTIVE
-    # admin if the username doesn't exist yet. Local-dev convenience only —
-    # teammates are still born in the Team UI via one-time setup codes.
-    bootstrap_admin_username: str = "sahil"
-    bootstrap_admin_pin: str = "4545"
+    # admin if the username AND pin are configured. Defaults are EMPTY so a
+    # production deploy never silently seeds an active admin with a known
+    # PIN — local dev opts in via ZAGENT_BOOTSTRAP_ADMIN_USERNAME /
+    # ZAGENT_BOOTSTRAP_ADMIN_PIN in .env (C-14).
+    bootstrap_admin_username: str = ""
+    bootstrap_admin_pin: str = ""
+    # Dev opt-in for the insecure shipped defaults (jwt_secret etc.). False in
+    # every real deploy — the secret validator fails fast without it (C-13).
+    dev_insecure_defaults: bool = False
 
     ado_org: str = ""
     ado_project: str = ""
@@ -137,6 +147,21 @@ class Settings(BaseSettings):
     @property
     def admins(self) -> set[str]:
         return {u.strip() for u in self.admin_usernames.split(",") if u.strip()}
+
+    @model_validator(mode="after")
+    def _enforce_secret_defaults(self) -> "Settings":
+        # C-13: a shipped/empty jwt_secret lets anyone forge a JWT and bypass
+        # PIN auth. Fail fast at startup unless the dev opt-in is set, so a
+        # production deploy that forgot ZAGENT_JWT_SECRET refuses to boot
+        # rather than silently running with a known secret.
+        if not self.dev_insecure_defaults and self.jwt_secret in _INSECURE_JWT_SECRETS:
+            raise ValueError(
+                "ZAGENT_JWT_SECRET must be set to a non-default secret "
+                "(it is currently empty or the shipped 'dev-only-change-me'). "
+                "Set ZAGENT_JWT_SECRET in the environment/.env, or set "
+                "ZAGENT_DEV_INSECURE_DEFAULTS=1 only for local dev."
+            )
+        return self
 
 
 @lru_cache

@@ -154,6 +154,36 @@ def test_all_tools_registry_has_seven():
                      "file_edit", "file_write"}
 
 
+@pytest.mark.asyncio
+async def test_call_tool_direct_routes_terminal_exec_to_mutating(monkeypatch: pytest.MonkeyPatch):
+    """C-02: terminal_exec is registered in BOTH the readonly and mutating
+    registries. call_tool_direct must dispatch to the MUTATING variant (the
+    approval contract), not the readonly sandbox — otherwise every approved
+    terminal_exec hits the readonly gate and the mutating contract is dead."""
+    import worker.engine.tools as tools_mod
+    from worker.engine.tools import call_tool_direct
+
+    dispatched: list[str] = []
+
+    async def fake_mutating(name, args):
+        dispatched.append(f"mutating:{name}")
+        return {"kind": "success", "ok": True, "output": "ok", "tool": name, "args": args}
+
+    async def fake_readonly(name, args):
+        dispatched.append(f"readonly:{name}")
+        return {"kind": "success", "ok": True, "output": "ok", "tool": name, "args": args}
+
+    monkeypatch.setattr(tools_mod, "call_mutating_tool", fake_mutating)
+    monkeypatch.setattr(tools_mod, "call_tool", fake_readonly)
+
+    await call_tool_direct("terminal_exec", {"command": "git status"})
+    assert dispatched == ["mutating:terminal_exec"], f"dispatched={dispatched}"
+    # readonly-only tools still resolve through the readonly shim
+    dispatched.clear()
+    await call_tool_direct("file_read", {"file_path": "x"})
+    assert dispatched == ["readonly:file_read"], f"dispatched={dispatched}"
+
+
 # ----------------------------------------------------------- approval gate
 
 @pytest.mark.asyncio

@@ -130,11 +130,21 @@ class RunManager:
     async def stop_run(self, run_id: str) -> None:
         """One tap, no confirmation — stopping is safe and reversible. Full trace
         retained; banner: 'Stopped by you — all work preserved.'"""
+        now = datetime.now(timezone.utc)
         session = get_session()
         try:
             run = session.get(Run, run_id)
             threads = session.query(Thread).filter_by(run_id=run_id).all()
-            thread_ids = [l.id for l in threads if l.status in ("running", "idle", "queued")]
+            thread_ids: list[str] = []
+            for l in threads:
+                if l.status in ("running", "idle", "queued"):
+                    thread_ids.append(l.id)
+                    # Write the Thread DB status so the capacity semaphore
+                    # releases the slot. The relay-only "stopped" publish
+                    # left the row at "running" and the slot leaked forever
+                    # (C-15) — stop_thread already did this, stop_run didn't.
+                    l.status = "stopped"
+                    l.finished_at = now
             transition(run, RunStage.INTERRUPTED)
             session.commit()
             available = run.available_actions
@@ -175,16 +185,27 @@ class RunManager:
 
     async def nudge_thread(self, run_id: str, thread_id: str, text: str) -> None:
         """Typed Lead-nudge: stays enabled while the agent works (carve-out).
-        Worker semantics: graceful interrupt + inject + resume."""
-        await self.control.nudge(thread_id, text)
+        Worker semantics: graceful interrupt + inject + resume.
+
+        Refuses to resurrect a terminal thread (stopped/replaced/timed_out/
+        completed/failed): the old code set status="running" unconditionally,
+        which flipped a dead thread back to "running" and stranded the run
+        while leaking the capacity slot (C-16). Only ACTIVE threads are nudged;
+        a missing thread stays a no-op (the control nudge goes nowhere)."""
+        from app.orchestrator.semaphores import ACTIVE_STATUSES
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
-            if thread:
+            if thread is not None and thread.status not in ACTIVE_STATUSES:
+                log.warning("nudge refused — thread terminal",
+                            run_id=run_id, thread_id=thread_id, status=thread.status)
+                return  # do NOT nudge or flip a dead thread back to "running"
+            if thread is not None:
                 thread.status = "running"
                 session.commit()
         finally:
             session.close()
+        await self.control.nudge(thread_id, text)
         await self.relay.publish_thread_status(run_id, thread_id, "running")
 
     # ------------------------------------------------------------ thread controls

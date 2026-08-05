@@ -217,6 +217,18 @@ async def test_terminal_exec_allows_readonly(monkeypatch: pytest.MonkeyPatch, tm
 
 
 @pytest.mark.asyncio
+async def test_terminal_exec_readonly_blocks_command_chaining(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """C-01: a read-only prefix must not smuggle a mutating tail past the gate.
+    `ls; rm -rf ~` used to pass because the readonly prefix matched and the
+    blocked tail ran under shell=True — chaining is now forbidden outright."""
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+    for evil in ("ls; rm -rf ~", "ls && rm -rf ~", "cat x > /tmp/evil", "echo $(rm x)", "ls | rm x"):
+        r = await call_tool("terminal_exec", {"command": evil})
+        assert r["kind"] == "error", f"chained command escaped the gate: {evil}"
+        assert "blocked" in r["output"].lower() or "chaining" in r["output"].lower()
+
+
+@pytest.mark.asyncio
 async def test_unknown_tool_returns_error():
     r = await call_tool("not_a_tool", {})
     assert r["kind"] == "error"

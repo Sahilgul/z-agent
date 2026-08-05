@@ -73,6 +73,7 @@ class SpawnRegistry:
             "kind": kind, "parent_thread_id": parent_thread_id,
             "context_id": context_id, "prompt": prompt,
             "started_at": time.time(), "status": "running",
+            "watchdog": None,
         }
 
     def drain(self, parent_thread_id: str) -> list[str]:
@@ -81,6 +82,7 @@ class SpawnRegistry:
         for sid, sp in self.spawns.items():
             if sp["parent_thread_id"] == parent_thread_id and sp["status"] == "running":
                 sp["status"] = "drained"
+                self._cancel_watchdog(sid)
                 drained.append(sid)
         return drained
 
@@ -89,6 +91,38 @@ class SpawnRegistry:
 
     def is_saturated(self, cap: int = SWARM_MAX_SLICES) -> bool:
         return self.live_count() >= cap
+
+    def arm_watchdog(self, spawn_id: str, loop: asyncio.AbstractEventLoop) -> None:
+        """Arm the 2h hard-cap watchdog for a spawn on the given event loop.
+
+        The spawn tools are sync @tool objects invoked via run_in_executor, so
+        they execute in a worker thread with NO running loop — the loop is
+        only available in the async dispatch path that called them. The
+        dispatcher snapshots the registry before invocation and arms
+        watchdogs for any newly-registered spawns once back on the loop
+        thread. Without this, `enforce_timeout` was never scheduled and the
+        2h cap was never armed (C-04)."""
+        sp = self.spawns.get(spawn_id)
+        if sp is None or sp.get("watchdog") is not None:
+            return
+        sp["watchdog"] = asyncio.ensure_future(enforce_timeout(spawn_id), loop=loop)
+
+    def finish(self, spawn_id: str, status: str = "completed") -> None:
+        """Mark a spawn finished and cancel its watchdog (the 2h cap is moot
+        once the spawn is done)."""
+        sp = self.spawns.get(spawn_id)
+        if sp is None:
+            return
+        sp["status"] = status
+        self._cancel_watchdog(spawn_id)
+
+    def _cancel_watchdog(self, spawn_id: str) -> None:
+        sp = self.spawns.get(spawn_id)
+        if sp is None:
+            return
+        wd = sp.pop("watchdog", None)
+        if wd is not None and not wd.done():
+            wd.cancel()
 
 
 # A module-level registry (the engine owns one per run)
@@ -143,7 +177,11 @@ def spawn_agent(prompt: str, repo: str | None = None) -> str:
     a single-file refactor). The engine vets the spawn (worker-idle gate).
     """
     req = SpawnRequest(kind="agent", prompt=prompt, repo=repo)
-    allowed, reason = _veto(req)
+    # The worker-idle saturation gate was dead code: _veto defaulted
+    # worker_idle=True and every call site omitted it, so a saturated worker
+    # pool never refused a spawn (C-03). Drive it from the registry's live
+    # spawn count.
+    allowed, reason = _veto(req, worker_idle=not _registry.is_saturated())
     if not allowed:
         return f"error: spawn vetoed — {reason}"
     spawn_id = str(uuid.uuid4())
@@ -166,7 +204,7 @@ def spawn_swarm(slices: list[dict[str, str]], rationale: str = "") -> str:
     drain if the parent stops. Max width: 8 slices.
     """
     req = SpawnRequest(kind="swarm", prompt="", slices=slices)
-    allowed, reason = _veto(req)
+    allowed, reason = _veto(req, worker_idle=not _registry.is_saturated())
     if not allowed:
         return f"error: swarm vetoed — {reason}"
     spawn_ids = []

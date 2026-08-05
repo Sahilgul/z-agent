@@ -222,7 +222,7 @@ async def run_agent(
     **options_kwargs: Any,
 ) -> RunRecorder:
     rec = RunRecorder(name)
-    norm = Normalizer(run_id=normalizer_run, lane_id="spike-lane")
+    norm = Normalizer(run_id=normalizer_run, thread_id="spike-lane")
     async with ClaudeSDKClient(options=_options(cwd, **options_kwargs)) as client:
         if on_client:
             await on_client(client)
@@ -317,7 +317,7 @@ async def check_interrupt(golden: Path) -> dict[str, Any]:
     that the agent visibly incorporates the steering message."""
     ws = stamp_workspace(golden, "ServerApp", "main", RESULTS_DIR / "workspaces" / "interrupt-ServerApp")
     rec = RunRecorder("interrupt")
-    norm = Normalizer(run_id="spike-interrupt", lane_id="spike-lane")
+    norm = Normalizer(run_id="spike-interrupt", thread_id="spike-lane")
     incorporated = False
     state_lost = False
     async with ClaudeSDKClient(options=_options(ws)) as client:

@@ -58,10 +58,18 @@ def pack(volume: Path) -> bytes:
 
 def unpack(blob: bytes, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
+    dest_resolved = dest.resolve()
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+        # Path-traversal guard (C-12): the old check used str.startswith,
+        # which a sibling-prefix escape defeated — a member like
+        # `../destination/evil` resolved to `/sessions/destination/evil` and
+        # passed `startswith("/sessions/dest")`. Use real path containment
+        # (Path.relative_to raises when the target is not under dest).
         for member in tar.getmembers():
             target = (dest / member.name).resolve()
-            if not str(target).startswith(str(dest.resolve())):
+            try:
+                target.relative_to(dest_resolved)
+            except ValueError:
                 raise ValueError(f"unsafe member path: {member.name}")
         tar.extractall(dest, filter="data")
 

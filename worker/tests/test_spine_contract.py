@@ -566,6 +566,25 @@ def test_autonomous_skips_gate():
     assert _should_continue({"messages": [ai], "mode": Mode.DEVELOPMENT, "autonomy": "autonomous"}) == "tools"
 
 
+def test_permissions_active_routes_readonly_to_gate():
+    """C-05: a readonly tool with a permission ruleset active must route
+    through the gate so a DENY/ASK rule on it is enforced (the gate
+    auto-approves no-match, blocks deny, cards ask). Previously the ruleset
+    was never consulted and readonly tools bypassed the gate entirely."""
+    ai = _ai("", [_tc("tc1", "file_read", {"file_path": "x"})])
+    state = {"messages": [ai], "mode": Mode.DEVELOPMENT, "autonomy": "supervised",
+             "permissions_active": True}
+    assert _should_continue(state) == "gate"
+
+
+def test_permissions_active_autonomous_skips_gate():
+    """Autonomous still bypasses the gate even with a ruleset active."""
+    ai = _ai("", [_tc("tc1", "file_read", {"file_path": "x"})])
+    state = {"messages": [ai], "mode": Mode.DEVELOPMENT, "autonomy": "autonomous",
+             "permissions_active": True}
+    assert _should_continue(state) == "tools"
+
+
 def test_goal_mode_turn_end_routes_to_goal_router():
     ai = _ai("stage done")
     assert _should_continue({"messages": [ai], "mode": Mode.GOAL, "autonomy": "autonomous"}) == "goal"

@@ -125,15 +125,35 @@ async def test_memory_relay_delta_poll_delivers(monkeypatch):
         get_settings.cache_clear()
 
 
-def test_seed_bootstraps_active_admin_once(session):
+def test_seed_bootstraps_active_admin_once(session, monkeypatch):
+    from app.auth.seed_users import seed
+    from app.core.config import get_settings
+    from app.db.models.user import User
+
+    # C-14: the bootstrap admin is opt-in (no shipped default). Configure
+    # username + pin, then seed — a production deploy with empty defaults
+    # never silently seeds an active admin with a known PIN.
+    monkeypatch.setenv("ZAGENT_BOOTSTRAP_ADMIN_USERNAME", "sahil")
+    monkeypatch.setenv("ZAGENT_BOOTSTRAP_ADMIN_PIN", "4545")
+    get_settings.cache_clear()
+    try:
+        seed()
+        admin = session.query(User).filter_by(username="sahil").one()
+        assert admin.role == "admin"
+        assert admin.status == "active"
+        assert verify_pin("4545", admin.pin_hash)
+
+        seed()  # idempotent — no duplicate, no pin reset
+        assert session.query(User).filter_by(username="sahil").count() == 1
+    finally:
+        get_settings.cache_clear()
+
+
+def test_seed_skips_bootstrap_admin_when_unset(session):
+    """C-14: with empty bootstrap defaults (the production default), seed()
+    must NOT create an active admin with a known PIN."""
     from app.auth.seed_users import seed
     from app.db.models.user import User
 
     seed()
-    admin = session.query(User).filter_by(username="sahil").one()
-    assert admin.role == "admin"
-    assert admin.status == "active"
-    assert verify_pin("4545", admin.pin_hash)
-
-    seed()  # idempotent — no duplicate, no pin reset
-    assert session.query(User).filter_by(username="sahil").count() == 1
+    assert session.query(User).filter_by(username="sahil").count() == 0

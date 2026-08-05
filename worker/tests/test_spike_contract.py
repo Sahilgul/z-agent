@@ -74,6 +74,20 @@ def test_tool_registry_has_three_tools() -> None:
     assert set(TOOL_BY_NAME) == {"file_read", "file_edit", "bash"}
 
 
+def test_tracer_normalizer_kwargs_fixed() -> None:
+    """C-06: the lane->thread rename left a stale `lane_id=` kwarg in the
+    tracer's Normalizer construction, raising TypeError and killing the
+    whole tracer CLI. Verify the source now passes `thread_id=` (which
+    Normalizer.__init__ accepts), not the stale `lane_id=`. Done as a
+    source check because tracer.py imports claude_agent_sdk (not installed
+    in the test env), so it can't be imported here."""
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "spike" / "tracer.py"
+    text = src.read_text(encoding="utf-8")
+    assert "lane_id=" not in text, "tracer still passes stale lane_id= to Normalizer"
+    assert "thread_id=" in text, "tracer must pass thread_id= to Normalizer"
+
+
 def test_looks_like_test_detection() -> None:
     assert looks_like_test("pytest tests/")
     assert looks_like_test("npm test")

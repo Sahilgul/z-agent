@@ -269,6 +269,11 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         "turn_count": state.get("turn_count", 0) + 1,
         "compaction_retries": 0,  # a healthy turn resets the overflow-retry loop guard
         "last_usage": dict(usage) if usage else None,
+        # A permission ruleset can DENY or ASK on a READONLY tool (hard git
+        # policies). _should_continue can't see config, so the agent node
+        # flags whether one is active; the gate then evaluates each call
+        # (allow/deny/ask) and enforces it (C-05).
+        "permissions_active": bool(config["configurable"].get("permissions")),
     }
     budget = state.get("budget")
     if usage and budget is not None:
@@ -933,9 +938,17 @@ def _should_continue(state: EngineState) -> str:
     last = messages[-1]
     tool_calls = getattr(last, "tool_calls", None) or []
     if tool_calls:
-        # Fast path: skip the gate when no call could need approval.
+        # Fast path: skip the gate when no call could need approval. A
+        # permission ruleset can still DENY or ASK on a READONLY tool (hard
+        # git policies), so when one is active we route through the gate and
+        # let it evaluate each call — the gate auto-approves no-match/allow
+        # and blocks deny without a card. Previously the ruleset was never
+        # consulted here, so DENY/ASK on readonly tools was bypassed (C-05).
         autonomy = _autonomy_of(state)
-        if any(needs_approval(tc.get("name", ""), autonomy) for tc in tool_calls):
+        if autonomy != "autonomous" and (
+            state.get("permissions_active")
+            or any(needs_approval(tc.get("name", ""), autonomy) for tc in tool_calls)
+        ):
             return "gate"
         return "tools"
     # Turn complete. Goal mode: the stage machine decides what happens next.

@@ -253,10 +253,15 @@ async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
     from worker.engine.tools.deferred import DEFERRED_TOOL_BY_NAME, call_deferred_tool
     if name in DEFERRED_TOOL_BY_NAME:
         return await call_deferred_tool(name, args)
-    if name in TOOL_BY_NAME:
-        return await call_tool(name, args)
+    # Mutating dispatch MUST precede the readonly lookup: `terminal_exec` is
+    # registered in BOTH (the readonly variant in readonly.py and the mutating
+    # one in mutating.py). The readonly check first would route every
+    # post-gate terminal_exec to the sandboxed readonly variant, leaving the
+    # mutating/approval contract dead in production (C-02). Mutating wins.
     if name in MUTATING_TOOL_BY_NAME:
         return await call_mutating_tool(name, args)
+    if name in TOOL_BY_NAME:
+        return await call_tool(name, args)
     extra = _extra_tools()
     if name in extra:
         return await _call_extra_tool(extra[name], name, args)
@@ -264,20 +269,35 @@ async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _call_extra_tool(t: Any, name: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Invoke a langchain @tool with the error-prefix result convention."""
+    """Invoke a langchain @tool with the error-prefix result convention.
+
+    For fan-out tools (spawn_agent/spawn_swarm) it also arms the 2h hard-cap
+    watchdog: the sync tool runs in an executor thread with no running loop,
+    so `enforce_timeout` can only be scheduled once we're back on the loop
+    thread here. Without this arming the 2h cap was never armed (C-04)."""
     import asyncio
+    is_spawn = name in ("spawn_agent", "spawn_swarm")
+    if is_spawn:
+        from worker.engine import fanout
+        before = set(fanout.get_registry().spawns.keys())
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: t.invoke(args))
         output = str(result)
         is_error = output.startswith("error:")
-        return {
+        out: dict[str, Any] = {
             "kind": "error" if is_error else "success",
             "ok": not is_error,
             "output": output,
             "tool": name,
             "args": args,
         }
+        if is_spawn and not is_error:
+            from worker.engine import fanout
+            new_ids = set(fanout.get_registry().spawns.keys()) - before
+            for sid in new_ids:
+                fanout.get_registry().arm_watchdog(sid, loop)
+        return out
     except Exception as exc:  # noqa: BLE001
         return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
 

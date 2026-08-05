@@ -97,10 +97,14 @@ def seed() -> None:
 
         # First-admin bootstrap (chicken-and-egg, local-dev path):
         # seed creates the configured admin ACTIVE so a fresh clone can log in
-        # without the add_user CLI. No-op once the user exists.
+        # without the add_user CLI. No-op once the user exists. Defaults are
+        # empty (C-14) so production never silently seeds an active admin with
+        # a known PIN — local dev opts in via ZAGENT_BOOTSTRAP_ADMIN_*
+        # (both username AND pin must be set; hash_pin still validates 4-6 digits).
         settings = get_settings()
         admin_name = settings.bootstrap_admin_username
-        if admin_name and session.query(User).filter_by(username=admin_name).one_or_none() is None:
+        if (admin_name and settings.bootstrap_admin_pin
+                and session.query(User).filter_by(username=admin_name).one_or_none() is None):
             from app.core.security import hash_pin
             session.add(User(
                 username=admin_name, display_name=admin_name,

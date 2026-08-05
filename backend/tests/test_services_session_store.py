@@ -83,3 +83,24 @@ def test_unpack_rejects_tar_slip(tmp_path):
     with pytest.raises((ValueError, Exception)):
         session_store.unpack(buf.getvalue(), tmp_path / "dest")
     assert not (tmp_path / "evil.txt").exists()
+
+
+def test_unpack_rejects_sibling_prefix_tar_slip(tmp_path):
+    """C-12: the old str.startswith guard let a sibling-prefix escape
+    through. A member like `../dest_evil/x` resolves to `<parent>/dest_evil/x`,
+    and `startswith('<parent>/dest')` is True (because 'dest_evil' starts
+    with 'dest'), so it was NOT rejected and extractall wrote outside dest.
+    The real path-containment guard (Path.relative_to) catches it."""
+    import io
+    import tarfile
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo(name="../dest_evil/x")
+        payload = b"owned"
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    with pytest.raises((ValueError, Exception)):
+        session_store.unpack(buf.getvalue(), dest)
+    assert not (tmp_path / "dest_evil").exists()

@@ -17,6 +17,7 @@ from app.services import autonomy as autonomy_dial
 from app.services import plans as plan_service
 from app.services.intents import (
     IntentNeedsConfirmation, classify_text, gate_intent, load_run_for_user,
+    load_thread_for_run,
 )
 from app.services.sessions import replay_events
 
@@ -242,7 +243,16 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind == ActionKind.ABANDON_RUN:
         await run_manager.abandon_run(run_id)
     elif kind in (ActionKind.NUDGE, ActionKind.SEND_MESSAGE):
-        thread_id = intent.thread_id or _lead_thread_id(run_id)
+        thread_id = intent.thread_id
+        if thread_id:
+            # IDOR guard (C-11): a caller-supplied thread_id must belong to
+            # this run. Without it, _persist_user_message would corrupt
+            # another thread's next_seq and nudge_thread would nudge another
+            # user's thread.
+            if load_thread_for_run(run_id, thread_id) is None:
+                raise HTTPException(status_code=404, detail="thread not found")
+        else:
+            thread_id = _lead_thread_id(run_id)
         if thread_id:
             # Mode switch takes effect here: if run.mode no longer matches the
             # mode the current thread was spawned under, chain the new blueprint
@@ -321,6 +331,11 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind == ActionKind.STOP_THREAD:
         if not intent.thread_id:
             raise HTTPException(status_code=422, detail="stop_thread needs thread_id")
+        # IDOR guard (C-10): the thread must belong to this run, otherwise
+        # STOP_THREAD could interrupt any user's thread by pairing the
+        # caller's run_id with another run's thread_id.
+        if load_thread_for_run(run_id, intent.thread_id) is None:
+            raise HTTPException(status_code=404, detail="thread not found")
         await run_manager.stop_thread(run_id, intent.thread_id)
         return {"status": "ok", "intent": kind.value, "thread_id": intent.thread_id}
     elif kind == ActionKind.PIN_FINDING:

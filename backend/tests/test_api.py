@@ -586,6 +586,53 @@ def test_thread_action_run_not_found(auth_client, session, make_user):
     assert r.status_code == 404
 
 
+def test_thread_nudge_idor_rejects_other_run_thread(auth_client, session, make_user):
+    """C-08: /threads/{id}/nudge must not act on a thread that belongs to
+    another run. The caller pairs their OWN run_id with another run's
+    thread_id — the thread->run ownership guard returns 404, never
+    reaching run_manager.nudge_thread."""
+    client, _, services, user = auth_client
+    other = make_user("other", role="member", status="active")
+    own_run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    other_run = Run(id="r2", created_by=other.id, mode="ask", stage="investigating")
+    other_thread = Thread(id="l2", run_id="r2", persona="researcher", status="running")
+    session.add_all([own_run, other_run, other_thread]); session.commit()
+    r = client.post("/threads/l2/nudge", json={"run_id": "r1", "text": "go"})
+    assert r.status_code == 404
+    assert services["run_manager"].nudged == []
+
+
+def test_thread_stop_idor_rejects_other_run_thread(auth_client, session, make_user):
+    """C-09: /threads/{id}/stop must not interrupt a thread that belongs to
+    another run — same ownership guard as nudge."""
+    client, _, services, user = auth_client
+    other = make_user("other", role="member", status="active")
+    own_run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    other_run = Run(id="r2", created_by=other.id, mode="ask", stage="investigating")
+    other_thread = Thread(id="l2", run_id="r2", persona="researcher", status="running")
+    session.add_all([own_run, other_run, other_thread]); session.commit()
+    r = client.post("/threads/l2/stop", json={"run_id": "r1"})
+    assert r.status_code == 404
+    assert not any(msg.get("type") == "interrupt" for _, msg in services["control"].calls)
+
+
+def test_post_intent_send_message_idor_rejects_other_run_thread(auth_client, session, make_user):
+    """C-11: a caller-supplied thread_id on SEND_MESSAGE must belong to the
+    run, otherwise _persist_user_message would corrupt another thread's
+    next_seq and nudge_thread would nudge another user's thread."""
+    client, _, services, user = auth_client
+    other = make_user("other", role="member", status="active")
+    own_run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    other_run = Run(id="r2", created_by=other.id, mode="ask", stage="investigating")
+    other_thread = Thread(id="l2", run_id="r2", persona="researcher", status="running")
+    session.add_all([own_run, other_run, other_thread]); session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"intent": "send_message", "source": "button",
+                          "text": "hi", "thread_id": "l2"})
+    assert r.status_code == 404
+    assert services["run_manager"].nudged == []
+
+
 def test_threads_require_auth(app_client):
     client, _, _ = app_client
     assert client.post("/threads/l1/nudge", json={"run_id": "r1", "text": "x"}).status_code == 401
@@ -869,12 +916,40 @@ def test_post_intent_merge_pr_confirmed(auth_client, session, make_user):
 # --------------------------------------------------------------- thread controls
 def test_post_intent_stop_thread(auth_client, session, make_user):
     client, _, services, user = auth_client
-    session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
-    session.commit()
+    run = Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating")
+    thread = Thread(id="l1", run_id="r1", persona="explorer", status="running")
+    session.add_all([run, thread]); session.commit()
     r = client.post("/runs/r1/intent",
                     json={"intent": "stop_thread", "source": "button", "thread_id": "l1"})
     assert r.status_code == 200
     assert services["run_manager"].stopped_threads == [("r1", "l1")]
+
+
+def test_post_intent_stop_thread_idor_rejects_other_run_thread(auth_client, session, make_user):
+    """C-10: STOP_THREAD must not interrupt a thread that belongs to another
+    run. Pair the caller's own run_id with another run's thread_id — the
+    ownership guard returns 404, never reaching run_manager.stop_thread."""
+    client, _, services, user = auth_client
+    other = make_user("other", role="member", status="active")
+    own_run = Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating")
+    other_run = Run(id="r2", created_by=other.id, mode="agent-rnd", stage="investigating")
+    other_thread = Thread(id="l2", run_id="r2", persona="explorer", status="running")
+    session.add_all([own_run, other_run, other_thread]); session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"intent": "stop_thread", "source": "button", "thread_id": "l2"})
+    assert r.status_code == 404
+    assert services["run_manager"].stopped_threads == []
+
+
+def test_post_intent_stop_thread_rejects_unknown_thread(auth_client, session, make_user):
+    """C-10: a thread_id that doesn't exist is 404, not a silent no-op."""
+    client, _, services, user = auth_client
+    session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
+    session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"intent": "stop_thread", "source": "button", "thread_id": "ghost"})
+    assert r.status_code == 404
+    assert services["run_manager"].stopped_threads == []
 
 
 def test_post_intent_stop_thread_needs_thread_id(auth_client, session, make_user):

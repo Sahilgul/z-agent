@@ -13,6 +13,7 @@ from zagent_contracts import IRREVERSIBLE_INTENTS, ActionKind, IntentSource, Use
 
 from app.db.base import get_session
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 
 READ_ONLY_INTENTS = frozenset({
     ActionKind.REVIEW_PLAN, ActionKind.REVIEW_EVIDENCE, ActionKind.REVIEW_DIFF,
@@ -76,5 +77,22 @@ def load_run_for_user(run_id: str, user_id: int) -> Run | None:
         if run is None or run.created_by != user_id:
             return None
         return run
+    finally:
+        session.close()
+
+
+def load_thread_for_run(run_id: str, thread_id: str) -> Thread | None:
+    """IDOR guard for per-thread controls: a thread is only actionable through
+    the run that owns it. `load_run_for_user` already proved the run belongs to
+    the requesting user; this proves the thread belongs to that run. Without
+    it, /threads/{id}/nudge|stop and the STOP_THREAD/SEND_MESSAGE/NUDGE intents
+    could target ANY thread by pairing the caller's own run_id with another
+    user's thread_id (C-08..C-11)."""
+    session = get_session()
+    try:
+        thread = session.get(Thread, thread_id)
+        if thread is None or thread.run_id != run_id:
+            return None
+        return thread
     finally:
         session.close()

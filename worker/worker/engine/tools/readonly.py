@@ -130,6 +130,35 @@ _READONLY_COMMANDS = re.compile(
     r"python\s+--version|node\s+--version|npm\s+--version|test)\b"
 )
 
+# Shell operators that chain, redirect, or substitute. Read-only mode forbids
+# them outright so a "safe" prefix cannot smuggle a mutating tail past the
+# blocked-command check — `ls; rm -rf ~` and `cat x > /etc/cron.d/evil` are the
+# canonical escapes the old single-string gate let through.
+_CHAIN_OPS = re.compile(r";|&&|\|\||\||&|`|\$\(|\$\{|>>|>|<|\n")
+
+
+def _gate_command(command: str) -> str | None:
+    """Return an error string if the command is unsafe for read-only mode,
+    else None. The old gate checked `_BLOCKED_COMMANDS.search(command) and not
+    _READONLY_COMMANDS.match(command)` — a chained command whose FIRST segment
+    was read-only (e.g. `ls; rm -rf ~`) passed because the readonly prefix
+    matched, so the blocked tail ran under `shell=True`. We now forbid chaining
+    outright and require the whole (single) command to be on the allowlist."""
+    stripped = command.strip()
+    if not stripped:
+        return "error: empty command"
+    if _CHAIN_OPS.search(stripped):
+        return ("error: shell chaining/redirection is blocked in read-only mode "
+                "(run one read-only command at a time).")
+    if _BLOCKED_COMMANDS.search(stripped):
+        return ("error: mutating command blocked in read-only mode. "
+                "Writes arrive with the approval contract.")
+    if not _READONLY_COMMANDS.match(stripped):
+        return ("error: command not on the read-only allowlist "
+                "(ls, cat, head, tail, wc, grep, rg, find, git status/log/diff/show/blame, "
+                "pwd, echo, env, whoami, <tool> --version, test).")
+    return None
+
 
 @tool
 def terminal_exec(command: str) -> str:
@@ -137,13 +166,12 @@ def terminal_exec(command: str) -> str:
 
     Mutating commands (rm, git commit, pip install, etc.) are blocked until
     the approval contract ships. Read-only commands (ls, cat, git
-    status, grep, rg, find) run directly.
+    status, grep, rg, find) run directly. Shell chaining/redirection is
+    forbidden so a read-only prefix can't smuggle a mutating tail through.
     """
-    if not command or not command.strip():
-        return "error: empty command"
-    if _BLOCKED_COMMANDS.search(command) and not _READONLY_COMMANDS.match(command.strip()):
-        return ("error: mutating command blocked in Phase 2 (read-only mode). "
-                "Writes arrive in Phase 3 with the approval contract.")
+    err = _gate_command(command)
+    if err is not None:
+        return err
     try:
         proc = subprocess.run(
             command, shell=True, check=False, capture_output=True, text=True,

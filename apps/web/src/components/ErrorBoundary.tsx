@@ -4,20 +4,36 @@ import { useAppTranslation } from "@/i18n";
 
 interface Props {
   children: ReactNode;
+  /** When this key changes, the boundary clears any caught error and
+   *  re-renders its children — so a screen error doesn't trap the whole
+   *  session after the user navigates away (C-18). The router passes the
+   *  current pathname so navigation resets the boundary. */
+  resetKey?: string;
 }
 interface State {
   hasError: boolean;
   message: string;
+  resetKey: string | undefined;
 }
 
 /** Top-level error boundary — prevents a single screen crash from
  *  whitescreening the whole app. Renders a token-styled fallback with a
  *  reload action; runs are safe server-side. */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: "" };
+  state: State = { hasError: false, message: "", resetKey: undefined };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, message: error.message };
+  }
+
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    // Clear the caught error when the resetKey changes (navigation), so the
+    // boundary re-renders children on the new route instead of staying
+    // stuck on the fallback forever (C-18).
+    if (props.resetKey !== state.resetKey) {
+      return { hasError: false, message: "", resetKey: props.resetKey };
+    }
+    return null;
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
