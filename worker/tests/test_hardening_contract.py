@@ -237,6 +237,164 @@ async def test_rollback_drill_compaction_preserves_protected():
     assert "user-1" in contents
 
 
+@pytest.mark.asyncio
+async def test_compaction_rolls_back_when_protected_message_dropped(monkeypatch):
+    """G-02: the honesty validator's rollback branch is unreachable under the
+    current _PRUNE_ORDER — protected origins (SYSTEM/USER/NUDGE) are never
+    pruned, so a protected message always survives and `missing` is always
+    empty. Force the branch by temporarily admitting a protected origin
+    (USER) into the prune order so a USER message in the prunable span gets
+    dropped; the validator must catch it, roll back, and leave the
+    conversation intact (original list, unchanged, after_tokens == before_tokens)."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from worker.engine import compaction as comp_mod
+
+    monkeypatch.setattr(
+        comp_mod, "_PRUNE_ORDER",
+        [PromptOrigin.TOOL, PromptOrigin.ENVELOPE, PromptOrigin.MEMORY,
+         PromptOrigin.ASSISTANT, PromptOrigin.USER],
+    )
+    compactor = Compactor(policy=CompactionPolicy(context_limit=10, recent_window=1, floor_messages=1))
+    user_msg = tag_message(HumanMessage(content="user-1"), PromptOrigin.USER)  # type: ignore[arg-type]
+    messages = [
+        tag_message(SystemMessage(content="system"), PromptOrigin.SYSTEM),  # type: ignore[arg-type]
+        user_msg,
+        *[tag_message(AIMessage(content=f"a{i}" * 20), PromptOrigin.ASSISTANT) for i in range(20)],  # type: ignore[arg-type]
+        tag_message(HumanMessage(content="recent"), PromptOrigin.USER),  # type: ignore[arg-type]
+    ]
+    new, result = await compactor.compact(messages)
+    assert result.rolled_back is True
+    assert "protected message changed/dropped" in result.rollback_reason
+    # The conversation is left intact: the original list is returned unchanged.
+    assert new is messages
+    assert result.after_tokens == result.before_tokens
+
+
+@pytest.mark.asyncio
+async def test_publish_events_swallows_sink_failure():
+    """G-03: _publish_events must not crash the graph when the event sink
+    raises — the failure is logged and swallowed (events are best-effort;
+    a sink blip must not kill the turn). Covers the except-branch at
+    graph.py:_publish_events."""
+    from worker.engine.graph import _publish_events
+
+    async def boom(_events):
+        raise RuntimeError("sink down")
+
+    config = {"configurable": {"event_sink": boom}}
+    events = [StepEvent(run_id="r1", thread_id="t1", seq=0,
+                        kind=StepKind.MESSAGE, title="turn")]
+    # Must not raise — the sink failure is swallowed.
+    await _publish_events(config, events)
+
+
+@pytest.mark.asyncio
+async def test_publish_events_noop_without_sink_or_events():
+    """G-03: the no-sink and no-events early returns are covered (the
+    guard at the top of _publish_events)."""
+    from worker.engine.graph import _publish_events
+
+    async def sink(_events):
+        return None
+
+    # No events -> early return, sink not called.
+    await _publish_events({"configurable": {"event_sink": sink}}, [])
+    # No sink -> early return.
+    await _publish_events({"configurable": {}},
+                          [StepEvent(run_id="r1", thread_id="t1", seq=0,
+                                     kind=StepKind.MESSAGE, title="x")])
+    # Sink None -> early return.
+    await _publish_events({"configurable": {"event_sink": None}},
+                          [StepEvent(run_id="r1", thread_id="t1", seq=0,
+                                     kind=StepKind.MESSAGE, title="x")])
+
+
+@pytest.mark.asyncio
+async def test_agent_node_mid_stream_llm_failure_emits_partial_delta_then_errors(monkeypatch):
+    """G-04: a mid-stream LLM failure (after partial deltas) is NOT retried
+    (the turn fails, by design — H-11). The partial delta must reach the
+    delta_sink, and the node returns {error, done=True} — NOT
+    needs_compaction (the failure isn't a context overflow)."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from worker.engine.events import EventEmitter
+    from worker.engine.graph import agent_node
+    from worker.engine.state import Budget, Mode, tag_message
+
+    class MidStreamFailingLLM:
+        """Yields one chunk (a partial delta) then raises mid-stream."""
+        def astream(self, messages, stream_mode: str = "messages"):
+            async def _gen():
+                yield AIMessage(content="partial delta text")
+                raise RuntimeError("mid-stream boom")
+            return _gen()
+
+    monkeypatch.setattr("worker.engine.graph.make_llm",
+                        lambda *a, **k: MidStreamFailingLLM())
+    # No tools needed for this failure-path test.
+    monkeypatch.setattr("worker.engine.graph._bound_tools", lambda *a, **k: [])
+
+    deltas: list[str] = []
+
+    async def delta_sink(delta):
+        deltas.append(delta.text)
+
+    config = {"configurable": {
+        "model": "kimi-foundry",
+        "emitter": EventEmitter("run-1", "t-1"),
+        "delta_sink": delta_sink,
+        "thread_id": "t-1",
+    }}
+    state = {
+        "run_id": "run-1", "thread_id": "t-1", "context_id": "t-1",
+        "task_id": "task-1", "mode": Mode.DEVELOPMENT, "autonomy": "autonomous",
+        "budget": Budget(cap=5.0),
+        "messages": [tag_message(HumanMessage(content="do the work"), "user")],
+        "done": False, "error": None,
+        "approved_calls": {}, "denial_streak": 0, "tool_streak": {},
+        "turn_count": 0, "compaction_count": 0, "compaction_retries": 0,
+    }
+    result = await agent_node(state, config)
+    assert result.get("done") is True
+    assert "mid-stream boom" in result.get("error", "")
+    assert "needs_compaction" not in result
+    assert deltas == ["partial delta text"]
+
+
+@pytest.mark.asyncio
+async def test_tools_node_rejects_invalid_mode_request_target():
+    """G-05: a mode_request with an invalid target_mode is rejected at the
+    graph level (the tools_node) — the agent sees an error ToolMessage
+    naming the bad mode and the valid set, and the run's mode does NOT
+    change. Covers the `target not in valid` branch in tools_node."""
+    from langchain_core.messages import AIMessage, ToolMessage
+    from worker.engine.events import EventEmitter
+    from worker.engine.graph import tools_node
+    from worker.engine.state import Mode, tag_message
+
+    emitter = EventEmitter("run-1", "t-1")
+    config = {"configurable": {"emitter": emitter, "thread_id": "t-1"}}
+    ai = tag_message(AIMessage(
+        content="",
+        tool_calls=[{"id": "tc1", "name": "mode_request",
+                      "args": {"target_mode": "bogus"}}],
+    ), "assistant")
+    state = {
+        "run_id": "run-1", "thread_id": "t-1", "context_id": "t-1",
+        "task_id": "task-1", "mode": Mode.DEVELOPMENT, "autonomy": "supervised",
+        "messages": [ai],
+        "approved_calls": {},  # no gate decision -> approved path
+        "done": False,
+    }
+    out = await tools_node(state, config)
+    new_msgs = out.get("messages", [])
+    tool_msgs = [m for m in new_msgs if isinstance(m, ToolMessage)]
+    assert tool_msgs, "expected a ToolMessage for the rejected mode_request"
+    assert "unknown mode" in tool_msgs[-1].content
+    assert "bogus" in tool_msgs[-1].content
+    # The run's mode was NOT changed (no `mode` key in the node output).
+    assert "mode" not in out
+
+
 # --- SLO evaluation ---
 
 def test_slo_passes_on_healthy_soak():
