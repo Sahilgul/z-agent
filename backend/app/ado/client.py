@@ -68,16 +68,27 @@ class AdoClient:
     async def resolve_identity(self, email: str) -> AdoIdentity:
         """ADO Graph: email -> descriptor. FAIL-LOUD on 0 or 2+ matches."""
         graph_base = f"https://vssps.dev.azure.com/{self.org}"
+        matches: list = []
+        continuation_token: str | None = None
         async with self._client() as c:
-            r = await c.get(
-                f"{graph_base}/_apis/graph/users",
-                params={"api-version": "7.1-preview.1"},
-            )
-            r.raise_for_status()
-            matches = [
-                u for u in r.json().get("value", [])
-                if (u.get("mailAddress") or "").lower() == email.lower()
-            ]
+            # H-46: the Graph API pages users via continuationToken. The
+            # old code read only the FIRST page, so a valid user past page 1
+            # was unresolvable ("no ADO identity"). Loop pages until the
+            # token is absent, collecting matches across all pages.
+            while True:
+                params = {"api-version": "7.1-preview.1"}
+                if continuation_token:
+                    params["continuationToken"] = continuation_token
+                r = await c.get(f"{graph_base}/_apis/graph/users", params=params)
+                r.raise_for_status()
+                data = r.json()
+                matches.extend(
+                    u for u in data.get("value", [])
+                    if (u.get("mailAddress") or "").lower() == email.lower()
+                )
+                continuation_token = data.get("continuationToken")
+                if not continuation_token:
+                    break
         if len(matches) == 0:
             raise IdentityResolutionError(f"no ADO identity for {email}")
         if len(matches) > 1:

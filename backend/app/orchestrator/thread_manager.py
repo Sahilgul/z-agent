@@ -127,7 +127,7 @@ class ThreadManager:
             thread.gateway_key = vk.key
             thread.gateway_key_alias = vk.alias
         except Exception as exc:  # gateway-down: fail safe before container start
-            self._mark(thread.id, "failed")
+            await self._mark(thread.id, "failed")
             raise ThreadSpawnError(f"gateway key mint failed: {exc}") from exc
 
         permission_mode = permission_mode_for(run.autonomy)
@@ -139,7 +139,7 @@ class ThreadManager:
                 resume_from_thread_id=resume_from_thread_id,
             )
         except Exception as exc:
-            self._mark(thread.id, "failed")
+            await self._mark(thread.id, "failed")
             raise ThreadSpawnError(f"container start failed: {exc}") from exc
 
         session = get_session()
@@ -223,7 +223,26 @@ class ThreadManager:
             except Exception as exc:
                 log.warning("key release failed", thread_id=thread_id, error=str(exc)[:120])
 
-    def _mark(self, thread_id: str, status: str) -> None:
+    async def _mark(self, thread_id: str, status: str) -> None:
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            if thread:
+                thread.status = status
+                session.commit()
+        finally:
+            session.close()
+        # H-36: release the minted LiteLLM key when the thread reaches a
+        # terminal state. The old _mark never called release_key, so every
+        # minted key (and its unsettled cost) leaked — the gateway held
+        # the key forever even after the thread died.
+        if status in ("completed", "failed", "stopped"):
+            await self.release_key(thread_id)
+
+    def _mark_sync(self, thread_id: str, status: str) -> None:
+        """Sync variant for contexts that can't await (sets status only;
+        key release is best-effort and picked up by the next terminal
+        transition or reconcile)."""
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)

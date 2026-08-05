@@ -34,7 +34,15 @@ def compute_available_actions(run: Run) -> list[str]:
     return ACTIONS_BY_STAGE.get(run.stage, [])
 
 
-def transition(run: Run, stage: RunStage) -> Run:
+def transition(run: Run, stage: RunStage, *, allow_terminal_exit: bool = False) -> Run:
+    # H-41: a terminal run (COMPLETED/FAILED/ABANDONED) must not be
+    # re-transitioned by stop/abandon/kill_replace — the old code had no
+    # guard, so a stop on an already-COMPLETED run resurrected it to
+    # INTERRUPTED. Resume is the only legitimate exit from a terminal
+    # state, so it passes allow_terminal_exit=True.
+    if run.stage in TERMINAL_STAGES and not allow_terminal_exit:
+        raise ValueError(
+            f"cannot transition terminal run ({run.stage}) -> {stage.value}")
     run.stage = stage.value
     run.available_actions = compute_available_actions(run)
     return run

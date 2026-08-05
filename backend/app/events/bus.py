@@ -97,7 +97,27 @@ class IngestConsumer:
             for stream, messages in results or []:
                 run_id = stream.removeprefix(STREAM_PREFIX)
                 for msg_id, fields in messages:
-                    await self._process(stream, msg_id, fields, run_id)
+                    try:
+                        await self._process(stream, msg_id, fields, run_id)
+                    except Exception as exc:  # H-43: a single bad event must
+                        # not kill the ingest consumer for ALL runs. The old
+                        # code let a DB error (or any non-validation exception
+                        # from _process) propagate out of the loop, terminating
+                        # the whole consumer. Dead-letter + ack the poison
+                        # message (moved, not re-processed forever) and keep
+                        # draining the other runs.
+                        try:
+                            await self.redis.xadd(stream + DEADLETTER_SUFFIX, {
+                                "original_id": msg_id,
+                                "error": f"consumer: {str(exc)[:400]}",
+                                "payload": fields.get("payload", ""),
+                            })
+                            await self.redis.xack(stream, GROUP, msg_id)
+                        except Exception as inner:  # noqa: BLE001 — Redis itself down
+                            log.error("dead-letter write failed; message will be retried",
+                                     stream=stream, msg_id=msg_id, error=str(inner)[:200])
+                        log.error("event consumer error dead-lettered",
+                                 stream=stream, msg_id=msg_id, error=str(exc)[:200])
 
     async def _process(self, stream: str, msg_id: str, fields: dict, run_id: str) -> None:
         try:

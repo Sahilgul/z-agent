@@ -100,3 +100,17 @@ def start_fetch_loop() -> BackgroundScheduler:
     _scheduler.start()
     log.info("golden fetch loop started", interval_s=settings.fetch_interval_seconds)
     return _scheduler
+
+
+def stop_fetch_loop() -> None:
+    """H-45: shut the fetch scheduler down on app teardown. The old
+    lifespan never stopped it, so the BackgroundScheduler kept firing
+    fetch_all during shutdown — racing the workspace shred and writing
+    to a half-torn-down DB."""
+    global _scheduler
+    if _scheduler is not None:
+        try:
+            _scheduler.shutdown(wait=False)
+        except Exception as exc:  # noqa: BLE001 — already shutting down
+            log.warning("fetch scheduler shutdown failed", error=str(exc)[:200])
+        _scheduler = None

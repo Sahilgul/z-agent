@@ -41,12 +41,26 @@ def should_attempt(pr_id: int, signature: str, trigger_name: str) -> tuple[bool,
                 .filter(TriggerEventLog.status == "matched",
                         TriggerEventLog.received_at >= since)
                 .order_by(TriggerEventLog.id).all())
-        attempts = [entry for entry in logs
-                    if (entry.payload or {}).get("trigger_name") == trigger_name
-                    and (entry.payload or {}).get("pr_id") == pr_id]
+        # H-25: a matched log row now stores its per-trigger verdicts under
+        # payload["verdicts"] (each carrying trigger + log_payload with
+        # pr_id/failure_signature). The old code read top-level
+        # payload.trigger_name/pr_id, which is gone, so the breaker never
+        # counted attempts and never tripped. Count from the verdicts list
+        # with a legacy fallback to the top-level fields.
+        attempts: list[dict] = []
+        for entry in logs:
+            payload = entry.payload or {}
+            verdicts = payload.get("verdicts")
+            if verdicts:
+                for v in verdicts:
+                    lp = v.get("log_payload") or {}
+                    if v.get("trigger") == trigger_name and lp.get("pr_id") == pr_id:
+                        attempts.append({"failure_signature": lp.get("failure_signature")})
+            elif payload.get("trigger_name") == trigger_name and payload.get("pr_id") == pr_id:
+                attempts.append({"failure_signature": payload.get("failure_signature")})
         if len(attempts) >= get_settings().guardian_max_attempts:
             return False, "max_attempts"
-        if attempts and (attempts[-1].payload or {}).get("failure_signature") == signature:
+        if attempts and attempts[-1]["failure_signature"] == signature:
             return False, "repeated_signature"
         return True, ""
     finally:

@@ -149,12 +149,22 @@ async def onboard(repo_id: int, relay=None) -> None:
             session.commit()
         finally:
             session.close()
-        if relay:
-            await relay.publish_global({"type": "repo_added", "repo": name})
         log.info("repo onboarded", repo=name, branch=branch)
     except Exception as exc:
         _set_status(repo_id, RepoStatus.ERROR, str(exc)[:300])
         log.error("repo onboarding failed", repo=name, error=str(exc)[:200])
+        return
+    # H-28: the relay publish used to sit INSIDE the onboarding try block, so
+    # a transient relay/Redis failure fell into the except and flipped an
+    # already-READY_NO_MAP repo to ERROR. Publish after success and swallow
+    # relay errors — the repo is ready; the repo_added notification is
+    # non-fatal and will be re-sent on the next fetch.
+    if relay:
+        try:
+            await relay.publish_global({"type": "repo_added", "repo": name})
+        except Exception as exc:
+            log.warning("repo_added relay failed (non-fatal)",
+                       repo=name, error=str(exc)[:200])
 
 
 def archive_repo(repo_id: int) -> None:

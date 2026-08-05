@@ -240,6 +240,24 @@ def _recent_active_run(trigger: Trigger, event: TriggerEvent) -> str | None:
         for entry in logs:
             run = session.get(Run, entry.run_id)
             if run and run.stage not in TERMINAL_STAGES:
+                # H-26: scope the coalescence to THIS trigger. The old code
+                # coalesced into ANY active run for the work item, so a
+                # dev-mode trigger nudged a plan-mode run (wrong mode) and
+                # one trigger's flap window captured another trigger's run.
+                # Match the run's mode to the trigger's mode AND require the
+                # prior matched log to have been started by this trigger
+                # (verdicts list, or legacy top-level trigger_name).
+                if run.mode != trigger.mode:
+                    continue
+                payload = entry.payload or {}
+                verdicts = payload.get("verdicts")
+                if verdicts:
+                    if not any(v.get("trigger") == trigger.name
+                              and v.get("status") == "started"
+                              and v.get("run_id") == run.id for v in verdicts):
+                        continue
+                elif payload.get("trigger_name") != trigger.name:
+                    continue
                 return run.id
         return None
     finally:
@@ -258,8 +276,21 @@ def _rate_limited(trigger) -> bool:
         logs = (session.query(TriggerEventLog)
                 .filter(TriggerEventLog.status == "matched",
                         TriggerEventLog.received_at >= since).all())
-        count = sum(1 for entry in logs
-                    if (entry.payload or {}).get("trigger_name") == trigger.name)
+        # H-25: a single event may match multiple triggers; the log row now
+        # stores ALL verdicts under payload["verdicts"] (each with its own
+        # trigger name). Count this trigger's STARTED verdicts across rows,
+        # falling back to the legacy top-level payload["trigger_name"] for
+        # rows written before the fix.
+        count = 0
+        for entry in logs:
+            payload = entry.payload or {}
+            verdicts = payload.get("verdicts")
+            if verdicts:
+                count += sum(1 for v in verdicts
+                            if v.get("trigger") == trigger.name
+                            and v.get("status") == "started")
+            elif payload.get("trigger_name") == trigger.name:
+                count += 1
         return count >= trigger.rate_limit_per_hour
     finally:
         session.close()
@@ -307,7 +338,6 @@ async def process(event: TriggerEvent, run_manager) -> dict:
             else:
                 owner_id = identity.resolve_descriptor(event.changed_by_descriptor)
             if owner_id is None:
-                _set_log(log_id, status="failed")
                 verdicts.append({"trigger": trigger.name, "status": "failed",
                                  "reason": "unresolved_identity"})
                 continue
@@ -317,35 +347,50 @@ async def process(event: TriggerEvent, run_manager) -> dict:
             thread_id = _lead_thread_id(active)
             if thread_id:
                 await run_manager.nudge_thread(active, thread_id, _nudge_text(event))
-            _set_log(log_id, status="matched", run_id=active,
-                     resolved_user_id=owner_id, payload={**event.payload, "trigger_name": trigger.name})
-            verdicts.append({"trigger": trigger.name, "status": "nudged", "run_id": active})
+            verdicts.append({"trigger": trigger.name, "status": "nudged",
+                             "run_id": active, "resolved_user_id": owner_id})
             continue
 
         if _rate_limited(trigger):  # guardrail 3 — queue, drain later
-            _set_log(log_id, status="queued", resolved_user_id=owner_id,
-                     payload={**event.payload, "trigger_name": trigger.name})
-            verdicts.append({"trigger": trigger.name, "status": "queued"})
+            verdicts.append({"trigger": trigger.name, "status": "queued",
+                             "resolved_user_id": owner_id})
             continue
 
         if handler is not None:
             verdict = await handler(event, trigger, run_manager)
             extra = verdict.pop("log_payload", {})
-            _set_log(log_id,
-                     status="matched" if verdict.get("run_id") else verdict.get("status", "ignored"),
-                     run_id=verdict.get("run_id"),
-                     payload={**event.payload, "trigger_name": trigger.name, **extra})
-            verdicts.append({"trigger": trigger.name, **verdict})
+            verdicts.append({"trigger": trigger.name, **verdict,
+                             "log_payload": {**event.payload, "trigger_name": trigger.name, **extra}})
             continue
 
         run = await run_manager.create_run(  # guardrail 4: GATED, always
             source="trigger", initiated_by=owner_id, mode_name=trigger.mode,
             task=_task_text(event), work_item_id=int(event.external_id),
             autonomy="gated")
-        _set_log(log_id, status="matched", run_id=run.id, resolved_user_id=owner_id,
-                 payload={**event.payload, "trigger_name": trigger.name})
-        verdicts.append({"trigger": trigger.name, "status": "started", "run_id": run.id})
-    return {"status": "matched", "verdicts": verdicts}
+        verdicts.append({"trigger": trigger.name, "status": "started",
+                         "run_id": run.id, "resolved_user_id": owner_id})
+    # H-25: write the dedupe log ONCE with ALL verdicts. The old code called
+    # _set_log per trigger, overwriting the single row — only the last
+    # trigger's outcome survived, so the audit trail lost every earlier
+    # trigger and _rate_limited undercounted (idempotency loss). Each
+    # verdict carries its own trigger name + run_id; the payload keeps a
+    # per-trigger trigger_name map for legacy readers. The row STATUS must
+    # reflect the verdicts: all-queued -> "queued" (so drain_queued finds
+    # it), all-failed -> "failed", else "matched" (started/nudged).
+    started = [v for v in verdicts if v.get("status") == "started"]
+    if not verdicts:
+        status = "ignored"
+    elif all(v.get("status") == "queued" for v in verdicts):
+        status = "queued"
+    elif all(v.get("status") == "failed" for v in verdicts):
+        status = "failed"
+    else:
+        status = "matched"
+    _set_log(log_id,
+             status=status,
+             run_id=started[0]["run_id"] if started else None,
+             payload={"verdicts": verdicts, **event.payload})
+    return {"status": status, "verdicts": verdicts}
 
 
 class _RowView:
@@ -387,6 +432,20 @@ def _nudge_text(event: TriggerEvent) -> str:
             "your current work — do not restart.")
 
 
+def _queued_trigger_name(payload: dict | None) -> str | None:
+    """H-25: a queued log row stores its verdict under payload["verdicts"][*]
+    ("trigger"); legacy rows stored it at top-level payload["trigger_name"]."""
+    if not payload:
+        return None
+    verdicts = payload.get("verdicts")
+    if verdicts:
+        for v in verdicts:
+            if v.get("status") == "queued":
+                return v.get("trigger")
+        return verdicts[0].get("trigger") if verdicts else None
+    return payload.get("trigger_name")
+
+
 async def drain_queued(run_manager, limit: int = 5) -> list[dict]:
     """Start queued (rate-limited) events as capacity returns — oldest first,
     each still under its trigger's hourly cap."""
@@ -396,9 +455,12 @@ async def drain_queued(run_manager, limit: int = 5) -> list[dict]:
                   .order_by(TriggerEventLog.id).limit(limit).all())
         items = [{
             "log_id": q.id, "external_id": q.external_id,
-            "trigger_name": (q.payload or {}).get("trigger_name"),
+            # H-25: the trigger name now lives under payload["verdicts"][*]
+            # ("trigger"), with a legacy fallback to top-level trigger_name.
+            "trigger_name": _queued_trigger_name(q.payload),
             "resolved_user_id": q.resolved_user_id,
             "revision": q.revision, "payload": q.payload,
+            "event_type": q.event_type,
         } for q in queued]
     finally:
         session.close()
@@ -419,7 +481,11 @@ async def drain_queued(run_manager, limit: int = 5) -> list[dict]:
             continue
         event = TriggerEvent(
             source=TriggerSource.ADO_WEBHOOK, external_id=item["external_id"],
-            revision=item["revision"], event_type="work_item.updated",
+            revision=item["revision"],
+            # H-27: use the queued event's ACTUAL type — the old code hardcoded
+            # "work_item.updated", so a queued build/pr event drained into the
+            # work_item handler (wrong task text, wrong routing).
+            event_type=item["event_type"] or "work_item.updated",
             payload=item["payload"] or {})
         run = await run_manager.create_run(
             source="trigger", initiated_by=item["resolved_user_id"],

@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Known-insecure shipped secrets — rejected in any non-dev deployment.
 _INSECURE_JWT_SECRETS = frozenset({"", "dev-only-change-me"})
+_INSECURE_PAT_KEYS = frozenset({"", "dev-only-byo-pat-key"})
 
 
 class Settings(BaseSettings):
@@ -116,7 +117,10 @@ class Settings(BaseSettings):
 
     # BYO-PAT: local-era at-rest encryption key; Key Vault
     # takes over at the VM move. Empty disables BYO-PAT storage.
-    byo_pat_encryption_key: str = "dev-only-byo-pat-key"
+    # H-44: no shipped default — the old "dev-only-byo-pat-key" let anyone
+    # with DB access decrypt every stored PAT. Set
+    # ZAGENT_BYO_PAT_ENCRYPTION_KEY in any real deploy (enforced below).
+    byo_pat_encryption_key: str = ""
 
     # Triggers engine: webhook HMAC secret (empty = ingress
     # rejects everything, fail-closed), the service account's OWN ADO descriptor
@@ -159,6 +163,16 @@ class Settings(BaseSettings):
                 "ZAGENT_JWT_SECRET must be set to a non-default secret "
                 "(it is currently empty or the shipped 'dev-only-change-me'). "
                 "Set ZAGENT_JWT_SECRET in the environment/.env, or set "
+                "ZAGENT_DEV_INSECURE_DEFAULTS=1 only for local dev."
+            )
+        # H-44: a shipped/empty byo_pat_encryption_key lets anyone with DB
+        # access decrypt every stored PAT. Fail fast at startup in any
+        # non-dev deploy that forgot ZAGENT_BYO_PAT_ENCRYPTION_KEY.
+        if not self.dev_insecure_defaults and self.byo_pat_encryption_key in _INSECURE_PAT_KEYS:
+            raise ValueError(
+                "ZAGENT_BYO_PAT_ENCRYPTION_KEY must be set to a non-default key "
+                "(it is currently empty or the shipped 'dev-only-byo-pat-key'). "
+                "Set ZAGENT_BYO_PAT_ENCRYPTION_KEY in the environment/.env, or set "
                 "ZAGENT_DEV_INSECURE_DEFAULTS=1 only for local dev."
             )
         return self

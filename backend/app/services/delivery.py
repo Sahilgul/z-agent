@@ -47,7 +47,12 @@ def branch_name_for(run: Run, thread: Thread | None = None) -> str:
     """Branch format agent/<run8>-<slug> — the agent/* namespace is what the
     ADO branch policies grant write access to; any other prefix fails."""
     slug = BRANCH_RE.sub("-", run.title.lower())[:32].strip("-") or "change"
-    suffix = f"/{thread.id[:8]}" if thread else ""
+    # H-30: a thread suffix used to be "/<thread8>", producing a TWO-level
+    # branch (agent/<run8>-<slug>/<thread8>) — but the ADO branch policy
+    # grants write to agent/* (a single-segment wildcard), which does NOT
+    # match agent/foo/bar. Keep the branch one level under agent/ with a
+    # hyphen suffix so the policy still grants write.
+    suffix = f"-{thread.id[:8]}" if thread else ""
     return f"agent/{run.id[:8]}-{slug}{suffix}"
 
 

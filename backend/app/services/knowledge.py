@@ -99,6 +99,25 @@ def mined_run_ids() -> set[str]:
         session.close()
 
 
+def mark_mined(run_id: str, user_id: int) -> None:
+    """Mark a run as mined by the distiller WITHOUT drafting a candidate
+    (H-31). A KnowledgeItem with source_run_id puts the run in
+    mined_run_ids so it isn't re-mined every night. No Approval card is
+    created (this is a mining marker, not a draft for review) and the
+    status is "rejected" so it never promotes into the shared corpus."""
+    session = get_session()
+    try:
+        item = KnowledgeItem(
+            content="(distiller mined — no candidate)", trigger_description="",
+            scope="user", created_by=user_id, source_run_id=run_id,
+            status="rejected",
+        )
+        session.add(item)
+        session.commit()
+    finally:
+        session.close()
+
+
 def pending() -> list[dict]:
     """Draft items, team-wide (shared-by-design exception: the corpus and
     its approval cards are visible to every teammate)."""
@@ -133,13 +152,21 @@ def _resolve_linked_approval(session, item: KnowledgeItem, decision: str,
                              decided_by: int) -> None:
     if not item.source_run_id:
         return
-    card = (session.query(Approval)
+    # H-29: a run can have MULTIPLE pending knowledge approvals (one per
+    # draft). The old .one_or_none() raised MultipleResultsFound on the
+    # second draft's approval, leaving the PHI checkpoint deadlocked.
+    # Query all pending knowledge cards for the run and match the
+    # specific item_id in Python (payload is JSON; the item_id filter is
+    # dialect-neutral here).
+    cards = (session.query(Approval)
             .filter_by(run_id=item.source_run_id, kind="knowledge", decision=None)
-            .one_or_none())
-    if card is not None and card.payload.get("item_id") == item.id:
-        card.decision = decision
-        card.decided_by = decided_by
-        card.decided_at = datetime.now(timezone.utc)
+            .all())
+    for card in cards:
+        if card.payload.get("item_id") == item.id:
+            card.decision = decision
+            card.decided_by = decided_by
+            card.decided_at = datetime.now(timezone.utc)
+            break
 
 
 def approve(item_id: int, scope: str, decided_by: int,

@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI):
     await ingest.stop()
     await approval_service.stop()
     await heartbeat_persister.stop()
+    # H-45: shut the fetch scheduler down so it doesn't fire during teardown.
+    from app.sandbox.fetcher import stop_fetch_loop
+    stop_fetch_loop()
     await relay.close()
     await control.close()
 

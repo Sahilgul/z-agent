@@ -81,7 +81,12 @@ class AskBlueprint(Blueprint):
                 status = thread.status if thread else "failed"
             finally:
                 session.close()
-            if status in ("idle", "completed", "failed", "stopped"):
+            if status in ("idle", "completed", "failed", "stopped",
+                          # H-38: interrupted (nudge/stop) and replaced
+                          # (kill-replace) are terminal too — the old set
+                          # omitted them so the await loop never returned
+                          # and the blueprint stuck forever.
+                          "interrupted", "replaced"):
                 return
             await asyncio.sleep(poll_seconds)
 
@@ -96,6 +101,15 @@ class AskBlueprint(Blueprint):
                 if thread and thread.status == "failed":
                     transition(run, RunStage.FAILED)
                     session.commit()
+                    # H-39: this node's stage is COMPLETED, so the UI was
+                    # already told "completed"; overriding to FAILED without
+                    # re-publishing left the UI showing "completed" while
+                    # the DB said FAILED. Re-publish the FAILED stage (best-
+                    # effort: the unit test calls _complete without a relay).
+                    relay = ctx.services.get("relay")
+                    if relay is not None:
+                        await relay.publish_run_stage(
+                            run.id, RunStage.FAILED.value, run.available_actions)
                     return
                 # Trajectory summaries written FROM DAY ONE (distiller history).
                 session.add(TrajectorySummary(

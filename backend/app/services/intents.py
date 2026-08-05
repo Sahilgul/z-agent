@@ -9,6 +9,8 @@ buttons execute directly. Irreversible intents always require confirmed=true.
 
 from __future__ import annotations
 
+import re
+
 from zagent_contracts import IRREVERSIBLE_INTENTS, ActionKind, IntentSource, UserIntent
 
 from app.db.base import get_session
@@ -43,7 +45,13 @@ def classify_text(run: Run, text: str) -> UserIntent | None:
         ActionKind.STOP_RUN: ("stop", "halt"),
     }
     for kind, phrases in keyword_map.items():
-        if kind.value in available and any(p in lowered for p in phrases):
+        # H-35: word-boundary match, not substring. The old `p in lowered`
+        # made "disapprove" match "approve" (-> APPROVE_PLAN) and "no, redo"
+        # match "no" — inverting user intent. \b on both ends of the phrase
+        # requires a real word boundary, so "disapprove" no longer hits
+        # "approve" and "I approve this" still does.
+        if kind.value in available and any(
+                re.search(rf"\b{re.escape(p)}\b", lowered) for p in phrases):
             return UserIntent(run_id=run.id, intent=kind, source=IntentSource.TEXT, text=text)
     return None
 

@@ -28,6 +28,7 @@ os.environ.setdefault("ZAGENT_ADO_ORG", "testorg")
 os.environ.setdefault("ZAGENT_ADO_PROJECT", "testproj")
 os.environ.setdefault("ZAGENT_FETCH_PAT", "fetch-pat")
 os.environ.setdefault("ZAGENT_FLEET_PAT", "fleet-pat")
+os.environ.setdefault("ZAGENT_BYO_PAT_ENCRYPTION_KEY", "test-byo-pat-key")  # H-44
 os.environ.setdefault("ZAGENT_GLOBAL_LANE_CAP", "12")
 os.environ.setdefault("ZAGENT_DEFAULT_LANE_BUDGET_USD", "5.0")
 
@@ -405,6 +406,7 @@ class FakeRunManager:
         self.pinned: list[tuple] = []
         self.replaced: list[tuple] = []
         self.continued: list[str] = []
+        self.resumed: list[str] = []
         self.replanned: list[tuple] = []
         self.prs_opened: list[str] = []
         self.prs_merged: list[tuple] = []
@@ -433,6 +435,15 @@ class FakeRunManager:
 
     async def continue_to_development(self, run_id):
         self.continued.append(run_id)
+
+    async def resume_run(self, run_id, initiated_by):
+        # H-22: resume continues the SAME run row (no fresh run created).
+        from app.services.runs import transition
+        from zagent_contracts import RunStage
+        run = Run(id=run_id, created_by=initiated_by, mode="ask", title="resumed")
+        transition(run, RunStage.QUEUED)
+        self.resumed.append(run_id)
+        return run
 
     async def replan(self, run_id, notes=""):
         self.replanned.append((run_id, notes))

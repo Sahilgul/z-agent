@@ -704,7 +704,7 @@ def test_decide_approval(auth_client, session, make_user):
 
 def test_decide_approval_not_found(auth_client):
     client, _, _, _ = auth_client
-    r = client.post("/approvals/ghost/decide", json={"decision": "denied"})
+    r = client.post("/approvals/ghost/decide", json={"decision": "deny"})
     assert r.status_code == 404
 
 
@@ -715,7 +715,7 @@ def test_decide_approval_other_user_hidden(auth_client, session, make_user):
     thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
     ap = Approval(id="a1", run_id="r1", thread_id="l1", kind="bash", payload={})
     session.add_all([run, thread, ap]); session.commit()
-    r = client.post("/approvals/a1/decide", json={"decision": "denied"})
+    r = client.post("/approvals/a1/decide", json={"decision": "deny"})
     assert r.status_code == 404
 
 
@@ -822,8 +822,11 @@ def test_session_resume(auth_client, session, make_user):
     assert r.status_code == 200
     body = r.json()
     assert body["continues"] == "r1"
-    assert body["run_id"]
-    assert services["run_manager"].created
+    # H-22: resume continues the SAME run row (no fresh run), so run_id is
+    # the original id and the manager records a resume, not a create.
+    assert body["run_id"] == "r1"
+    assert services["run_manager"].resumed == ["r1"]
+    assert services["run_manager"].created == []
 
 
 def test_session_resume_not_found(auth_client):

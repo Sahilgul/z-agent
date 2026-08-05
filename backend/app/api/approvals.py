@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.deps import current_user
 from app.db.base import get_session
@@ -17,10 +17,27 @@ from app.db.models.user import User
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 
+# H-24: the worker's ApprovalBroker accepts exactly these decision strings
+# (worker/worker/engine/approvals.py) plus the plan-approval verdicts
+# (approved/rejected). The old `decision: str` accepted ANY string — it
+# landed in the audit row and was replayed to the worker's blocking BLPOP,
+# where the worker's own guard silently denied "unknown decision". Validate
+# at the API boundary so a typo returns 422, not a silent deny or a 500.
+_VALID_DECISIONS = {"allow", "allow_once", "always_allow", "deny", "deny_tool",
+                    "approved", "rejected"}
+
 
 class DecideBody(BaseModel):
-    decision: str  # allow_once | always_allow | deny | approved | rejected
+    decision: str  # allow_once | always_allow | deny | deny_tool | approved | rejected
     reason: str = ""
+
+    @field_validator("decision")
+    @classmethod
+    def _validate_decision(cls, v: str) -> str:
+        if v not in _VALID_DECISIONS:
+            raise ValueError(
+                f"decision must be one of {sorted(_VALID_DECISIONS)}, got {v!r}")
+        return v
 
 
 @router.get("")

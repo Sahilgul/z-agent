@@ -347,7 +347,8 @@ class DevelopmentBlueprint(Blueprint):
                 status = thread.status if thread else "failed"
             finally:
                 session.close()
-            if status in ("idle", "completed", "failed", "stopped"):
+            if status in ("idle", "completed", "failed", "stopped",
+                          "interrupted", "replaced"):  # H-38
                 return
             await asyncio.sleep(poll_seconds)
 

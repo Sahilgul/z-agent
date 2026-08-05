@@ -17,7 +17,10 @@ def test_branch_name_for_with_thread():
     thread = Thread(id="thread12-aaaa", run_id=run.id, persona="researcher", status="running")
     name = delivery.branch_name_for(run, thread)
     assert name.startswith("agent/r1234567-")
-    assert name.endswith("/thread12")
+    # H-30: the thread suffix is a HYPHEN, not a slash — a two-level
+    # branch (agent/.../...) fails the agent/* ADO branch policy.
+    assert name.endswith("-thread12")
+    assert name.count("/") == 1, "branch must be one level under agent/"
 
 
 def test_branch_name_for_without_thread():

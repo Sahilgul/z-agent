@@ -226,8 +226,16 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
         # The frontend always sends intent="send_message" with the text as a
         # SEPARATE field — this branch must carry body.text through or every
         # follow-up message reaches the agent empty (the "no content" loop).
-        intent = UserIntent(run_id=run_id, intent=ActionKind(body.intent),
-                            source=IntentSource(body.source), thread_id=body.thread_id,
+        # H-23: an invalid intent/source string raises ValueError from the
+        # enum ctor — uncaught it bubbled as a 500. Validate and return 422.
+        try:
+            kind_enum = ActionKind(body.intent)
+            source_enum = IntentSource(body.source)
+        except ValueError as exc:
+            raise HTTPException(status_code=422,
+                                detail=f"invalid intent/source: {exc}") from exc
+        intent = UserIntent(run_id=run_id, intent=kind_enum,
+                            source=source_enum, thread_id=body.thread_id,
                             text=body.text,
                             confirmed=body.confirmed, payload=body.payload)
 

@@ -120,7 +120,13 @@ async def test_run_nightly_drops_regressing_candidates(session, make_user):
     out = await distiller.run_nightly(complete=_two_candidates,
                                       scorer=lambda cases: [{"resolved": False}])
     assert out["candidates"] == 0
-    assert session.query(KnowledgeItem).count() == 0
+    # H-31: even with 0 candidates drafted, the summarized run is marked
+    # mined (a marker KnowledgeItem, status=rejected) so it isn't
+    # re-mined every night. The old code left it unmined (infinite re-mining).
+    items = session.query(KnowledgeItem).all()
+    assert len(items) == 1
+    assert items[0].source_run_id == "run-a"
+    assert items[0].status == "rejected"  # mining marker, not a reviewable draft
 
 
 async def test_run_nightly_no_summaries_noop(session):

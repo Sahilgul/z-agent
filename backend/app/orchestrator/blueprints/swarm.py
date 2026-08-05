@@ -224,6 +224,13 @@ class SwarmBlueprint(Blueprint):
             if thread_ids and len(failed) == len(thread_ids):
                 transition(run, RunStage.FAILED)
                 session.commit()
+                # H-39: re-publish the FAILED stage — this node's stage is
+                # COMPLETED so the UI was already told "completed" (best-
+                # effort: the unit test calls _complete without a relay).
+                relay = ctx.services.get("relay")
+                if relay is not None:
+                    await relay.publish_run_stage(
+                        run.id, RunStage.FAILED.value, run.available_actions)
                 return
             for thread in threads:
                 if thread is None:
@@ -252,7 +259,8 @@ async def _await_thread(thread_id: str, poll_seconds: float = 2.0) -> None:
             status = thread.status if thread else "failed"
         finally:
             session.close()
-        if status in ("idle", "completed", "failed", "stopped"):
+        if status in ("idle", "completed", "failed", "stopped",
+                      "interrupted", "replaced"):  # H-38
             return
         await asyncio.sleep(poll_seconds)
 

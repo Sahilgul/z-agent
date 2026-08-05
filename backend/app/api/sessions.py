@@ -81,12 +81,12 @@ async def resume(run_id: str, request: Request, user: User = Depends(current_use
     run = load_run_for_user(run_id, user.id)
     if run is None:
         raise HTTPException(status_code=404, detail="session not found")
-    # Resume restarts the blueprint with thread session_ids intact — the
-    # worker picks RESUME_SESSION_ID up from its env (sandbox/manager.thread_env).
+    # H-22: resume the SAME run row so the worker inherits the prior session
+    # (resume_from_thread_id -> inherited session_id + mounted session
+    # volume). The old code called create_run — a fresh run with no link to
+    # the prior session, so every resume started a stranger.
     run_manager = request.app.state.run_manager
-    new_run = await run_manager.create_run(
-        source="button", initiated_by=user.id, mode_name=run.mode,
-        task=run.title, repo=run.repo, work_item_id=run.work_item_id,
-        autonomy=run.autonomy,
-    )
-    return {"run_id": new_run.id, "continues": run_id}
+    resumed = await run_manager.resume_run(run_id, user.id)
+    if resumed is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"run_id": run_id, "continues": run_id}

@@ -39,7 +39,8 @@ class _FakeControl:
 
 
 class _FakeLaneManager:
-    pass
+    async def release_key(self, thread_id: str) -> None:  # H-36 test stub
+        pass
 
 
 def _seed_mode(session, name="ask", autonomy_default="supervised", enabled=True):

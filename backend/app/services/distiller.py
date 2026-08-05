@@ -113,17 +113,30 @@ async def run_nightly(complete=None, scorer=None, days: int = 1) -> dict:
         return {"mined": 0, "candidates": 0, "cards": 0}
     candidates = await distill(summaries, complete=complete)
     drafted = 0
-    for cand in candidates:
+    mined_run_ids: set[str] = set()
+    for i, cand in enumerate(candidates):
         label = cand["content"][:60]
         delta = bench_delta(label, scorer=scorer)
         if delta.get("passes") is False:
             log.info("distiller candidate regressed bench, dropped", label=label)
             continue
+        # H-31: attribute each candidate round-robin to a REAL summary's
+        # user/run — the old code attributed every candidate to summaries[0],
+        # leaking other users' distilled lessons into summaries[0]'s user
+        # scope (privacy) and only marking summaries[0]'s run as mined so
+        # the rest were re-mined every night (infinite re-mining).
+        src = summaries[i % len(summaries)]
         knowledge.draft(content=cand["content"],
                         trigger_description=cand["trigger_description"],
-                        created_by=summaries[0]["user_id"], proposed_scope="user",
-                        source_run_id=summaries[0]["run_id"],
+                        created_by=src["user_id"], proposed_scope="user",
+                        source_run_id=src["run_id"],
                         extra_payload={"bench_delta": delta})
+        mined_run_ids.add(src["run_id"])
         drafted += 1
+    # H-31: mark every OTHER summarized run as mined so it isn't re-mined
+    # every night (the old code only marked summaries[0]'s run).
+    for s in summaries:
+        if s["run_id"] not in mined_run_ids:
+            knowledge.mark_mined(s["run_id"], s["user_id"])
     # each draft created its own approval card with the bench delta in payload
     return {"mined": len(summaries), "candidates": drafted, "cards": drafted}

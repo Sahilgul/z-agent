@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -220,6 +221,28 @@ class SandboxManager:
             container.remove(force=True)
         except DockerException as exc:
             log.warning("container stop failed", container=container_id[:12], error=str(exc)[:200])
+
+    def container_running(self, container_id: str) -> bool:
+        """True if the container exists and is still running (H-37)."""
+        try:
+            client = _docker()
+            container = client.containers.get(container_id)
+            return container.status.lower() == "running"
+        except DockerException:
+            return False
+
+    def wait_for_container_exit(self, container_id: str, timeout_s: float = 15.0) -> None:
+        """Poll until the container is gone or not running (H-37). Used by
+        kill_replace_thread to guarantee the old container has released the
+        session volume before the replacement mounts it — otherwise two
+        containers write the same session volume (corruption)."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if not self.container_running(container_id):
+                return
+            time.sleep(0.25)
+        log.warning("container did not exit in time",
+                   container=container_id[:12], timeout=timeout_s)
 
     def shred_workspace(self, run_id: str) -> None:
         """Workspaces are destroyed at run end; survivors are branches/PRs,

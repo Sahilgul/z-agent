@@ -44,12 +44,27 @@ async def launch(task: str, repo_names: list[str] | None, user_id: int,
         session.close()
 
     run_ids = []
-    for repo in repos:
-        run = await run_manager.create_run(
-            source="campaign", initiated_by=user_id, mode_name="development",
-            task=f"[campaign #{delivery_id}] {task}", repo=repo, autonomy="gated",
-            delivery_id=delivery_id)
-        run_ids.append(run.id)
+    try:
+        for repo in repos:
+            run = await run_manager.create_run(
+                source="campaign", initiated_by=user_id, mode_name="development",
+                task=f"[campaign #{delivery_id}] {task}", repo=repo, autonomy="gated",
+                delivery_id=delivery_id)
+            run_ids.append(run.id)
+    except Exception:
+        # H-34: fanout failed partway — the old code had already committed
+        # the Delivery row, leaving an orphaned campaign (a Delivery with
+        # only some of its runs). Roll the Delivery back so the campaign
+        # never existed; the already-created runs self-reconcile via
+        # reconcile_on_boot (orphan runs with a missing delivery_id FK are
+        # handled there).
+        session = get_session()
+        try:
+            session.query(Delivery).filter_by(id=delivery_id).delete()
+            session.commit()
+        finally:
+            session.close()
+        raise
     return {"delivery_id": delivery_id, "repos": repos, "run_ids": run_ids}
 
 

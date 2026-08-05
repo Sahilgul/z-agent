@@ -30,7 +30,7 @@ from app.orchestrator.blueprints.base import BlueprintContext
 from app.orchestrator.thread_manager import ThreadManager
 from app.orchestrator.mode_engine import blueprint_for
 from app.sandbox.manager import sandbox_manager
-from app.services.runs import transition
+from app.services.runs import TERMINAL_STAGES, transition
 
 log = get_logger(service="run_manager")
 
@@ -87,20 +87,55 @@ class RunManager:
         self._tasks[run.id] = asyncio.create_task(self._execute(run.id, task, repo, fanout))
         return run
 
+    async def resume_run(self, run_id: str, initiated_by: int) -> Run | None:
+        """Continue the SAME run row (H-22): re-stamp from QUEUED, mount the
+        prior thread's session volume, resume with its session_id. The old
+        `resume` API called create_run — a fresh run with no link to the
+        prior session, so the worker started a stranger every resume. Here
+        we re-execute the existing run row and seed ctx.artifacts with
+        resume_from_thread_id so the blueprint spawns a thread that
+        inherits the prior session_id (thread_manager.spawn already wires
+        the inherited session + the old session volume mount)."""
+        session = get_session()
+        try:
+            run = session.get(Run, run_id)
+            if run is None or run.created_by != initiated_by:
+                return None
+            last_thread = (session.query(Thread)
+                          .filter_by(run_id=run_id)
+                          .order_by(Thread.created_at.desc())
+                          .first())
+            last_thread_id = last_thread.id if last_thread is not None else None
+            transition(run, RunStage.QUEUED, allow_terminal_exit=True)  # H-41
+            run.finished_at = None
+            session.commit()
+        finally:
+            session.close()
+        self.ingest.register_run(run_id)
+        await self.relay.publish_run_stage(run_id, run.stage, run.available_actions)
+        self._tasks[run_id] = asyncio.create_task(
+            self._execute(run_id, run.title, run.repo,
+                          artifacts_extra={"resume_from_thread_id": last_thread_id}))
+        return run
+
     async def _execute(self, run_id: str, task: str, repo: str | None,
-                       fanout: int | None = None) -> None:
+                       fanout: int | None = None,
+                       artifacts_extra: dict | None = None) -> None:
         session = get_session()
         try:
             run = session.get(Run, run_id)
         finally:
             session.close()
         blueprint = blueprint_for(run.mode)
+        artifacts: dict = {"task": task, "repo": repo,
+                          **({"fanout": fanout} if fanout is not None else {})}
+        if artifacts_extra:
+            artifacts.update(artifacts_extra)
         ctx = BlueprintContext(
             run=run,
             services={"thread_manager": self.thread_manager, "relay": self.relay,
                       "control": self.control},
-            artifacts={"task": task, "repo": repo,
-                       **({"fanout": fanout} if fanout is not None else {})},
+            artifacts=artifacts,
         )
         await self._guarded_execute(run_id, ctx, blueprint)
 
@@ -118,12 +153,19 @@ class RunManager:
             session = get_session()
             try:
                 row = session.get(Run, run_id)
-                transition(row, RunStage.FAILED)
-                row.finished_at = datetime.now(timezone.utc)
-                session.commit()
+                # H-42: don't overwrite an already-terminal run. A chained
+                # blueprint that raises AFTER the run reached COMPLETED/
+                # ABANDONED used to flip it to FAILED, overwriting the
+                # correct terminal state and confusing the UI/audit. Only
+                # fail a run that is still in flight.
+                if row.stage not in TERMINAL_STAGES:
+                    transition(row, RunStage.FAILED)
+                    row.finished_at = datetime.now(timezone.utc)
+                    session.commit()
             finally:
                 session.close()
-            await self.relay.publish_run_stage(run_id, RunStage.FAILED.value, [])
+            if row.stage == RunStage.FAILED.value:
+                await self.relay.publish_run_stage(run_id, RunStage.FAILED.value, [])
 
     # ------------------------------------------------------------ lifecycle
 
@@ -134,6 +176,8 @@ class RunManager:
         session = get_session()
         try:
             run = session.get(Run, run_id)
+            if run.stage in TERMINAL_STAGES:
+                return  # H-41: don't resurrect a terminal run to INTERRUPTED
             threads = session.query(Thread).filter_by(run_id=run_id).all()
             thread_ids: list[str] = []
             for l in threads:
@@ -153,6 +197,8 @@ class RunManager:
         for thread_id in thread_ids:
             await self.control.interrupt(thread_id)
             await self.relay.publish_thread_status(run_id, thread_id, "stopped")
+            # H-36: release the minted gateway key for each stopped thread.
+            await self.thread_manager.release_key(thread_id)
         task = self._tasks.get(run_id)
         if task and not task.done():
             task.cancel()
@@ -167,6 +213,8 @@ class RunManager:
             thread_ids = [l.id for l in threads]
             container_ids = [l.container_id for l in threads if l.container_id]
             run = session.get(Run, run_id)
+            if run.stage in TERMINAL_STAGES:
+                return  # H-41: don't resurrect a terminal run to ABANDONED
             transition(run, RunStage.ABANDONED)
             run.finished_at = datetime.now(timezone.utc)
             session.commit()
@@ -223,6 +271,8 @@ class RunManager:
         finally:
             session.close()
         await self.relay.publish_thread_status(run_id, thread_id, "stopped")
+        # H-36: release the minted gateway key for the stopped thread.
+        await self.thread_manager.release_key(thread_id)
 
     async def pin_finding(self, run_id: str, thread_id: str, note: str = "") -> None:
         """Pin a finding from a thread overlay: lands as a run event the
@@ -254,9 +304,17 @@ class RunManager:
             thread = session.get(Thread, thread_id)
             if thread is None or thread.run_id != run_id:
                 raise ValueError("thread not found in this run")
+            # H-41: don't replace an already-terminal thread — the old
+            # code set status="replaced" unconditionally, re-resurrecting
+            # a stopped/failed/completed thread and double-spawning a
+            # replacement (orphan + capacity leak).
+            if thread.status in ("replaced", "stopped", "completed", "failed"):
+                raise ValueError(
+                    f"thread already terminal ({thread.status}); cannot replace")
             context = dict(thread.spawn_context or {})
             persona = thread.persona
             repo_scope = thread.repo_scope
+            old_container_id = thread.container_id
             thread.status = "replaced"
             thread.finished_at = datetime.now(timezone.utc)
             run = session.get(Run, run_id)
@@ -265,6 +323,16 @@ class RunManager:
             session.close()
         await self.control.kill(thread_id)
         await self.relay.publish_thread_status(run_id, thread_id, "replaced")
+        # H-37: WAIT for the old container to actually die before spawning
+        # the replacement. The old control.kill just published a kill message
+        # and returned; the replacement then mounted the old session volume
+        # (resume_from_thread_id) while the old container was still alive and
+        # writing to it — two containers on one session volume = corruption.
+        # Poll the old container until it's gone (or timeout) before spawning.
+        if old_container_id:
+            await asyncio.to_thread(
+                sandbox_manager.wait_for_container_exit, old_container_id,
+            )
 
         repo = None
         if repo_scope:
@@ -411,17 +479,38 @@ class RunManager:
         """Boot-time sweep: every run whose threads are gone is marked
         interrupted with an Inbox card offering resume — no silent zombies."""
         session = get_session()
+        reconciled: list[tuple[str, list[str], list[str]]] = []
         try:
             active = session.query(Run).filter(
-                Run.stage.in_([RunStage.PROVISIONING.value, RunStage.INVESTIGATING.value,
+                Run.stage.in_([RunStage.QUEUED.value,  # H-40: include QUEUED
+                               RunStage.PROVISIONING.value, RunStage.INVESTIGATING.value,
                                RunStage.PLANNING.value, RunStage.DEVELOPING.value,
                                RunStage.VERIFYING.value])
             ).all()
-            count = 0
+            now = datetime.now(timezone.utc)
             for run in active:
+                # H-40: mark the run's threads stopped so the capacity
+                # semaphore releases their slots. The old code only
+                # transitioned the RUN, leaving threads "running"/"queued"
+                # -> zombie threads + capacity leak. Collect their ids for
+                # key release (H-36).
+                threads = session.query(Thread).filter_by(run_id=run.id).all()
+                thread_ids = []
+                for t in threads:
+                    if t.status in ("running", "idle", "queued"):
+                        t.status = "stopped"
+                        t.finished_at = now
+                    thread_ids.append(t.id)
                 transition(run, RunStage.INTERRUPTED)
-                count += 1
+                reconciled.append((run.id, list(run.available_actions), thread_ids))
             session.commit()
-            return count
         finally:
             session.close()
+        # H-40/H-36: release keys for stopped threads and publish the stage
+        # change so the UI reflects INTERRUPTED (the old code never published).
+        for run_id, available, thread_ids in reconciled:
+            for tid in thread_ids:
+                await self.thread_manager.release_key(tid)
+            await self.relay.publish_run_stage(
+                run_id, RunStage.INTERRUPTED.value, available)
+        return len(reconciled)

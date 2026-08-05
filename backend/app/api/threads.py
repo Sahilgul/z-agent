@@ -58,6 +58,11 @@ async def pin_finding(thread_id: str, body: LaneActionBody, request: Request,
     phases wire this into the knowledge inbox; for now records the intent as an event."""
     if load_run_for_user(body.run_id, user.id) is None:
         raise HTTPException(status_code=404, detail="run not found")
+    # IDOR guard (H-21): like /stop, the pin must not flag another run's
+    # thread — the old code only checked run ownership, so a user could
+    # publish a spoofed "pinned" status for an arbitrary thread_id.
+    if load_thread_for_run(body.run_id, thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
     relay = request.app.state.relay
     await relay.publish_thread_status(body.run_id, thread_id, "pinned")
     return {"ok": True}

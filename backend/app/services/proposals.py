@@ -118,9 +118,35 @@ async def accept(proposal_id: int, user_id: int, run_manager) -> dict:
     p = _get(proposal_id)
     if p.status != "proposed":
         raise ProposalError("proposal already decided")
+    # H-32: atomically CLAIM the proposal before creating the run. The old
+    # code read status, checked the ceiling, created the run, then wrote
+    # status='accepted' — two concurrent accepts both saw 'proposed', both
+    # passed the ceiling, and both created runs (duplicate runs + ceiling
+    # defeated). The atomic claim (proposed -> accepting) makes only one
+    # accept win; a concurrent loser's filter_by(status='proposed') update
+    # matches 0 rows and bails.
+    session = get_session()
+    try:
+        claimed = (session.query(Proposal)
+                  .filter_by(id=proposal_id, status="proposed")
+                  .update({"status": "accepting"}))
+        session.commit()
+    finally:
+        session.close()
+    if not claimed:
+        raise ProposalError("proposal already decided")
     ceiling = get_settings().proposals_weekly_ceiling_usd
     spend = _weekly_spend()
     if spend >= ceiling:
+        # Release the claim so a later accept can retry when spend falls;
+        # otherwise the proposal would strand in 'accepting' forever.
+        session = get_session()
+        try:
+            session.query(Proposal).filter_by(
+                id=proposal_id, status="accepting").update({"status": "proposed"})
+            session.commit()
+        finally:
+            session.close()
         raise ProposalError(
             f"weekly proposal spend ceiling reached (${spend:.2f} >= ${ceiling:.2f})")
     run = await run_manager.create_run(
@@ -143,6 +169,16 @@ def dismiss(proposal_id: int, user_id: int, reason: str = "") -> dict:
     p = _get(proposal_id)
     if p.status != "proposed":
         raise ProposalError("proposal already decided")
+    # H-33: draft the preference signal BEFORE committing the status. The
+    # old code committed status='dismissed' first, then drafted — a draft
+    # failure left the proposal dismissed with the preference signal lost
+    # (partial write). Draft first; if it raises, the proposal stays
+    # 'proposed' and the user can retry.
+    knowledge.draft(
+        content=(f"Dismissed {p.source} proposal '{p.title}'"
+                 + (f" — reason: {reason}" if reason else "")),
+        trigger_description=f"when ranking {p.source} proposals for this teammate",
+        created_by=user_id, proposed_scope="user")
     session = get_session()
     try:
         row = session.get(Proposal, proposal_id)
@@ -150,9 +186,4 @@ def dismiss(proposal_id: int, user_id: int, reason: str = "") -> dict:
         session.commit()
     finally:
         session.close()
-    knowledge.draft(
-        content=(f"Dismissed {p.source} proposal '{p.title}'"
-                 + (f" — reason: {reason}" if reason else "")),
-        trigger_description=f"when ranking {p.source} proposals for this teammate",
-        created_by=user_id, proposed_scope="user")
     return {"status": "dismissed"}
