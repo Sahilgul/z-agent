@@ -191,6 +191,26 @@ async def test_expire_stale_throttles_between_sweeps(session, make_user, fake_re
     assert session.query(Approval).filter_by(id="ap-th").one().decision is None
 
 
+async def test_expire_stale_swallows_db_error(fake_redis, monkeypatch):
+    """G-17: a SQLAlchemyError during the stale sweep must not kill the
+    consumer — it's logged and swallowed (a sweep hiccup is transient;
+    the next tick retries). Covers the except-SQLAlchemyError branch."""
+    from sqlalchemy.exc import SQLAlchemyError
+    import app.services.approvals as approvals_mod
+
+    class _BoomSession:
+        def query(self, *a, **k):
+            raise SQLAlchemyError("simulated sweep failure")
+        def close(self):
+            pass
+
+    monkeypatch.setattr(approvals_mod, "get_session", lambda: _BoomSession())
+    svc = _svc(fake_redis)
+    svc._last_sweep = datetime.now(timezone.utc) - timedelta(hours=1)
+    # Must not raise — the SQLAlchemyError is swallowed (logged + return).
+    await svc._expire_stale()
+
+
 async def test_loop_sleeps_when_no_streams(fake_redis, monkeypatch):
     svc = _svc(fake_redis)
     real_sleep = asyncio.sleep

@@ -345,3 +345,43 @@ def test_merge_pr_native_ui_hands_off_without_completing(session, make_user, mon
     ev = session.query(Event).filter_by(run_id="r1", type="merge_handoff").one()
     assert ev.payload["decided_by"] == u.id
     assert ev.payload["handoff_url"] == result["handoff_url"]
+
+
+def test_mark_merged_closes_native_ui_handoff_loop(session, make_user, monkeypatch):
+    """G-16: after a native-UI handoff the PrLink stays "open" (the human
+    merges in ADO). mark_merged closes the loop — it flips the open link to
+    "merged" with the deciding human's id, matching the in-process merge_pr
+    evidence trail. Before this, a handoff'd PR stayed "open" forever even
+    though it was merged in ADO."""
+    from app.core.config import Settings
+
+    u = _seed_mergeable(session, make_user)
+    monkeypatch.setattr(delivery, "get_settings",
+                        lambda: Settings(ado_org="acme", ado_project="Product",
+                                         merge_native_ui=True))
+    fake = _FakeAdoMerge()
+    asyncio.run(delivery.merge_pr("r1", u.id, ado_client=fake))
+    # After handoff the link is still open.
+    session.expire_all()
+    assert session.query(PrLink).filter_by(run_id="r1").one().status == "open"
+    # mark_merged closes it.
+    result = delivery.mark_merged("r1", u.id)
+    assert result["handoff_url"] is None
+    session.expire_all()
+    link = session.query(PrLink).filter_by(run_id="r1").one()
+    assert link.status == "merged"
+    assert link.merged_by == u.id
+    assert link.merged_at is not None
+
+
+def test_mark_merged_no_open_pr_raises(session, make_user):
+    """G-16: mark_merged on a run with no open PR raises DeliveryError (the
+    caller — a webhook or manual confirm — gets a clear 422, not a silent
+    no-op)."""
+    u = _seed_mergeable(session, make_user)
+    # Merge it first (in-process path marks it "merged"), then mark_merged
+    # finds no OPEN link -> DeliveryError.
+    fake = _FakeAdoMerge()
+    asyncio.run(delivery.merge_pr("r1", u.id, ado_client=fake))
+    with pytest.raises(delivery.DeliveryError):
+        delivery.mark_merged("r1", u.id)

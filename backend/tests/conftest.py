@@ -438,6 +438,7 @@ class FakeRunManager:
         self.replaced: list[tuple] = []
         self.continued: list[str] = []
         self.resumed: list[str] = []
+        self.resumed_forwarded: list[dict] = []
         self.replanned: list[tuple] = []
         self.prs_opened: list[str] = []
         self.prs_merged: list[tuple] = []
@@ -445,13 +446,13 @@ class FakeRunManager:
         self.switched_modes: list[tuple] = []
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
-                         work_item_id=None, autonomy=None, fanout=None):
+                         work_item_id=None, autonomy=None, fanout=None, delivery_id=None):
         from app.db.base import get_session
         from app.services.runs import transition
         from zagent_contracts import RunStage
         run = Run(id=str(uuid.uuid4()), created_by=initiated_by, source=source,
                   mode=mode_name, autonomy=autonomy or "supervised", title=task[:256],
-                  repo=repo, work_item_id=work_item_id)
+                  repo=repo, work_item_id=work_item_id, delivery_id=delivery_id)
         transition(run, RunStage.QUEUED)
         # M-60: persist the run so a POST→GET round-trip sees it. The fake
         # used to only append to self.created, leaving the DB empty, so a
@@ -463,7 +464,8 @@ class FakeRunManager:
             session.refresh(run)
         finally:
             session.close()
-        self.created.append({"id": run.id, "task": task, "repo": repo, "fanout": fanout})
+        self.created.append({"id": run.id, "task": task, "repo": repo, "fanout": fanout,
+                             "delivery_id": delivery_id})
         return run
 
     async def stop_run(self, run_id):
@@ -480,11 +482,32 @@ class FakeRunManager:
 
     async def resume_run(self, run_id, initiated_by):
         # H-22: resume continues the SAME run row (no fresh run created).
+        # G-09: record the FORWARDED mode/title/repo/autonomy so a test can
+        # verify resume preserves the original run's identity (the real
+        # resume_run re-executes the existing row and reads its mode/title/
+        # repo; the old fake hardcoded mode="ask", title="resumed" and hid
+        # whether the forwarding actually happened).
+        from app.db.base import get_session
+        from app.db.models.run import Run as _Run
         from app.services.runs import transition
         from zagent_contracts import RunStage
-        run = Run(id=run_id, created_by=initiated_by, mode="ask", title="resumed")
+        forwarded = {}
+        session = get_session()
+        try:
+            orig = session.get(_Run, run_id)
+            if orig is not None:
+                forwarded = {"mode": orig.mode, "title": orig.title,
+                             "repo": orig.repo, "autonomy": orig.autonomy}
+        finally:
+            session.close()
+        run = Run(id=run_id, created_by=initiated_by,
+                  mode=forwarded.get("mode", "ask"),
+                  autonomy=forwarded.get("autonomy", "supervised"),
+                  title=forwarded.get("title", "resumed"),
+                  repo=forwarded.get("repo"))
         transition(run, RunStage.QUEUED)
         self.resumed.append(run_id)
+        self.resumed_forwarded.append({"run_id": run_id, "forwarded": forwarded})
         return run
 
     async def replan(self, run_id, notes=""):

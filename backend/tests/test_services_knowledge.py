@@ -38,6 +38,22 @@ def test_draft_forces_user_scope_whatever_was_proposed(session, make_user):
     assert item.status == "draft"
 
 
+def test_draft_rejects_invalid_proposed_scope(session, make_user):
+    """G-18: an invalid proposed_scope is rejected at the service layer
+    (knowledge.draft) before any row is written — the PHI checkpoint
+    enforces scope=user storage regardless, but the proposed value must be
+    one of the known scopes or the approval card would carry a bogus scope
+    the approver can't act on. Covers the `proposed_scope not in SCOPES`
+    guard in draft()."""
+    u = make_user()
+    with pytest.raises(knowledge.KnowledgeError):
+        knowledge.draft("lesson", "trig", u.id, proposed_scope="bogus-scope")
+    # Boundary: the valid scopes are accepted (no raise).
+    for scope in ("global", "repo", "user"):
+        item = knowledge.draft("lesson", "trig", u.id, proposed_scope=scope)
+        assert item.scope == "user"  # always stored as user (PHI checkpoint)
+
+
 def test_draft_from_run_creates_knowledge_approval_card(session, make_user):
     from app.db.models.run import Run
     u = make_user()

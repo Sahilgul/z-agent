@@ -316,3 +316,33 @@ async def merge_pr(run_id: str, user_id: int,
         raise
     finally:
         session.close()
+
+
+def mark_merged(run_id: str, user_id: int) -> dict:
+    """G-16: the native-UI handoff path (merge_pr under
+    settings.merge_native_ui) writes a `merge_handoff` event and returns the
+    deep link, leaving the PrLink "open" — the human completes in ADO's own
+    UI. There was no path to later mark that PrLink "merged", so the evidence
+    trail stayed open forever for a PR the human had actually merged. This
+    closes the loop: a webhook (or a manual mark-merged call) flips the
+    open link to "merged" with the deciding human's id, matching the
+    in-process merge_pr path's evidence trail."""
+    session = get_session()
+    try:
+        link = (
+            session.query(PrLink)
+            .filter_by(run_id=run_id, status="open")
+            .order_by(PrLink.created_at.desc())
+            .first()
+        )
+        if link is None:
+            raise DeliveryError("no open PR for this run")
+        link.status = "merged"
+        link.merged_at = datetime.now(timezone.utc)
+        link.merged_by = user_id
+        session.commit()
+        log.info("pr marked merged (native-UI handoff closed)", run_id=run_id,
+                 pr=link.ado_pr_id, merged_by=user_id)
+        return {"link": link, "handoff_url": None}
+    finally:
+        session.close()

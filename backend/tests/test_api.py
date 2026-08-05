@@ -475,6 +475,58 @@ def test_run_events(auth_client, session, make_user):
     assert len(r.json()) == 1
 
 
+def test_run_events_404_for_unknown_run(auth_client):
+    # G-06: an unknown run returned 200 [] (replay_events is owner-scoped and
+    # returns [] for missing runs) instead of 404 — a caller could tell
+    # "no such run" from "run has no events". Now the 404 guard fires.
+    client, _, _, _ = auth_client
+    r = client.get("/runs/does-not-exist/events")
+    assert r.status_code == 404
+
+
+def test_run_events_404_for_cross_user_run(auth_client, session, make_user):
+    # G-06: a run owned by ANOTHER user must 404 for this caller (not 200 []).
+    client, _, _, _ = auth_client
+    other = make_user("other", role="member", status="active")
+    run = Run(id="r-other", created_by=other.id, mode="ask", stage="completed")
+    session.add(run); session.commit()
+    r = client.get("/runs/r-other/events")
+    assert r.status_code == 404
+
+
+def test_run_events_thread_id_and_after_seq_filters(auth_client, session, make_user):
+    # G-08: the thread_id and after_seq query filters were untested. Seed
+    # two threads with seqs 0..2 and assert each filter narrows correctly.
+    client, _, _, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="completed")
+    session.add(run)
+    session.add_all([
+        Thread(id="l1", run_id="r1", persona="researcher", status="completed"),
+        Thread(id="l2", run_id="r1", persona="developer", status="completed"),
+    ])
+    session.commit()
+    for tid in ("l1", "l2"):
+        for seq in (0, 1, 2):
+            session.add(Event(run_id="r1", thread_id=tid, seq=seq,
+                              type="message", title=f"{tid}-{seq}", payload={}))
+    session.commit()
+    # thread_id filter: only l1's events.
+    r = client.get("/runs/r1/events?thread_id=l1")
+    assert r.status_code == 200
+    titles = {e["title"] for e in r.json()}
+    assert titles == {"l1-0", "l1-1", "l1-2"}
+    # after_seq filter: only events with seq > 1 across both threads.
+    r = client.get("/runs/r1/events?after_seq=1")
+    assert r.status_code == 200
+    titles = {e["title"] for e in r.json()}
+    assert titles == {"l1-2", "l2-2"}
+    # both filters together: l2 events with seq > 0.
+    r = client.get("/runs/r1/events?thread_id=l2&after_seq=0")
+    assert r.status_code == 200
+    titles = {e["title"] for e in r.json()}
+    assert titles == {"l2-1", "l2-2"}
+
+
 def test_run_threads(auth_client, session, make_user):
     client, _, _, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="completed")
@@ -845,6 +897,26 @@ def test_session_resume(auth_client, session, make_user):
 def test_session_resume_not_found(auth_client):
     client, _, _, _ = auth_client
     assert client.post("/sessions/ghost/resume").status_code == 404
+
+
+def test_session_resume_forwards_original_run_identity(auth_client, session, make_user):
+    """G-09: resume CONTINUES the same run row, so the worker must inherit the
+    original run's mode/title/repo/autonomy — not a fresh "ask"/"resumed"
+    placeholder. The fake run manager records the forwarded fields; assert
+    they match the original run."""
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="development", stage="completed",
+              title="orig-title", repo="ServerApp", autonomy="gated")
+    session.add(run); session.commit()
+    r = client.post("/sessions/r1/resume")
+    assert r.status_code == 200
+    forwarded = services["run_manager"].resumed_forwarded
+    assert len(forwarded) == 1
+    rec = forwarded[0]["forwarded"]
+    assert rec["mode"] == "development"
+    assert rec["title"] == "orig-title"
+    assert rec["repo"] == "ServerApp"
+    assert rec["autonomy"] == "gated"
 
 
 def test_sessions_require_auth(app_client):

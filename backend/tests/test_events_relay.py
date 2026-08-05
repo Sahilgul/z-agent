@@ -145,6 +145,54 @@ async def test_delta_loop_ignores_non_message_and_bad_json(fake_redis, monkeypat
     r.unsubscribe("run-1", q)
 
 
+async def test_delta_loop_poll_path_under_in_memory(fake_redis, monkeypatch):
+    """G-21: the relay's _delta_loop has two branches — `pubsub.listen()`
+    under real Redis (in_memory False) and `pubsub.get_message()` polling under
+    fakeredis (in_memory True, because fakeredis listen() waits on a thread
+    condition and freezes the dev server's one asyncio loop). The existing
+    tests exercise the listen() path (the test env uses redis://localhost,
+    so in_memory() is False); the poll path was untested. Force in_memory()
+    True and drive the poll path with a FakePubSub that implements
+    get_message (not listen)."""
+    r = _relay(fake_redis)
+    monkeypatch.setattr(relay_mod, "in_memory", lambda: True)
+
+    class FakePubSub:
+        def __init__(self):
+            self._msgs = iter([
+                {"type": "subscribe"},
+                {"type": "message", "data": json.dumps({"text": "polled"})},
+            ])
+        async def subscribe(self, *ch): pass
+        async def unsubscribe(self, *ch): pass
+        async def aclose(self): pass
+        async def get_message(self, ignore_subscribe_messages=True, timeout=0):
+            try:
+                return next(self._msgs)
+            except StopIteration:
+                return None  # loop will sleep and re-poll
+
+    monkeypatch.setattr(fake_redis, "pubsub", lambda: FakePubSub())
+    q = r.subscribe("run-1")
+    # Run the loop briefly; the poll path forwards the message then idles on None.
+    task = asyncio.create_task(r._delta_loop("run-1"))
+    for _ in range(400):
+        await asyncio.sleep(0.005)
+        if not q.empty():
+            break
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        raise AssertionError(f"loop raised: {exc!r}") from exc
+    msg = q.get_nowait()
+    assert msg["type"] == "delta"
+    assert msg["delta"] == {"text": "polled"}
+    r.unsubscribe("run-1", q)
+
+
 async def test_close_cancels_delta_tasks(fake_redis):
     r = _relay(fake_redis)
     r.subscribe("run-1")

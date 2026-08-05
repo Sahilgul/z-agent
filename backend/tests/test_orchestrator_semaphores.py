@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from app.db.models.thread import Thread
@@ -95,3 +97,24 @@ async def test_writable_reservation_blocks_second_writer_before_row(session):
     cap.release("ServerApp")
     ok, _ = await cap.try_acquire("ServerApp")
     assert ok is True
+
+
+async def test_try_acquire_serializes_under_concurrent_gather(monkeypatch):
+    """G-10: concurrent try_acquire calls under asyncio.gather must serialize
+    on the lock — without the lock the check-then-reserve race would let N
+    concurrent spawns all pass the cap check before any reservation is held
+    (over-booking). Fire many concurrent acquisitions against a small cap
+    and assert exactly `cap` succeed (no over-booking)."""
+    cap = semaphores.Capacity()
+    monkeypatch.setattr(semaphores.get_settings(), "global_thread_cap", 3)
+    # No active rows — the cap is enforced purely by the in-memory reservation
+    # under the lock, so this isolates the serialization (no DB timing noise).
+    async def _no_rows() -> int:
+        return 0
+    monkeypatch.setattr(cap, "active_thread_count", _no_rows)
+    results = await asyncio.gather(*[cap.try_acquire(None) for _ in range(10)])
+    ok_count = sum(1 for ok, _ in results if ok)
+    assert ok_count == 3, f"expected exactly 3 acquisitions under the cap, got {ok_count}"
+    # The 7 rejected ones all cite the global cap.
+    reasons = [reason for ok, reason in results if not ok]
+    assert all("global thread cap" in r for r in reasons)

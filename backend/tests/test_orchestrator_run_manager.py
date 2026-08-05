@@ -152,6 +152,42 @@ async def test_abandon_run_kills_and_shreds(session, make_user, monkeypatch):
     assert relay.stages[-1][1] == RunStage.ABANDONED.value
 
 
+async def test_abandon_run_cancels_task_before_shred(session, make_user, monkeypatch):
+    """G-11: abandon_run must cancel the run task BEFORE shredding the
+    workspace — cancelling first stops the worker from writing into the
+    workspace mid-shred. The existing test verified the actions happened
+    but not the ordering. Use a fake task that records when cancel() is
+    called and assert cancel precedes shred."""
+    u = make_user("a")
+    rm, ingest, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", container_id="c1")
+    session.add_all([run, thread]); session.commit()
+
+    order: list[str] = []
+
+    class _FakeTask:
+        def __init__(self) -> None:
+            self._done = False
+        def done(self) -> bool:
+            return self._done
+        def cancel(self) -> bool:
+            order.append("cancel")
+            self._done = True
+            return True
+
+    rm._tasks["r1"] = _FakeTask()
+    monkeypatch.setattr(run_manager.sandbox_manager, "stop_container", lambda cid: None)
+
+    def _shred(rid):
+        order.append("shred")
+    monkeypatch.setattr(run_manager.sandbox_manager, "shred_workspace", _shred)
+
+    await rm.abandon_run("r1")
+    # The run task was cancelled, then the workspace was shredded — in that order.
+    assert order == ["cancel", "shred"]
+
+
 async def test_nudge_thread_sets_running(session, make_user):
     u = make_user("a")
     rm, _, relay, control = _make_manager()
@@ -222,6 +258,29 @@ async def test_reconcile_on_boot_interrupts_active_runs(session, make_user):
     assert session.get(Run, f"r-{RunStage.INVESTIGATING.value}").stage == RunStage.INTERRUPTED.value
 
 
+async def test_reconcile_on_boot_interrupts_planning_and_queued_runs(session, make_user):
+    """G-13: the existing reconcile test covered PROVISIONING/INVESTIGATING/
+    DEVELOPING/VERIFYING but NOT PLANNING (or QUEUED — added by H-40). A run
+    sitting in PLANNING across a crash must be interrupted on boot too, or it
+    strands as a zombie (capacity leak + a stuck inbox). Seed PLANNING +
+    QUEUED runs with live threads and assert both are interrupted and their
+    threads stopped."""
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    for stage in (RunStage.QUEUED.value, RunStage.PLANNING.value):
+        r = Run(id=f"r-{stage}", created_by=u.id, mode="plan", stage=stage)
+        session.add(r)
+        session.add(Thread(id=f"l-{stage}", run_id=f"r-{stage}", persona="planner",
+                          status="running"))
+    session.commit()
+    count = await rm.reconcile_on_boot()
+    assert count == 2
+    session.expire_all()
+    for stage in (RunStage.QUEUED.value, RunStage.PLANNING.value):
+        assert session.get(Run, f"r-{stage}").stage == RunStage.INTERRUPTED.value
+        assert session.get(Thread, f"l-{stage}").status == "stopped"
+
+
 async def test_execute_failure_path_marks_failed(session, make_user, monkeypatch):
     u = make_user("a")
     _seed_mode(session)
@@ -238,6 +297,32 @@ async def test_execute_failure_path_marks_failed(session, make_user, monkeypatch
     assert session.get(Run, "r1").stage == RunStage.FAILED.value
     assert session.get(Run, "r1").finished_at is not None
     assert relay.stages[-1][1] == RunStage.FAILED.value
+
+
+async def test_guarded_execute_reraises_cancelled_not_marks_failed(session, make_user, monkeypatch):
+    """G-14: _guarded_execute must RE-RAISE asyncio.CancelledError (not
+    swallow it as a failure). A CancelledError means the run's task was
+    cancelled (stop/abandon/shutdown) — marking the run FAILED would
+    overwrite the intended terminal state (ABANDONED/STOPPED) and confuse
+    the audit. Assert CancelledError propagates and the run is NOT flipped
+    to FAILED."""
+    u = make_user("a")
+    _seed_mode(session)
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.QUEUED.value)
+    session.add(run); session.commit()
+
+    class CancelledBlueprint:
+        async def execute(self, ctx):
+            raise asyncio.CancelledError()
+    monkeypatch.setattr(run_manager, "blueprint_for", lambda name: CancelledBlueprint())
+
+    with pytest.raises(asyncio.CancelledError):
+        await rm._execute("r1", "task", None)
+    session.expire_all()
+    # The run stays QUEUED — CancelledError did NOT flip it to FAILED.
+    assert session.get(Run, "r1").stage == RunStage.QUEUED.value
+    assert session.get(Run, "r1").finished_at is None
 
 
 # --------------------------------------------------------------- switch_mode
@@ -490,6 +575,40 @@ async def test_kill_replace_passes_resume_from_thread_id(session, make_user, mon
 
     await rm.kill_replace_thread("r1", "l1")
     assert captured["resume_from_thread_id"] == "l1"
+
+
+async def test_kill_replace_waits_for_old_container_before_spawn(session, make_user, monkeypatch):
+    """G-12: kill_replace must WAIT for the old container to die (H-37) BEFORE
+    spawning the replacement — otherwise two containers mount the same session
+    volume at once (corruption). The existing tests verified resume_from_thread_id
+    is passed but not the wait-before-spawn ordering. Record the call order and
+    assert wait_for_container_exit precedes spawn."""
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
+    thread = Thread(id="l1", run_id="r1", persona="explorer", status="running",
+                container_id="c-old",
+                spawn_context={"prompt": "trace the webhook leg"})
+    session.add_all([run, thread]); session.commit()
+
+    order: list[str] = []
+
+    class _Replacement:
+        id = "thread-new"
+
+    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                         resume_session=False, resume_from_thread_id=None):
+        order.append("spawn")
+        return _Replacement()
+    rm.thread_manager.spawn = fake_spawn
+
+    def _wait(cid):
+        order.append("wait_for_exit")
+    monkeypatch.setattr(run_manager.sandbox_manager, "wait_for_container_exit", _wait)
+
+    await rm.kill_replace_thread("r1", "l1")
+    # The old container must be gone BEFORE the replacement spawns.
+    assert order == ["wait_for_exit", "spawn"]
 
 
 async def test_kill_replace_wrong_run_raises(session, make_user):

@@ -178,6 +178,26 @@ async def test_drain_queued_starts_when_capacity_returns(session, bound_user):
     assert session.query(TriggerEventLog).filter_by(status="queued").count() == 0
 
 
+async def test_drain_queued_passes_original_resolved_user_id(session, bound_user):
+    """G-19: drain_queued must start the run as the QUEUED event's
+    resolved_user_id (the resolver that owned the trigger at queue time),
+    not a default system user — the run lands in the owner's inbox with
+    their steering. The existing drain test verified the run started but
+    not who it was initiated_by."""
+    _trigger(session, rate=1)
+    rm = FakeRM()
+    await triggers.process(_event(revision=3), rm)   # matched (rate=1)
+    await triggers.process(_event(revision=4), rm)   # queued (rate-limited)
+    from datetime import datetime, timedelta, timezone
+    log = session.query(TriggerEventLog).filter_by(status="matched").one()
+    log.received_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    session.commit()
+    await triggers.drain_queued(rm)
+    # The drained run was initiated_by the original resolved_user_id.
+    assert rm.created[-1]["by"] == bound_user.id
+    assert rm.created[-1]["source"] == "trigger"
+
+
 # ------------------------------------------------------------------ signature
 def test_signature_verification(monkeypatch):
     import hashlib

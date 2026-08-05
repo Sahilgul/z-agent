@@ -217,6 +217,50 @@ async def test_loop_sleeps_when_no_streams(fake_redis, monkeypatch):
     assert slept["n"] >= 1
 
 
+async def test_loop_block_arg_differs_in_memory_vs_real_redis(fake_redis, monkeypatch):
+    """G-20: the ingest loop uses block=None under in_memory() (fakeredis
+    blocking calls deadlock the single asyncio loop of a dev server) and
+    block=1000 under real Redis (efficient blocking read). Both branches
+    of the `block=None if in_memory() else 1000` expression were
+    untested. Capture the block arg passed to xreadgroup under each mode."""
+    c = _consumer(fake_redis)
+    c.register_run("events:r1")
+    captured: dict[str, object] = {}
+
+    async def _capture_xreadgroup(group, consumer, streams, count=None, block=None):
+        captured["block"] = block
+        await asyncio.sleep(0)  # yield so the loop doesn't busy-spin
+        return []  # nothing to process
+
+    fake_redis.xreadgroup = _capture_xreadgroup
+
+    async def _run_until_captured():
+        task = asyncio.create_task(c._loop())
+        for _ in range(400):
+            await asyncio.sleep(0.005)
+            if "block" in captured:
+                break
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            raise AssertionError(f"loop raised: {exc!r}") from exc
+
+    # In-memory (fakeredis): block must be None.
+    monkeypatch.setattr(bus_mod, "in_memory", lambda: True)
+    captured.clear()
+    await _run_until_captured()
+    assert captured.get("block") is None
+
+    # Real Redis: block must be 1000.
+    monkeypatch.setattr(bus_mod, "in_memory", lambda: False)
+    captured.clear()
+    await _run_until_captured()
+    assert captured.get("block") == 1000
+
+
 async def test_init_constructs_redis_client():
     """Cover IngestConsumer.__init__ — redis.from_url builds a client object
     without opening a connection, so this is network-free."""

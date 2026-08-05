@@ -124,3 +124,40 @@ async def test_status_none_does_not_update_last_status(session, make_user, monke
     session.expire_all()
     # heartbeat_at should reflect only the first write, not the third call.
     assert session.get(Thread, "l1").heartbeat_at == first_hb
+
+
+async def test_persist_rolls_back_on_db_error(session, make_user, monkeypatch):
+    """G-22: a missed beat must never kill the heartbeat loop. _persist wraps
+    the commit in try/except: on any DB error it rolls back and logs a warning,
+    then returns (the next tick retries). The rollback-on-error path was
+    untested. Force commit() to raise and assert _persist swallows it and
+    calls rollback()."""
+    u = make_user("a")
+    session.add(Run(id="r1", created_by=u.id, mode="ask"))
+    session.add(Thread(id="l1", run_id="r1", persona="researcher", status="running"))
+    session.commit()
+
+    rolled_back = {"n": 0}
+
+    class _BoomSession:
+        def __init__(self, real):
+            self._real = real
+        def get(self, *a, **k):
+            return self._real.get(*a, **k)
+        def commit(self):
+            raise RuntimeError("db down")
+        def rollback(self):
+            rolled_back["n"] += 1
+        def close(self):
+            pass
+        def expire_all(self):
+            pass
+
+    import app.services.heartbeats as hb_mod
+    real_session = session
+    monkeypatch.setattr(hb_mod, "get_session", lambda: _BoomSession(real_session))
+
+    h = _persister()
+    # Must not raise — the error is swallowed + rolled back.
+    h._persist("l1", "running")
+    assert rolled_back["n"] == 1

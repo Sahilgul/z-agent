@@ -135,7 +135,31 @@ def get_run(run_id: str, user: User = Depends(current_user)):
 @router.get("/{run_id}/events")
 def run_events(run_id: str, user: User = Depends(current_user), thread_id: str | None = None,
                after_seq: int | None = None):
+    # G-06: replay_events is hard-scoped to the owner and returns [] for an
+    # unknown OR cross-user run, so this endpoint returned 200 [] instead of
+    # 404 — a cross-user caller could distinguish "no such run" from "run has
+    # no events". Match get_run's 404 guard so not-found/forbidden is reported.
+    run = load_run_for_user(run_id, user.id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
     return replay_events(run_id, user.id, thread_id=thread_id, after_seq=after_seq)
+
+
+@router.post("/{run_id}/mark-merged")
+def mark_merged(run_id: str, user: User = Depends(current_user)):
+    """G-16: close the native-UI merge handoff loop. When
+    settings.merge_native_ui is on, merge_pr hands off to ADO's native UI and
+    leaves the PrLink "open"; this endpoint marks it "merged" (called by the
+    ADO webhook or a manual confirmation) so the evidence trail matches the
+    PR's real state."""
+    from app.services import delivery
+    run = load_run_for_user(run_id, user.id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        return delivery.mark_merged(run_id, user.id)
+    except delivery.DeliveryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{run_id}/threads")

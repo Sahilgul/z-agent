@@ -392,9 +392,20 @@ async def process(event: TriggerEvent, run_manager) -> dict:
         status = "failed"
     else:
         status = "matched"
+    # G-19: persist resolved_user_id onto the log ROW (not just inside the
+    # verdict payload). drain_queued reads q.resolved_user_id to start the
+    # run as the original owner; before this the column stayed NULL for a
+    # queued event (the owner id lived only in payload["verdicts"][*]), so a
+    # drained run was initiated_by=None — it landed in nobody's inbox and
+    # lost the resolver's steering. Take it from the first verdict that
+    # carries one (every verdict sets resolved_user_id).
+    resolved_user_id = next(
+        (v.get("resolved_user_id") for v in verdicts
+         if v.get("resolved_user_id") is not None), None)
     _set_log(log_id,
              status=status,
              run_id=started[0]["run_id"] if started else None,
+             resolved_user_id=resolved_user_id,
              payload={"verdicts": verdicts, **event.payload})
     return {"status": status, "verdicts": verdicts}
 
