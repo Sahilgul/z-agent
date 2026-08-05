@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import type { LampTone } from "@/components/ui/status-lamp";
 import { cn } from "@/lib/utils";
 import { stageMeta } from "../lib/runMachine";
+import { formatDateTime } from "../lib/time";
 import type { Run } from "../types";
 
 const RECENT_TABS = 5;
@@ -151,6 +152,9 @@ export function SessionTabs({
                     <StageLed tone={meta.tone} label={meta.label} />
                     <span className="min-w-0 flex-1 truncate text-[13px] text-ink-primary">{run.title}</span>
                     <span className="flex-none font-mono text-[11px] text-ink-faint">{run.mode}</span>
+                    <span className="flex-none font-mono text-[11px] text-ink-faint">
+                      {formatDateTime(run.created_at ?? run.last_active_at)}
+                    </span>
                     <span className="tabular flex-none font-mono text-[11px] text-ink-faint">
                       ${run.cost_usd.toFixed(2)}
                     </span>

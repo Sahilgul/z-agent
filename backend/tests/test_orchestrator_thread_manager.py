@@ -149,7 +149,8 @@ async def test_spawn_resume_from_thread_inherits_session_id(session, make_user, 
 
     captured = {}
     def fake_run_container(run, thread, prompt, persona_prompt, permission_mode,
-                            writable_repo, context_repos, resume_from_thread_id=None):
+                            writable_repo, context_repos, resume_from_thread_id=None,
+                            preserve_workspace=False):
         captured["resume_from_thread_id"] = resume_from_thread_id
         captured["session_id"] = thread.session_id
         return "container-new"
@@ -268,3 +269,43 @@ async def test_spawn_many_skips_thread_on_non_capacity_failure(session, make_use
     assert threads == []
     session.expire_all()
     assert session.query(Thread).filter_by(status="failed").count() == 2
+
+
+async def test_finish_thread_stops_container_stamps_completed_releases_key(
+        session, make_user, monkeypatch):
+    """Blueprint node-end: the idle container dies NOW (freeing the capacity
+    slot and the per-repo write lock — 'idle' is an ACTIVE status), then the
+    row is stamped completed and the gateway key released."""
+    run = _make_run(session, make_user)
+    session.add(Thread(id="l1", run_id=run.id, persona="developer", status="idle",
+                       container_id="c-1", gateway_key="vk-1"))
+    session.commit()
+    gw = _FakeGateway()
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+    stopped = []
+    monkeypatch.setattr(thread_manager.sandbox_manager, "stop_container",
+                        lambda cid: stopped.append(cid))
+    await lm.finish_thread("l1")
+    assert stopped == ["c-1"]  # container dies BEFORE the stamp (order matters)
+    session.expire_all()
+    row = session.get(Thread, "l1")
+    assert row.status == "completed"
+    assert row.finished_at is not None
+    assert gw.deleted == ["vk-1"]
+
+
+async def test_finish_thread_leaves_terminal_threads_alone(
+        session, make_user, monkeypatch):
+    """An honest 'failed' must never be rewritten to a cosmetic 'completed'."""
+    run = _make_run(session, make_user)
+    session.add(Thread(id="l2", run_id=run.id, persona="developer", status="failed",
+                       container_id="c-2"))
+    session.commit()
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+    stopped = []
+    monkeypatch.setattr(thread_manager.sandbox_manager, "stop_container",
+                        lambda cid: stopped.append(cid))
+    await lm.finish_thread("l2")
+    assert stopped == []  # already terminal: no stop, no re-stamp
+    session.expire_all()
+    assert session.get(Thread, "l2").status == "failed"

@@ -41,6 +41,20 @@ def test_seed_creates_plan_development_debug_modes(session):
     assert debug.playbook_ids == ["debug/repro-first"]
 
 
+def test_seed_creates_goal_mode(session):
+    """Goal mode = zero-interruption PRD->PR. autonomy_default='autonomous' is
+    load-bearing: it maps to bypassPermissions so the engine's approval gate
+    never fires — the mode is defined by running with no approval cards."""
+    seed_users.seed()
+    goal = session.query(Mode).filter_by(name="goal").one()
+    assert goal.topology == "goal"
+    assert goal.autonomy_default == "autonomous"
+    assert goal.permission_mode == "bypassPermissions"
+    assert goal.permissions == {"writable": True, "repos": []}
+    assert goal.evidence_contract["tests_pass"] is True
+    assert goal.enabled is True
+
+
 def test_seed_creates_playbooks(session):
     from app.db.models.knowledge import Playbook
     seed_users.seed()

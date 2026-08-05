@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.core.redis_factory import in_memory, make_redis
 from app.db.base import get_session
 from app.db.models.thread import Thread
+from app.orchestrator.semaphores import ACTIVE_STATUSES
 
 log = get_logger(service="heartbeats")
 
@@ -107,7 +108,11 @@ class HeartbeatPersister:
             thread.heartbeat_at = datetime.now(timezone.utc)
             # The worker's heartbeat carries its live status; reflect it so the
             # watchdog and tiles agree with what the thread is actually doing.
-            if status:
+            # But only while the row is ACTIVE: a beat is stale by definition
+            # once the control plane has stamped a terminal status (stop_thread,
+            # kill_replace, finish_thread, abandon) — a dying container's last
+            # beat must never resurrect the row to "idle"/"running".
+            if status and thread.status in ACTIVE_STATUSES:
                 thread.status = status
             session.commit()
         except Exception as exc:  # a missed beat must never kill the loop

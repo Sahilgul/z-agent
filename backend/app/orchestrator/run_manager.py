@@ -15,6 +15,7 @@ import asyncio
 import uuid
 from collections.abc import Coroutine
 from datetime import datetime, timezone
+from typing import Any
 
 from zagent_contracts import RunStage
 
@@ -46,11 +47,16 @@ def _title_is_generic(task: str, work_item_id: int) -> bool:
 
 class RunManager:
     def __init__(self, ingest: IngestConsumer, relay: Relay, thread_manager: ThreadManager,
-                 control: LaneControl) -> None:
+                 control: LaneControl, approvals: Any | None = None) -> None:
         self.ingest = ingest
         self.relay = relay
         self.thread_manager = thread_manager
         self.control = control
+        # The ApprovalService consuming approvals:{run_id}. Optional so unit
+        # tests can construct a bare manager; production wires it in main.py —
+        # without it the approvals consumer idles on an empty stream set and
+        # no approval card is ever created.
+        self.approvals = approvals
         self._tasks: dict[str, asyncio.Task] = {}
 
     def _track(self, run_id: str, coro: Coroutine[object, object, object]) -> asyncio.Task:
@@ -101,6 +107,8 @@ class RunManager:
             session.close()
 
         self.ingest.register_run(run.id)
+        if self.approvals is not None:
+            self.approvals.register_run(run.id)
         await self.relay.publish_run_stage(run.id, run.stage, run.available_actions)
         self._track(run.id, self._execute(run.id, task, repo, fanout))
         return run
@@ -130,6 +138,8 @@ class RunManager:
         finally:
             session.close()
         self.ingest.register_run(run_id)
+        if self.approvals is not None:
+            self.approvals.register_run(run_id)
         await self.relay.publish_run_stage(run_id, run.stage, run.available_actions)
         self._track(
             run_id,
@@ -252,6 +262,8 @@ class RunManager:
             task.cancel()
         await asyncio.to_thread(sandbox_manager.shred_workspace, run_id)
         self.ingest.unregister_run(run_id)
+        if self.approvals is not None:
+            self.approvals.unregister_run(run_id)
         await self.relay.publish_run_stage(run_id, RunStage.ABANDONED.value, [])
 
     async def nudge_thread(self, run_id: str, thread_id: str, text: str) -> None:

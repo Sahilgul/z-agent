@@ -220,8 +220,17 @@ class EngineRunner:
 
     async def _emit_approval_card(self, payload: dict[str, Any]) -> None:
         """Render the interrupt payload as the approval-card StepEvent —
-        dedicated APPROVAL kind with action_id pairing."""
+        dedicated APPROVAL kind with action_id pairing. ALSO bridge it to
+        the backend ApprovalService (approvals:{run_id} stream) so the human
+        gets the decidable card; a bridge failure degrades to the same
+        deterministic timeout-deny as a lost decision channel."""
         await self.forwarder.publish_events([self.emitter.approval_card(payload, self.task_id)])
+        try:
+            await self.forwarder.publish_approval_request(payload)
+        except Exception as exc:  # noqa: BLE001
+            log.error("approval bridge publish failed; card will time out into a deny",
+                      run_id=self.run_id, approval_id=payload.get("approval_id"),
+                      error=str(exc)[:200])
 
     # ---------------------------------------------------------------- turn loop
 

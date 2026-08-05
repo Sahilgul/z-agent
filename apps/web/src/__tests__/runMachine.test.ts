@@ -172,4 +172,43 @@ describe("foldStream", () => {
     expect(items[0].detail.action_id).toBe("ap-1");
     expect(items[1].detail.action_id).toBe(items[0].detail.action_id);
   });
+
+  // --- message timestamps + "took Ns" ---
+
+  it("carries ts through and measures took-Ns from the preceding user message", () => {
+    const items = foldStream(
+      [
+        { thread_id: "l1", kind: "message", title: "q", detail: { text: "q", role: "user" }, seq: 0, ts: "2026-08-01T00:00:00Z" },
+        { thread_id: "l1", kind: "message", title: "a", detail: { text: "a", role: "agent" }, seq: 1, ts: "2026-08-01T00:00:17Z" },
+      ],
+      [],
+    );
+    expect(items[0].ts).toBe("2026-08-01T00:00:00Z");
+    expect(items[0].durationS).toBeNull(); // the user asks; only the agent "took" time
+    expect(items[1].durationS).toBe(17);
+  });
+
+  it("scopes took-Ns per thread and skips replies with no preceding user message", () => {
+    const items = foldStream(
+      [
+        { thread_id: "l2", kind: "message", title: "a", detail: { text: "a", role: "agent" }, seq: 0, ts: "2026-08-01T00:00:10Z" },
+        { thread_id: "l1", kind: "message", title: "q", detail: { text: "q", role: "user" }, seq: 1, ts: "2026-08-01T00:00:00Z" },
+        { thread_id: "l1", kind: "message", title: "a", detail: { text: "a", role: "agent" }, seq: 2, ts: "2026-08-01T00:01:10Z" },
+      ],
+      [],
+    );
+    expect(items[0].durationS).toBeNull(); // l2 reply: no user message in l2
+    expect(items[2].durationS).toBe(70); // l1 reply measured from l1's question
+  });
+
+  it("never shows a negative duration on out-of-order replay", () => {
+    const items = foldStream(
+      [
+        { thread_id: "l1", kind: "message", title: "q", detail: { text: "q", role: "user" }, seq: 0, ts: "2026-08-01T00:00:30Z" },
+        { thread_id: "l1", kind: "message", title: "a", detail: { text: "a", role: "agent" }, seq: 1, ts: "2026-08-01T00:00:00Z" },
+      ],
+      [],
+    );
+    expect(items[1].durationS).toBeNull();
+  });
 });

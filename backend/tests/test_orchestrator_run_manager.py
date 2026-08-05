@@ -43,6 +43,14 @@ class _FakeLaneManager:
         pass
 
 
+class _FakeApprovals:
+    def __init__(self):
+        self.registered = []
+        self.unregistered = []
+    def register_run(self, run_id): self.registered.append(run_id)
+    def unregister_run(self, run_id): self.unregistered.append(run_id)
+
+
 def _seed_mode(session, name="ask", autonomy_default="supervised", enabled=True):
     session.add(Mode(name=name, autonomy_default=autonomy_default, enabled=enabled,
                      persona_prompt="p", permission_mode="default"))
@@ -77,6 +85,38 @@ async def test_create_run_unknown_mode_raises(session, make_user):
     rm, _, _, _ = _make_manager()
     with pytest.raises(ValueError, match="unknown or disabled mode"):
         await rm.create_run(source="button", initiated_by=u.id, mode_name="ghost", task="x")
+
+
+async def test_create_run_registers_with_approval_service(session, make_user, monkeypatch):
+    """Regression: ApprovalService.register_run was never called, so the
+    approvals consumer idled on an empty stream set and no Approval row was
+    ever created — engine approval cards timed out into denies unanswered."""
+    u = make_user("a")
+    _seed_mode(session)
+    approvals = _FakeApprovals()
+    rm, ingest, _, _ = _make_manager()
+    rm.approvals = approvals
+    async def noop(*a, **k): pass
+    monkeypatch.setattr(rm, "_execute", noop)
+    run = await rm.create_run(source="button", initiated_by=u.id, mode_name="ask", task="do it")
+    assert run.id in approvals.registered
+    assert run.id in ingest.registered
+    rm._tasks[run.id].cancel()
+    try: await rm._tasks[run.id]
+    except asyncio.CancelledError: pass
+
+
+async def test_abandon_run_unregisters_from_approval_service(session, make_user, monkeypatch):
+    u = make_user("a")
+    approvals = _FakeApprovals()
+    rm, _, _, _ = _make_manager()
+    rm.approvals = approvals
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    session.add(run)
+    session.commit()
+    monkeypatch.setattr(run_manager.sandbox_manager, "shred_workspace", lambda *a, **k: None)
+    await rm.abandon_run("r1")
+    assert "r1" in approvals.unregistered
 
 
 async def test_create_run_disabled_mode_raises(session, make_user):

@@ -50,13 +50,21 @@ def session_subpath(run_id: str, thread_id: str) -> Path:
     return path
 
 
-def stamp_clone(repo: Repo, run_id: str, thread_id: str) -> Path:
+def stamp_clone(repo: Repo, run_id: str, thread_id: str, fresh: bool = True) -> Path:
     """Synchronous final fetch (agent always starts on latest), then a
-    self-contained clone stamp at origin/<integration_branch>."""
+    self-contained clone stamp at origin/<integration_branch>.
+
+    fresh=False is for a run's SECOND writable thread (goal-mode fix loop):
+    the dest is keyed by run_id, so a re-stamp would rmtree the previous
+    writable thread's implementation. Preserve it instead — the agent starts
+    from the run's own work, which is the whole point of a fix round."""
     settings = get_settings()
     golden_repo = settings.golden_dir / repo.name
     dest = settings.workspaces_dir / run_id / repo.name
     if dest.exists():
+        if not fresh:
+            log.info("preserving existing run workspace", run_id=run_id, repo=repo.name)
+            return dest
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "-C", str(golden_repo), "fetch", "--quiet", "origin"],
@@ -161,9 +169,10 @@ class SandboxManager:
         return env
 
     def run_thread_container(self, run: Run, thread: Thread, prompt: str, persona_prompt: str,
-                           permission_mode: str, writable_repo: Repo | None,
-                           context_repos: list[Repo],
-                           resume_from_thread_id: str | None = None) -> str:
+                             permission_mode: str, writable_repo: Repo | None,
+                             context_repos: list[Repo],
+                             resume_from_thread_id: str | None = None,
+                             preserve_workspace: bool = False) -> str:
         """Start the worker container. Ask ladder: Ask = read-only golden
         mounts only; writable clone stamps arrive with coding threads.
 
@@ -188,7 +197,8 @@ class SandboxManager:
             volumes[self.settings.npm_cache_volume] = {"bind": "/cache/npm", "mode": "rw"}
 
         if writable_repo is not None:
-            stamp = stamp_clone(writable_repo, run.id, thread.id)
+            stamp = stamp_clone(writable_repo, run.id, thread.id,
+                                fresh=not preserve_workspace)
             # UI repos (ClientApp) get the Playwright MCP config stamped into the
             # workspace — the agent SDK reads .mcp.json at session start.
             stamp_mcp_config(stamp, writable_repo)

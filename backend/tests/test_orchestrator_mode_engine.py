@@ -3,12 +3,23 @@ import pytest
 from app.db.models.mode import Mode
 from app.orchestrator.blueprints.ask import AskBlueprint
 from app.orchestrator.blueprints.base import Blueprint
+from app.orchestrator.blueprints.goal import GoalBlueprint
 from app.orchestrator import mode_engine
 
 
 def test_blueprints_registry_contains_ask():
     assert "ask" in mode_engine.BLUEPRINTS
     assert mode_engine.BLUEPRINTS["ask"] is AskBlueprint
+
+
+def test_blueprints_registry_contains_goal():
+    assert mode_engine.BLUEPRINTS["goal"] is GoalBlueprint
+
+
+def test_blueprint_for_goal_returns_instance():
+    bp = mode_engine.blueprint_for("goal")
+    assert isinstance(bp, GoalBlueprint)
+    assert bp.name == "goal"
 
 
 def test_blueprint_for_ask_returns_instance():

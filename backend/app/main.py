@@ -36,8 +36,9 @@ async def lifespan(app: FastAPI):
     control = LaneControl()
     gateway = GatewayClient()
     thread_manager = ThreadManager(ingest, relay, gateway)
-    run_manager = RunManager(ingest, relay, thread_manager, control)
     approval_service = ApprovalService(relay, control)
+    run_manager = RunManager(ingest, relay, thread_manager, control,
+                             approvals=approval_service)
     heartbeat_persister = HeartbeatPersister()
 
     app.state.relay = relay

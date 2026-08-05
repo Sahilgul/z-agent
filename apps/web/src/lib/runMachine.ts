@@ -115,6 +115,12 @@ export interface StreamItem {
   role: "user" | "agent" | null;
   /** The typed card payload (todo tasks, compaction counts, approval args…). */
   detail: Record<string, unknown>;
+  /** Event timestamp (ISO) — null on live typing deltas (not persisted yet). */
+  ts: string | null;
+  /** Seconds from the preceding user message to this agent reply — the
+   *  "took Ns" line. Null unless this is an agent message with a known
+   *  preceding user message in the same thread. */
+  durationS: number | null;
 }
 
 /** Typed status sub-kinds → display card kinds (console parity, card
@@ -150,9 +156,10 @@ function isPlumbing(e: { kind: string; detail?: Record<string, unknown> }): bool
 
 /** Fold WS typing deltas + stored events into display items. Deltas for the
  *  same (thread, kind) collapse into one growing bubble; stored events pass
- *  through untouched. Pure — tested without React. */
+ *  through untouched. Agent replies get a "took Ns" measured from the
+ *  preceding user message in the same thread. Pure — tested without React. */
 export function foldStream(
-  events: { thread_id: string; kind: string; title: string; detail: Record<string, unknown>; seq: number }[],
+  events: { thread_id: string; kind: string; title: string; detail: Record<string, unknown>; seq: number; ts?: string }[],
   deltas: { thread_id: string; kind: string; text: string }[],
 ): StreamItem[] {
   // The key must distinguish a user-authored message from an agent-authored
@@ -172,7 +179,25 @@ export function foldStream(
     live: false,
     role: e.detail.role === "user" ? "user" : e.detail.role === "agent" ? "agent" : null,
     detail: e.detail,
+    ts: typeof e.ts === "string" ? e.ts : null,
+    durationS: null,
   }));
+  // "Took Ns": an agent reply measures from the preceding USER message in
+  // the same thread — that is the question it answers. Messages with no
+  // preceding user message (replay window opened mid-session) show no line.
+  const lastUserTs = new Map<string, number>();
+  for (const item of items) {
+    if (item.kind !== "message") continue;
+    const t = item.ts ? Date.parse(item.ts) : NaN;
+    if (item.role === "user") {
+      if (!Number.isNaN(t)) lastUserTs.set(item.threadId, t);
+      continue;
+    }
+    const start = lastUserTs.get(item.threadId);
+    if (start !== undefined && !Number.isNaN(t) && t >= start) {
+      item.durationS = Math.round((t - start) / 1000);
+    }
+  }
   const live = new Map<string, StreamItem>();
   for (const d of deltas) {
     const k = `${d.thread_id}:${d.kind}`;
@@ -190,6 +215,8 @@ export function foldStream(
         live: true,
         role: null,
         detail: {},
+        ts: null,
+        durationS: null,
       });
     }
   }

@@ -18,6 +18,7 @@ from app.orchestrator.blueprints.ask import AskBlueprint
 from app.orchestrator.blueprints.base import Blueprint
 from app.orchestrator.blueprints.debug import DebugBlueprint
 from app.orchestrator.blueprints.development import DevelopmentBlueprint
+from app.orchestrator.blueprints.goal import GoalBlueprint
 from app.orchestrator.blueprints.plan import PlanBlueprint
 from app.orchestrator.blueprints.swarm import SwarmBlueprint
 
@@ -26,6 +27,7 @@ BLUEPRINTS: dict[str, type[Blueprint]] = {
     "plan": PlanBlueprint,
     "development": DevelopmentBlueprint,
     "debug": DebugBlueprint,
+    "goal": GoalBlueprint,
     "width-swarm": SwarmBlueprint,
 }
 

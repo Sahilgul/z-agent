@@ -6,7 +6,7 @@ from app.db.models.delivery import PrLink
 from app.db.models.event import Event
 from app.db.models.thread import Thread
 from app.db.models.repo import Repo
-from app.db.models.run import Plan, Run
+from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.trajectory import TrajectorySummary
 from app.services import delivery
 
@@ -99,6 +99,27 @@ def test_build_evidence_package_full(session, make_user):
     assert pkg["trajectory"] == "distilled"
 
 
+def test_build_evidence_package_prefers_plan_step_rows(session, make_user):
+    """C1: the PR evidence gate read step statuses from the planner's raw
+    structured JSON — which ALWAYS says 'pending' (the schema hint instructs
+    it), so every PR was blocked with 'plan step(s) not done' even when every
+    PlanStep row was done. The rows are the system of record."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="goal", stage="completed", title="ship")
+    plan = Plan(run_id="r1", structured={"title": "Plan A", "steps": [
+        {"index": 0, "title": "s0", "status": "pending"},  # raw planner JSON
+        {"index": 1, "title": "s1", "status": "pending"},
+    ]}, status="approved")
+    session.add_all([run, plan]); session.commit()
+    session.add_all([
+        PlanStep(plan_id=plan.id, index=0, title="s0", status="done"),
+        PlanStep(plan_id=plan.id, index=1, title="s1", status="done"),
+    ])
+    session.commit()
+    pkg = delivery.build_evidence_package("r1")
+    assert [s["status"] for s in pkg["plan_steps"]] == ["done", "done"]
+
+
 # --------------------------------------------------------------- evidence_complete
 def test_evidence_complete_empty():
     pkg = {"plan_steps": [], "threads": []}
@@ -174,6 +195,38 @@ def test_push_branch_invokes_git(monkeypatch):
     assert calls[0][0] == ["push", "-u", "origin", "agent/r1-x"]
     assert calls[0][1] == "/ws"
     assert "FLEET_PAT" in calls[0][2]
+
+
+# --------------------------------------------------------------- commit_pending
+def test_commit_pending_clean_tree_is_noop(monkeypatch):
+    calls = []
+
+    async def fake_git(args, cwd, env_extra):
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr(delivery, "_git", fake_git)
+    committed = asyncio.run(
+        delivery.commit_pending("r1", "/ws", "agent/r1-x"))
+    assert committed is False
+    assert calls == [["checkout", "-B", "agent/r1-x"], ["add", "-A"],
+                     ["status", "--porcelain"]]
+
+
+def test_commit_pending_dirty_tree_commits_with_bot_identity(monkeypatch):
+    calls = []
+
+    async def fake_git(args, cwd, env_extra):
+        calls.append(args)
+        return " M src/changed.ts" if args[:2] == ["status", "--porcelain"] else ""
+
+    monkeypatch.setattr(delivery, "_git", fake_git)
+    committed = asyncio.run(
+        delivery.commit_pending("r1", "/ws", "agent/r1-x", message="goal: ship it"))
+    assert committed is True
+    commit = calls[-1]
+    assert commit[0] == "-c" and "user.name=zagent[bot]" in commit
+    assert "commit" in commit and "goal: ship it" in commit
 
 
 # --------------------------------------------------------------- sync_before_push

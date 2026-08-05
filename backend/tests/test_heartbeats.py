@@ -161,3 +161,24 @@ async def test_persist_rolls_back_on_db_error(session, make_user, monkeypatch):
     # Must not raise — the error is swallowed + rolled back.
     h._persist("l1", "running")
     assert rolled_back["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_beat_never_resurrects_terminal_thread(session, make_user, monkeypatch):
+    """Once the control plane stamps a terminal status (stop_thread,
+    kill_replace, finish_thread), a dying container's last beats are stale by
+    definition — they must not flip the row back to idle/running (this race
+    would re-lock the repo write semaphore and re-take the capacity slot)."""
+    u = make_user("a")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
+    thread = Thread(id="l1", run_id="r1", persona="developer",
+                    status="completed", next_seq=0)
+    session.add_all([run, thread])
+    session.commit()
+
+    h = await _persist_with_clock(monkeypatch, [0.0, 1.0])
+    h._persist("l1", "idle")  # stale beat from the just-killed container
+    session.expire_all()
+    row = session.get(Thread, "l1")
+    assert row.status == "completed"  # terminal stamp wins
+    assert row.heartbeat_at is not None  # but liveness still recorded

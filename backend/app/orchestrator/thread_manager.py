@@ -73,7 +73,8 @@ class ThreadManager:
     async def spawn(self, run: Run, persona: str, prompt: str, persona_prompt: str,
                     writable_repo: Repo | None, context_repos: list[Repo],
                     resume_session: bool = False,
-                    resume_from_thread_id: str | None = None) -> Thread:
+                    resume_from_thread_id: str | None = None,
+                    preserve_workspace: bool = False) -> Thread:
         repo_name = writable_repo.name if writable_repo else None
         # Flywheel injection: pinned knowledge + the owner's
         # episodic recall join every thread's persona prompt. Cached per run, so
@@ -108,6 +109,7 @@ class ThreadManager:
             spawn_context={"prompt": prompt, "persona_prompt": persona_prompt,
                            "resume_session": resume_session,
                            "mode": run.mode,
+                           **({"preserve_workspace": True} if preserve_workspace else {}),
                            **({"resume_from_thread_id": resume_from_thread_id}
                               if resume_from_thread_id else {})},
         )
@@ -137,6 +139,7 @@ class ThreadManager:
                 run, thread, prompt, persona_prompt, permission_mode,
                 writable_repo, context_repos,
                 resume_from_thread_id=resume_from_thread_id,
+                preserve_workspace=preserve_workspace,
             )
         except Exception as exc:
             await self._mark(thread.id, "failed")
@@ -222,6 +225,43 @@ class ThreadManager:
                 await self.gateway.delete_key(key)
             except Exception as exc:
                 log.warning("key release failed", thread_id=thread_id, error=str(exc)[:120])
+
+    async def finish_thread(self, thread_id: str, final_status: str = "completed") -> None:
+        """Blueprint node-end: the thread's turn is over and it will never get
+        another one. Without this the worker container LINGERS at idle for its
+        TTL (900s engine default) — and "idle" is an ACTIVE status, so the
+        thread keeps its capacity slot AND its per-repo write lock, and the
+        PR evidence gate's "one completed thread" check can't pass until the
+        watchdog eventually flips it (review C2/C3/C4).
+
+        Order matters: stop the container FIRST (docker stop blocks until
+        removal), then stamp the terminal status — the heartbeat consumer
+        mirrors the worker's live status into the row, so a lingering
+        container's beat would overwrite an early "completed" with "idle".
+        Already-terminal threads are left alone: an honest "failed" beats a
+        cosmetic "completed"."""
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            if thread is None or thread.status in ("completed", "failed", "stopped", "replaced"):
+                return
+            container_id = thread.container_id
+        finally:
+            session.close()
+        if container_id:
+            await asyncio.to_thread(sandbox_manager.stop_container, container_id)
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            # Re-check after the stop: something else may have terminated the
+            # thread while the container was dying.
+            if thread and thread.status not in ("completed", "failed", "stopped", "replaced"):
+                thread.status = final_status
+                thread.finished_at = datetime.now(timezone.utc)
+                session.commit()
+        finally:
+            session.close()
+        await self.release_key(thread_id)
 
     async def _mark(self, thread_id: str, status: str) -> None:
         session = get_session()

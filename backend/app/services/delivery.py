@@ -31,7 +31,7 @@ from app.db.models.delivery import PrLink
 from app.db.models.event import Event
 from app.db.models.thread import Thread
 from app.db.models.repo import Repo
-from app.db.models.run import Plan, Run
+from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.trajectory import TrajectorySummary
 
 log = get_logger(service="delivery")
@@ -91,16 +91,30 @@ def build_evidence_package(run_id: str) -> dict:
             .order_by(TrajectorySummary.id.desc())
             .first()
         )
-        steps = (plan_row.structured or {}).get("steps", []) if plan_row else []
+        # Step statuses come from the PlanStep ROWS — the system of record the
+        # blueprints update as work lands. The planner's structured JSON always
+        # says "pending" (that's the schema hint), so reading it here gated
+        # every PR on steps that could never look done (review C1).
+        step_rows = (
+            session.query(PlanStep)
+            .filter_by(plan_id=plan_row.id)
+            .order_by(PlanStep.index)
+            .all()
+        ) if plan_row else []
+        if step_rows:
+            steps = [{"index": s.index, "title": s.title, "status": s.status}
+                     for s in step_rows]
+        else:
+            steps = [
+                {"index": s.get("index"), "title": s.get("title"), "status": s.get("status")}
+                for s in (plan_row.structured or {}).get("steps", [])
+            ] if plan_row else []
         return {
             "schema_version": 1,
             "run_id": run_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "plan_title": (plan_row.structured or {}).get("title", "") if plan_row else "",
-            "plan_steps": [
-                {"index": s.get("index"), "title": s.get("title"), "status": s.get("status")}
-                for s in steps
-            ],
+            "plan_steps": steps,
             "threads": [
                 {"persona": l.persona, "status": l.status, "steps": l.next_seq,
                  "cost_usd": l.cost_usd}
@@ -163,6 +177,28 @@ async def sync_before_push(run_id: str, workspace: str, target_branch: str) -> N
             f"pre-PR rebase onto origin/{target_branch} conflicted — human "
             f"resolution required in {workspace}") from exc
     log.info("workspace rebased pre-PR", run_id=run_id, target=target_branch)
+
+
+async def commit_pending(run_id: str, workspace: str, branch: str,
+                         message: str | None = None) -> bool:
+    """Deterministic commit safety net for autonomous pipelines (goal mode):
+    point the workspace at the run branch and commit any uncommitted work under
+    the bot identity. Returns True when a commit was created, False on a clean
+    tree (the agent's own commits already cover the work). checkout -B keeps
+    the working tree + HEAD, so the developer thread's commits are never lost."""
+    settings = get_settings()
+    env = {"FLEET_PAT": settings.fleet_pat}
+    await _git(["checkout", "-B", branch], cwd=workspace, env_extra=env)
+    await _git(["add", "-A"], cwd=workspace, env_extra=env)
+    staged = await _git(["status", "--porcelain"], cwd=workspace, env_extra=env)
+    if not staged.strip():
+        log.info("commit_pending: clean tree, nothing to do", run_id=run_id, branch=branch)
+        return False
+    subject = message or f"goal: uncommitted work safety net (run {run_id[:8]})"
+    await _git(["-c", "user.name=zagent[bot]", "-c", "user.email=zagent-bot@localhost",
+                "commit", "-m", subject], cwd=workspace, env_extra=env)
+    log.info("commit_pending: committed", run_id=run_id, branch=branch)
+    return True
 
 
 async def push_branch(run_id: str, repo: Repo, workspace: str, branch: str) -> None:

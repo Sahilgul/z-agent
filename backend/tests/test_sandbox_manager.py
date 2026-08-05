@@ -202,18 +202,54 @@ def test_run_thread_container_writable_stamps(session, make_user, monkeypatch):
     client = _FakeDockerClient()
     _patch_docker(monkeypatch, client)
     stamped = []
-    monkeypatch.setattr(sb, "stamp_clone", lambda repo, run_id, thread_id: stamped.append((repo.name, run_id, thread_id)) or "/tmp/stamp")
+    monkeypatch.setattr(sb, "stamp_clone", lambda repo, run_id, thread_id, fresh=True: stamped.append((repo.name, run_id, thread_id, fresh)) or "/tmp/stamp")
     mgr = sb.SandboxManager()
     repo = Repo(name="ServerApp", integration_branch="main")
     cid = mgr.run_thread_container(run, thread, "task", "persona", "acceptEdits",
                                   writable_repo=repo, context_repos=[])
     assert cid == client.containers._container.id
-    assert stamped == [("ServerApp", "r1", "l1")]
+    assert stamped == [("ServerApp", "r1", "l1", True)]
     _, kwargs = client.containers.run_calls[0]
     env = kwargs["environment"]
     assert env["FLEET_PAT"] == sb.get_settings().fleet_pat
     mounts = kwargs["volumes"]
     assert any("/workspace/ServerApp" in v.get("bind", "") and v.get("mode") == "rw" for v in mounts.values())
+
+
+def test_run_thread_container_preserve_workspace_maps_fresh_false(session, make_user, monkeypatch):
+    """Goal-mode fix loop: preserve_workspace=True must reach stamp_clone as
+    fresh=False so the run's second writable thread keeps the implementation."""
+    run, thread = _make_run_thread(session, make_user)
+    client = _FakeDockerClient()
+    _patch_docker(monkeypatch, client)
+    stamped = []
+    monkeypatch.setattr(sb, "stamp_clone", lambda repo, run_id, thread_id, fresh=True: stamped.append(fresh) or "/tmp/stamp")
+    mgr = sb.SandboxManager()
+    repo = Repo(name="ServerApp", integration_branch="main")
+    mgr.run_thread_container(run, thread, "task", "persona", "bypassPermissions",
+                             writable_repo=repo, context_repos=[],
+                             preserve_workspace=True)
+    assert stamped == [False]
+
+
+def test_stamp_clone_fresh_false_preserves_existing_workspace(monkeypatch, tmp_path):
+    """The wipe hazard: dest exists + fresh=False -> no rmtree, no re-clone —
+    the previous writable thread's work survives."""
+    repo = Repo(name="ServerApp", integration_branch="main")
+    monkeypatch.setattr(sb, "get_settings", lambda: type(
+        "S", (), {"golden_dir": tmp_path, "workspaces_dir": tmp_path})())
+    dest = tmp_path / "r1" / "ServerApp"
+    dest.mkdir(parents=True)
+    rmtrees = []
+    monkeypatch.setattr(sb.shutil, "rmtree", lambda p, ignore_errors=False: rmtrees.append(p))
+
+    def fake_run(cmd, **kw):
+        raise AssertionError("no git command may run when preserving")
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    out = sb.stamp_clone(repo, "r1", "l2", fresh=False)
+    assert out == dest
+    assert rmtrees == []
 
 
 def test_stop_container_calls_stop_and_remove(monkeypatch):

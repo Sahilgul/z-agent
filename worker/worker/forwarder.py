@@ -9,6 +9,7 @@ only (loss is fine). Heartbeats ride a TTL key + pub/sub.
 from __future__ import annotations
 
 import json
+import time
 
 import redis.asyncio as redis
 from zagent_contracts import StepEvent, TypingDelta
@@ -35,6 +36,26 @@ class Forwarder:
                 "payload": json.dumps(event.model_dump(mode="json")),
             })
         await pipe.execute()
+
+    async def publish_approval_request(self, payload: dict) -> None:
+        """Bridge the engine's approval card to the backend ApprovalService:
+        XADD to approvals:{run_id} so the backend creates the DECIDABLE
+        Approval row (the interactive card with buttons). Without this the
+        engine path only emitted a display-only StepEvent and no decision
+        could ever arrive — the BLPOP always timed out into a deny."""
+        await self.redis.xadd(f"approvals:{self.run_id}", {
+            "approval_id": payload["approval_id"],
+            "thread_id": self.thread_id,
+            "kind": "tool",
+            "payload": json.dumps({
+                "tool": payload.get("tool"),
+                "args": payload.get("args"),
+                "preview": payload.get("preview"),
+                "destructive": payload.get("destructive", False),
+                "always_allowable": payload.get("always_allowable", False),
+            }),
+            "requested_at": str(time.time()),
+        }, maxlen=200, approximate=True)  # cap: a retrying gate can't grow it forever
 
     async def publish_deltas(self, deltas: list[TypingDelta]) -> None:
         if not deltas:

@@ -65,6 +65,17 @@ AGENT_RND_PERSONA = (
     "questions — citing their file:line evidence. You are read-only: you never modify files."
 )
 
+GOAL_PERSONA = (
+    "You are a senior autonomous delivery engineer in a ZERO-INTERRUPTION pipeline: "
+    "feature story (PRD) to pull request with no human checkpoints. Explore the codebase "
+    "for context, plan precisely, harden the plan through the critique rounds (treat "
+    "critic findings as authoritative review comments), implement every step in the "
+    "writable clone, and leave the tree green for the control plane's verification gate "
+    "(tests, ruff/lint, build, dev boot). Commit your work on the run's agent branch — "
+    "the control plane pushes and opens the PR. Never stop to ask permission; a clear "
+    "failure report beats a forced bad result."
+)
+
 # Permissions scope (modes as data): which repos a thread under this mode may
 # stamp a writable clone for. Empty = read-only. ``repos`` is an allowlist; ``writable``
 # gates whether the thread gets a writable mount at all.
@@ -167,13 +178,26 @@ def seed() -> None:
                                    "ci_green": False, "screenshots": False},
             ))
             session.commit()
+        # Goal = zero-interruption PRD->PR pipeline. autonomy_default="autonomous"
+        # is load-bearing: it maps to bypassPermissions, so the engine's approval
+        # gate never fires — the mode is DEFINED by running end-to-end without a
+        # single approval card.
+        if session.query(Mode).filter_by(name="goal").one_or_none() is None:
+            session.add(Mode(
+                name="goal", persona_prompt=GOAL_PERSONA,
+                permission_mode="bypassPermissions", topology="goal", model_tier="strong",
+                autonomy_default="autonomous", permissions=ANY_REPO_WRITABLE_PERMS,
+                evidence_contract={"tests_pass": True, "diff_summary": True,
+                                   "ci_green": False, "screenshots": False},
+            ))
+            session.commit()
 
         _seed_demo_run(session)
         _seed_welcome_thread(session)
         _seed_triggers(session)
         from app.services.playbooks import seed_playbooks
         seeded = seed_playbooks(session)
-        print(f"[seed] done: system user, ask/plan/development/debug modes, demo run, welcome thread, {seeded} playbook(s)")
+        print(f"[seed] done: system user, ask/plan/development/debug/goal modes, demo run, welcome thread, {seeded} playbook(s)")
     finally:
         session.close()
 

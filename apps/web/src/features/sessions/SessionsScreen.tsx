@@ -36,6 +36,7 @@ const MODE_OPTIONS = [
   { value: "development", label: "develop" },
   { value: "debug", label: "debug" },
   { value: "agent-rnd", label: "swarm" },
+  { value: "goal", label: "goal" },
 ] as const;
 
 type Mode = (typeof MODE_OPTIONS)[number]["value"];
@@ -49,6 +50,7 @@ const SUGGESTIONS: { mode: Mode; label: string; prompt: string }[] = [
   { mode: "development", label: "develop", prompt: "fix the flaky login redirect and open a PR" },
   { mode: "debug", label: "debug", prompt: "why did the last patrol run fail?" },
   { mode: "agent-rnd", label: "swarm", prompt: "spawn 4 explorers to map auth across the fleet" },
+  { mode: "goal", label: "goal", prompt: "ship the team usage-stats page: plan it, build it, open the PR" },
 ];
 
 export function SessionsScreen() {
