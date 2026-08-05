@@ -1,4 +1,10 @@
-"""DAY-1 TRACER BULLET (plan §9 Phase 0).
+"""LEGACY tracer bullet — Claude Agent SDK based (SUPERSEDED Aug 5, Round 32/Phase 0).
+
+Replaced by worker/spike/matrix.py, which runs the FULL a–g DECISION_MATRIX
+over the OpenAI-compatible gateway using langchain-openai ChatOpenAI + a
+LangGraph interrupt/resume graph (check g). Kept for history; do NOT run this
+against the open-model route — it speaks the Anthropic protocol the SDK expects,
+which is not what the Phase 0 gate validates.
 
 Headless agent, run INSIDE the worker container image on the real workstation,
 streaming normalized StepEvents over WS to a static page — no DB, no auth, no
@@ -41,16 +47,22 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, ToolUseBlock
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    ResultMessage,
+    ToolUseBlock,
+)
 from zagent_contracts import Notebook, Plan, StepEvent, StepKind
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from worker.normalize import Normalizer  # noqa: E402
+from worker.normalize import Normalizer
 
 RESULTS_DIR = Path(os.environ.get("SPIKE_RESULTS_DIR", "./spike-results"))
 WS_PORT = int(os.environ.get("SPIKE_WS_PORT", "8765"))
@@ -374,7 +386,7 @@ def write_matrix(results: dict[str, Any]) -> None:
     template = Path(__file__).parent / "DECISION_MATRIX.md"
     out = RESULTS_DIR / "DECISION_MATRIX.md"
     rendered = template.read_text()
-    rendered = rendered.replace("{{GENERATED_AT}}", datetime.now(timezone.utc).isoformat())
+    rendered = rendered.replace("{{GENERATED_AT}}", datetime.now(UTC).isoformat())
     rendered = rendered.replace("{{RESULTS_JSON}}", json.dumps(results, indent=2, default=str))
     out.write_text(rendered)
     print(f"[spike] decision matrix -> {out}")

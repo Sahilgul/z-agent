@@ -2,8 +2,10 @@
 
 Generated: {{GENERATED_AT}}
 
-Thresholds are registered here BEFORE the spike runs (plan §9 Phase 0 exit: "no
-number-and-a-debate"). The matrix decides Kimi vs Claude-on-Foundry mechanically.
+Thresholds are registered here BEFORE the spike runs ("no number-and-a-debate").
+The matrix decides the open-model route AND the loop implementation mechanically.
+(Decision rule reconciled Aug 5 per Plan-delta Round 31 — Claude-on-Foundry
+fallback removed; R2 decision = open models via OpenAI-compatible protocol.)
 
 ## Thresholds (fixed pre-run)
 
@@ -17,12 +19,12 @@ number-and-a-debate"). The matrix decides Kimi vs Claude-on-Foundry mechanically
 | f | PROMPT CACHING (the deciding number) | `cache_read_input_tokens > 0` on run 2 with identical prefix | If caching doesn't survive translation, per-run cost/latency is several-fold worse and NO architecture change fixes it |
 | g | interrupt+inject+resume | nudge visibly incorporated (canary word present), `state_lost=false` | Phase 3 "nudge a drifting lane" exit depends on mid-work steering |
 
-## Decision rule (fixed pre-run)
+## Decision rule (fixed pre-run; reconciled Aug 5, Round 31)
 
-- **ALL PASS** → Kimi on Foundry is the model route. Proceed to Phase 1.
-- **f FAILS** → recompute per-run cost with uncached pricing; if several-fold worse, switch to Claude-on-Foundry NOW (gateway config change, not an architecture change).
-- **a, d, or e FAILS** → Claude-on-Foundry. Translation fidelity is not negotiable.
-- **b, c, or g FAILS, everything else passes** → document workaround (retry/poll fallback); revisit before Phase 2 gate.
+- **ALL PASS (on ≥2 open models — Kimi + one Qwen/Llama variant)** → the model route holds; "model-agnostic" is validated, not asserted. Proceed to engine Phase 1.
+- **f FAILS** → recompute per-run cost with uncached pricing; if several-fold worse, try an alternate open model route (gateway config change, not an architecture change).
+- **a, d, or e FAILS on Kimi** → run the same matrix on a second open model. If it passes → model-route decision, plan unchanged. If the second model ALSO fails → the common factor is the translation layer → FALLBACK: hand-rolled loop over raw OpenAI completions (no langchain-openai); every other plan decision stands.
+- **b, c, or g FAILS, everything else passes** → document workaround (retry/poll fallback). A **g** failure additionally triggers a LangGraph interrupt/resume investigation BEFORE Phase 2 — the entire approval architecture stands on it.
 
 ## Results
 
