@@ -44,15 +44,19 @@ export function ReposScreen() {
     queryFn: () => api.get<Repo[]>("/repos").catch(() => [] as Repo[]),
   });
 
-  // poll only while any repo is mid-onboarding
+  // poll only while any repo is mid-onboarding. L-39: depend on the
+  // derived boolean, not the `repos` array — every refetch produced a new
+  // `repos` reference, tearing down and rebuilding the interval each
+  // cycle (and resetting the 4s clock). The boolean only flips when the
+  // polling need actually changes (unsettled↔all-settled).
+  const polling = repos.some((r) => !SETTLED.includes(r.status));
   useEffect(() => {
-    if (repos.some((r) => !SETTLED.includes(r.status))) {
-      timer.current = setInterval(() => void qc.invalidateQueries({ queryKey: qk.repos }), 4000);
-    }
+    if (!polling) return;
+    timer.current = setInterval(() => void qc.invalidateQueries({ queryKey: qk.repos }), 4000);
     return () => {
       if (timer.current) clearInterval(timer.current);
     };
-  }, [repos, qc]);
+  }, [polling, qc]);
 
   async function fetchBranches() {
     setBusy(true);

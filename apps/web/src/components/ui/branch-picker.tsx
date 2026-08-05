@@ -62,7 +62,11 @@ export function BranchPicker({
         id={id}
         role="combobox"
         aria-expanded={open}
-        aria-controls="branch-picker-list"
+        // L-37: the listbox node (#branch-picker-list) only renders while
+        // `open`, so a static aria-controls pointed at a non-existent node
+        // when closed — screen readers following the control hit a broken
+        // reference. Only advertise the control when the listbox is mounted.
+        aria-controls={open ? "branch-picker-list" : undefined}
         autoComplete="off"
         value={query}
         placeholder="type to filter branches"
@@ -76,7 +80,13 @@ export function BranchPicker({
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setOpen(true);
-            setActive((i) => Math.min(i + 1, matches.length - 1));
+            // L-35: on empty matches `matches.length - 1` is -1, so
+            // Math.min(i + 1, -1) clamped active to -1 (and matches[-1]
+            // then resolves to the last element in JS — wrong highlight).
+            // When there's nothing to highlight, hold active at 0.
+            setActive((i) =>
+              matches.length === 0 ? 0 : Math.min(i + 1, matches.length - 1),
+            );
           } else if (e.key === "ArrowUp") {
             e.preventDefault();
             setActive((i) => Math.max(i - 1, 0));

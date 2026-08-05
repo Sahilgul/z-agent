@@ -145,7 +145,7 @@ export function SessionsScreen() {
         mode,
         task: title ?? task,
         repo,
-        fanout: fanout === "" ? undefined : fanout,
+        fanout: fanout === "" || Number.isNaN(fanout) ? undefined : fanout,
       });
       setTask("");
       setStartingNew(false);
@@ -376,7 +376,15 @@ export function SessionsScreen() {
                 min={1}
                 placeholder="threads"
                 value={fanout}
-                onChange={(e) => setFanout(e.target.value === "" ? "" : Number(e.target.value))}
+                onChange={(e) => {
+                  // L-38: Number(""/non-numeric) is NaN; JSON.stringify(NaN)
+                  // serializes to null on send, so the backend got
+                  // fanout:null instead of "unset". Coerce NaN back to ""
+                  // so the empty sentinel round-trips correctly.
+                  if (e.target.value === "") { setFanout(""); return; }
+                  const n = Number(e.target.value);
+                  setFanout(Number.isNaN(n) ? "" : n);
+                }}
                 title="swarm width — the Lead still authors the slices"
                 className="w-[84px] font-mono"
               />

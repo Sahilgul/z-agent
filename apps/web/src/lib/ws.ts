@@ -41,7 +41,12 @@ export class RunSocket {
       this.onState?.(false);
       if (!this.closedByUs) this.scheduleReconnect();
     };
-    ws.onerror = () => ws.close();
+    // L-40: close the instance's canonical socket reference, not the
+    // captured local `ws` — if this.ws was reassigned (a reconnect or an
+    // explicit close()) the local would close a stale socket while the
+    // live one kept this.ws inconsistent. Closing this.ws keeps the
+    // instance state and the close action on the same reference.
+    ws.onerror = () => this.ws?.close();
   }
 
   private scheduleReconnect(): void {

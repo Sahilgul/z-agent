@@ -56,7 +56,10 @@ function InputGroupAddon({
         if ((e.target as HTMLElement).closest("button")) {
           return
         }
-        e.currentTarget.parentElement?.querySelector("input")?.focus()
+        // L-36: only `input` was focused — a textarea-based InputGroup
+        // (InputGroupTextarea renders <textarea>) got no focus on addon
+        // click. Focus whichever focusable control is present.
+        e.currentTarget.parentElement?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea")?.focus()
       }}
       {...props}
     />
