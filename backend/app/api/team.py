@@ -5,6 +5,8 @@ ONCE), regenerate, deactivate, list pending. Admin stats are METADATA-ONLY
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -13,6 +15,14 @@ from app.db.base import get_session
 from app.db.models.run import Run
 from app.db.models.user import User
 from app.services.team import add_teammate, deactivate_user, regenerate_code
+
+try:
+    from app.ado.client import IdentityResolutionError
+except ImportError:  # ado client optional in some test envs
+    class IdentityResolutionError(Exception):  # noqa: N818
+        """Local fallback when the ado client isn't importable."""
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/team", tags=["team"])
 
@@ -43,8 +53,17 @@ async def create_user(body: AddTeammateBody, _: User = Depends(admin_user)):
         user, code = await add_teammate(body.username, body.display_name, body.ado_email)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IdentityResolutionError as exc:
+        # M-28: identity resolution failed for the client-provided email — a
+        # client-input issue, not a gateway-down issue. Surface 422 with a
+        # generic message (don't leak internals).
+        log.warning("identity resolution failed for %s", body.username)
+        raise HTTPException(status_code=422, detail="could not resolve ADO identity") from exc
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"identity binding failed: {exc}") from exc
+        # M-28: the broad except leaked internal error text (`{exc}`) to the
+        # client. Log the full error server-side; return a generic 502.
+        log.exception("identity binding failed for %s", body.username)
+        raise HTTPException(status_code=502, detail="identity binding failed") from exc
     # The code is shown ONCE — send via Slack; it is never retrievable again.
     return {"id": user.id, "username": user.username, "setup_code": code,
             "ado_bound": user.ado_descriptor is not None}

@@ -174,6 +174,11 @@ def report(before: datetime | None = None, after: datetime | None = None) -> dic
 def before_after(split: datetime) -> dict:
     """The compounding proof: bench performance before vs after a cutover
     (distiller adoption, model swap, guidebook rollout)."""
+    # M-30: the API query param can arrive tz-aware while EvalRun.created_at is
+    # naive UTC; comparing offset-aware vs offset-naive raises TypeError ->
+    # 500. Normalize split to naive UTC before the comparison.
+    if split.tzinfo is not None:
+        split = split.astimezone(timezone.utc).replace(tzinfo=None)
     return {"before": report(before=split), "after": report(after=split),
             "split": split.isoformat()}
 

@@ -65,9 +65,27 @@ def first_login(body: FirstLoginBody, response: Response):
         pin_hash = hash_pin(body.pin)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # M-31: the 8-digit setup code was brute-forceable — first-login had NO
+    # rate limiting. Reuse the login lockout: check lockout before the attempt,
+    # then record a failed attempt on a bad code so MAX_FAILED_ATTEMPTS locks
+    # the account for LOCKOUT_MINUTES (same posture as the PIN login).
+    pre_session = get_session()
+    try:
+        pre = pre_session.query(User).filter_by(username=body.username).one_or_none()
+        if pre is not None:
+            check_lockout(pre)
+    finally:
+        pre_session.close()
     try:
         user = redeem_setup_code(body.username, body.code, pin_hash)
     except ValueError as exc:
+        fail_session = get_session()
+        try:
+            row = fail_session.query(User).filter_by(username=body.username).one_or_none()
+            if row is not None:
+                record_failed_attempt(fail_session, row)
+        finally:
+            fail_session.close()
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     if body.display_name:
         session = get_session()

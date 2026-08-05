@@ -5,12 +5,18 @@ shared-by-design exception.
 
 from __future__ import annotations
 
+import json
+import logging
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.deps import current_user
 from app.db.models.user import User
 from app.services import ideas
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ideas", tags=["ideas"])
 
@@ -56,6 +62,15 @@ async def ask_counsel(thread_id: int, user: User = Depends(current_user)):
         return await ideas.ask_counsel(thread_id)
     except ideas.IdeasError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        # M-29: gateway errors (LLM gateway down / 5xx) used to propagate as
+        # 500. Surface as 502 (bad gateway) with a generic message.
+        log.warning("ask_counsel gateway failure", thread_id=thread_id, error=str(exc))
+        raise HTTPException(status_code=502, detail="counsel gateway unavailable") from exc
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        # M-29: malformed LLM JSON / unexpected shape used to 500. Surface 422.
+        log.warning("ask_counsel bad gateway response", thread_id=thread_id, error=str(exc))
+        raise HTTPException(status_code=422, detail="counsel returned a malformed response") from exc
 
 
 @router.post("/{thread_id}/summarize")
@@ -64,6 +79,14 @@ async def summarize(thread_id: int, user: User = Depends(current_user)):
         return await ideas.summarize(thread_id)
     except ideas.IdeasError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        # M-29: gateway errors used to propagate as 500 -> 502.
+        log.warning("summarize gateway failure", thread_id=thread_id, error=str(exc))
+        raise HTTPException(status_code=502, detail="summary gateway unavailable") from exc
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        # M-29: malformed LLM JSON used to 500 -> 422.
+        log.warning("summarize bad gateway response", thread_id=thread_id, error=str(exc))
+        raise HTTPException(status_code=422, detail="summary returned a malformed response") from exc
 
 
 @router.post("/{thread_id}/promote", status_code=201)

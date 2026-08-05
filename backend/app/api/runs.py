@@ -36,6 +36,13 @@ def _persist_user_message(run_id: str, thread_id: str, text: str) -> dict | None
         thread = session.get(Thread, thread_id)
         if thread is None:
             return None
+        # M-32: the read-modify-write on thread.next_seq raced under
+        # concurrency — two nudges to the same thread read the same seq,
+        # both wrote seq+1, and both inserted an Event with the SAME seq
+        # (duplicate seq events, breaking per-thread seq uniqueness). Lock
+        # the row (Postgres FOR UPDATE serializes concurrent calls; SQLite
+        # ignores it — tests are single-session so no race there).
+        thread = session.query(Thread).filter_by(id=thread_id).with_for_update().one()
         seq = thread.next_seq
         thread.next_seq = seq + 1
         session.add(Event(
@@ -261,6 +268,14 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                 raise HTTPException(status_code=404, detail="thread not found")
         else:
             thread_id = _lead_thread_id(run_id)
+        # M-33: with no thread for the run, the old code silently dropped the
+        # message and fell through to `return {"status": "ok"}` — the caller
+        # never learned the nudge wasn't delivered. Surface a 404 so the client
+        # can retry / re-render instead of believing the message landed.
+        if thread_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail="no thread available for this run; message not delivered")
         if thread_id:
             # Mode switch takes effect here: if run.mode no longer matches the
             # mode the current thread was spawned under, chain the new blueprint
