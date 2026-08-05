@@ -38,9 +38,25 @@ export async function subscribeToPush(): Promise<boolean> {
     applicationServerKey: urlB64ToUint8Array(public_key) as BufferSource,
   });
   const json = sub.toJSON() as { endpoint?: string; keys?: Record<string, string> };
-  await api.post("/push/subscriptions", {
-    endpoint: json.endpoint ?? sub.endpoint,
-    keys: json.keys ?? {},
-  });
+  try {
+    await api.post("/push/subscriptions", {
+      endpoint: json.endpoint ?? sub.endpoint,
+      keys: json.keys ?? {},
+    });
+  } catch {
+    // G-27: the POST failed — the browser is now subscribed to push but the
+    // server has no record of it (an orphan). Left in place, the user
+    // believes they opted in (the toggle says so) but no notifications
+    // arrive, and a later retry would find an existing subscription and
+    // skip re-subscribing — stuck. Unsubscribe the browser side so its
+    // state matches the server (not opted in) and surface the failure
+    // (return false) so the UI can tell the user it didn't take.
+    try {
+      await sub.unsubscribe();
+    } catch {
+      /* best-effort cleanup; the surfaced false is the signal */
+    }
+    return false;
+  }
   return true;
 }

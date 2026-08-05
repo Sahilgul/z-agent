@@ -16,12 +16,14 @@ vi.mock("../lib/api", () => ({
 // Browser push primitives — jsdom doesn't ship these, so install them on
 // navigator/window before importing the module under test.
 function installPushPrimitives() {
+  const unsubscribe = vi.fn(async () => true);
   const subscribe = vi.fn(async () => ({
     endpoint: "https://push.example/sub/123",
     toJSON: () => ({
       endpoint: "https://push.example/sub/123",
       keys: { p256dh: "p256dh-key", auth: "auth-key" },
     }),
+    unsubscribe,
   }));
   const registration = { pushManager: { subscribe } };
   Object.defineProperty(navigator, "serviceWorker", {
@@ -32,7 +34,7 @@ function installPushPrimitives() {
     configurable: true,
     value: {},
   });
-  return { subscribe };
+  return { subscribe, unsubscribe };
 }
 
 describe("subscribeToPush", () => {
@@ -62,5 +64,22 @@ describe("subscribeToPush", () => {
     const ok = await subscribeToPush();
     expect(ok).toBe(false);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("unsubscribes the orphaned browser subscription when the POST fails (G-27)", async () => {
+    // G-27: if the server POST fails, the browser is left subscribed to push
+    // while the server has no record — an orphan. The user believes they
+    // opted in (toggle says so) but no notifications arrive, and a retry
+    // finds the existing subscription and skips re-subscribing — stuck.
+    // subscribeToPush must unsubscribe the browser side AND return false so
+    // the UI can surface the failure.
+    const { unsubscribe } = installPushPrimitives();
+    get.mockResolvedValue({ public_key: "BPk_test_key", enabled: true });
+    post.mockRejectedValue(new Error("server down"));
+    const { subscribeToPush } = await import("../lib/push");
+    const ok = await subscribeToPush();
+    expect(ok).toBe(false);
+    expect(post).toHaveBeenCalledWith("/push/subscriptions", expect.anything());
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });
