@@ -102,11 +102,9 @@ built SPA behind a single origin.
 cd infra/vm
 cp .env.example .env       # every :?-marked var must be filled or deploy aborts
 ./deploy.sh                # builds images, migrates, seeds, starts the stack
-./deploy.sh tailscale      # optional: tailnet-only HTTPS access
 ```
 
-Reachable at `http://<vm>:8080`, or `https://zagent.<tailnet>.ts.net` with the
-Tailscale profile.
+Reachable at `http://<vm>:8080`.
 
 ### Data root — read this before changing volumes
 

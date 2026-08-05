@@ -118,32 +118,10 @@ services:
       - egress          # its own path out, domain-allowlisted by squid.conf
     restart: unless-stopped
 
-  # Phone/laptop access over the tailnet (plan §1 milestone: watch a run from a
-  # phone). Brings the backend up as https://<host>.<tailnet>.ts.net — TLS
-  # terminated by Tailscale, cookie `secure` flag flips at the VM move.
-  # One-time: tailscale login on the host, then
-  #   docker compose --profile tailscale up -d
-  tailscale:
-    profiles: [tailscale]
-    image: tailscale/tailscale:stable
-    hostname: zagent
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:-}      # reusable auth key, or leave empty + login interactively once
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_SERVE_CONFIG: /config/serve.json
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./tailscale/serve.json:/config/serve.json:ro
-    depends_on:
-      - backend
-    networks: [internal]
-    restart: unless-stopped
-
 volumes:
   redis-data:
   gateway-db-data:
   app-data:
-  tailscale-state:
   pkg-cache:
   pip-cache:
   npm-cache:

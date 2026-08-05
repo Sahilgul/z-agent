@@ -34,7 +34,7 @@ class FirstLoginBody(BaseModel):
 def _set_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         "zagent_token", token, httponly=True, samesite="lax",
-        secure=False,  # Phase 1: Tailscale TLS terminates ahead; flip at the VM move
+        secure=False,  # Phase 1: plain HTTP; flip once TLS terminates ahead
         max_age=60 * 60 * 24 * 14,
     )
 

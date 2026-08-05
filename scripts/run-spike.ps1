@@ -24,5 +24,5 @@ docker run --rm -it `
   zagent-worker:0.1.0 `
   python -m spike.tracer $Check --golden /golden/repos --repo $Repo --branch $Branch
 
-Write-Host "Open http://localhost:8766 on your phone (via Tailscale) to watch live."
+Write-Host "Open http://localhost:8766 to watch live."
 Write-Host "Decision matrix: $root/spike-results/DECISION_MATRIX.md"

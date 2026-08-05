@@ -2,7 +2,8 @@ name: zagent
 
 # Ubuntu-VM stack (plan §7 Phase 4 gate — the production-shaped deployment).
 # Everything the app needs runs here; the only internet-egress services are
-# `gateway` (Foundry) and `db`-adjacent nothing. Access via Tailscale profile.
+# `gateway` (Foundry) and `db`-adjacent nothing. Access via the web service's
+# published port (see its `ports:` note).
 #
 #   db          — APP Postgres (Phase 4 cutover: ZAGENT_DB_URL points here)
 #   redis       — event bus (AOF everysec)
@@ -166,7 +167,7 @@ services:
       - backend
     ports:
       # Public pilot mode (user decision, Aug 2): plain HTTP on all interfaces;
-      # NSG inbound 8080 must be open. Tailscale profile remains the secure path.
+      # NSG inbound 8080 must be open.
       - "8080:80"
     networks: [internal]
     restart: unless-stopped
@@ -182,27 +183,10 @@ services:
       - egress
     restart: unless-stopped
 
-  tailscale:
-    profiles: [tailscale]
-    image: tailscale/tailscale:stable
-    hostname: zagent
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_SERVE_CONFIG: /config/serve.json
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./serve.json:/config/serve.json:ro
-    depends_on:
-      - web
-    networks: [internal]
-    restart: unless-stopped
-
 volumes:
   pg-data:
   redis-data:
   gateway-db-data:
-  tailscale-state:
   pkg-cache:
   pip-cache:
   npm-cache:
