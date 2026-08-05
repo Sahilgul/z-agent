@@ -21,3 +21,4 @@ dist/
 .coverage
 out.txt
 team_fail.txt
+CompetitorReposAnalysis/
