@@ -202,7 +202,8 @@ class ApprovalBroker:
             decision = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return {"decision": "deny", "reason": "malformed decision payload — denied"}
-        if decision.get("decision") not in ("allow", "allow_once", "always_allow", "deny"):
+        if decision.get("decision") not in ("allow", "allow_once", "always_allow",
+                                            "edited_allow", "deny"):
             return {"decision": "deny", "reason": "unknown decision — denied"}
         return decision
 

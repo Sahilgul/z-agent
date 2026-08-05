@@ -135,10 +135,13 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
     # SLO fail instead of passing by default).
     result.events_emitted = emitter._seq
     result.events_lost = max(0, emitter._seq - len(events))
-    # Count tool calls + ok from events
-    tool_events = [e for e in events if e.detail.get("tool")]
+    # Count tool calls + ok from events. The sink closure already guards
+    # with `getattr(e, "detail", None) or {}` — events CAN arrive with a
+    # missing/None detail, so this post-processing must guard too (an
+    # AttributeError here escapes run_soak and the SLO is never evaluated).
+    tool_events = [e for e in events if (getattr(e, "detail", None) or {}).get("tool")]
     result.tool_calls = len(tool_events)
-    result.tool_calls_ok = sum(1 for e in tool_events if e.detail.get("ok"))
+    result.tool_calls_ok = sum(1 for e in tool_events if (e.detail or {}).get("ok"))
     if deltas and first_delta_at is not None:
         # H-14: time-to-FIRST-delta (captured in the delta_sink closure), not
         # the full runtime — the old code used `time.monotonic() - started`

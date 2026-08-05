@@ -187,12 +187,23 @@ class EngineRunner:
         Each pending interrupt is an approval card: emit it, wait for the
         human (deny-on-timeout inside the broker), resume with the decision.
         """
-        result = await graph.ainvoke(input_or_none, config)
+        result: dict[str, Any] = {}
+        started = False
         while True:
+            # Service PENDING interrupts before invoking: on a container
+            # restart the checkpoint already holds the approval card's
+            # payload (with the approval_id the human is deciding on).
+            # Invoking first would re-execute the gate node, regenerate a
+            # NEW approval_id, and orphan the pending decision.
             snap = await graph.aget_state(config)
             interrupts = [i for task in snap.tasks for i in task.interrupts]
             if not interrupts:
-                return result or {}
+                if started and not snap.next:
+                    return result
+                result = await graph.ainvoke(
+                    input_or_none if not started else None, config)
+                started = True
+                continue
             payload = interrupts[0].value
             await self._emit_approval_card(payload)
             self.status = "input_required"
@@ -205,6 +216,7 @@ class EngineRunner:
             await self.forwarder.publish_events([
                 self.emitter.approval_decision(payload["approval_id"], decision, self.task_id)])
             result = await graph.ainvoke(Command(resume=decision), config)
+            started = True
 
     async def _emit_approval_card(self, payload: dict[str, Any]) -> None:
         """Render the interrupt payload as the approval-card StepEvent —
@@ -249,6 +261,14 @@ class EngineRunner:
                 # First turn (or continuation of an in-flight one).
                 if fresh or snap.next:
                     await self._run_turn(graph, config, pending_input, episodic)
+                elif self.status == "running":
+                    # Resumed into an already-completed graph (container
+                    # replacement on a finished thread): no turn runs, so
+                    # nothing would ever move status off "running" — the
+                    # idle watchdog only fires on "idle" and the thread
+                    # would linger forever.
+                    self.status = "idle"
+                    await self.forwarder.heartbeat(self.status)
 
                 # Idle turn loop: linger for nudges until kill or idle TTL.
                 while not self._stop.is_set():
@@ -290,6 +310,10 @@ class EngineRunner:
             await self.forwarder.close()
             await self.broker.close()
             await self.control.close()
+            try:
+                episodic.close()
+            except Exception:  # noqa: BLE001
+                pass
         return 0 if self.status != "failed" else 1
 
     async def _run_turn(self, graph: Any, config: dict[str, Any], input_or_none: Any,
@@ -387,36 +411,52 @@ class EngineRunner:
         """Drain the control channel. Nudges queue for the turn boundary; kill
         and interrupt act immediately."""
         while not self._stop.is_set():
-            msg: ControlMessage = await self.control.queue.get()
-            self.last_activity = time.monotonic()
-            if msg.type == "kill":
-                self.status = "stopped"
+            try:
+                msg: ControlMessage = await self.control.queue.get()
+                self.last_activity = time.monotonic()
+                if msg.type == "kill":
+                    self.status = "stopped"
+                    # Stop FIRST: a Redis blip on the heartbeat must not
+                    # leave the thread unkillable with a dead pump.
+                    self._stop.set()
+                    try:
+                        await self.forwarder.heartbeat(self.status)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    return
+                if msg.type == "nudge":
+                    await self._pending_nudges.put(msg)
+                elif msg.type == "spawn_done":
+                    # The feed signals a spawned subagent/swarm thread finished.
+                    # This is the production path that moves a spawn out of
+                    # "running" (besides the 2h watchdog) — without it the
+                    # registry saturated permanently after SWARM_MAX_SLICES
+                    # spawns and every subsequent fan-out was vetoed.
+                    self._spawn_registry.finish(msg.text)
+                elif msg.type == "mode":
+                    try:
+                        self.mode = Mode(msg.mode)
+                        # Mode transitions are audited via a durable event.
+                        from zagent_contracts import StepKind
+                        await self.forwarder.publish_events([self.emitter._next(
+                            StepKind.STATUS,
+                            f"mode → {self.mode.value}",
+                            {"kind": "mode_transition", "mode": self.mode.value},
+                            self.task_id, None,
+                        )])
+                    except ValueError:
+                        pass
                 await self.forwarder.heartbeat(self.status)
-                self._stop.set()
-                return
-            if msg.type == "nudge":
-                await self._pending_nudges.put(msg)
-            elif msg.type == "spawn_done":
-                # The feed signals a spawned subagent/swarm thread finished.
-                # This is the production path that moves a spawn out of
-                # "running" (besides the 2h watchdog) — without it the
-                # registry saturated permanently after SWARM_MAX_SLICES
-                # spawns and every subsequent fan-out was vetoed.
-                self._spawn_registry.finish(msg.text)
-            elif msg.type == "mode":
-                try:
-                    self.mode = Mode(msg.mode)
-                    # Mode transitions are audited via a durable event.
-                    from zagent_contracts import StepKind
-                    await self.forwarder.publish_events([self.emitter._next(
-                        StepKind.STATUS,
-                        f"mode → {self.mode.value}",
-                        {"kind": "mode_transition", "mode": self.mode.value},
-                        self.task_id, None,
-                    )])
-                except ValueError:
-                    pass
-            await self.forwarder.heartbeat(self.status)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                # Same doctrine as the heartbeat loop (M-06): a Redis blip
+                # must not kill the control pump — without it the thread is
+                # permanently unresponsive to kill/nudge/mode/spawn_done.
+                log.warning("control pump iteration failed — continuing",
+                            run_id=self.run_id, thread_id=self.thread_id,
+                            exc_info=True)
+                await asyncio.sleep(0.5)
 
     async def _heartbeat_loop(self) -> None:
         while not self._stop.is_set():
@@ -448,12 +488,12 @@ class EngineRunner:
                             run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
 
     async def _emit_engine_error(self, error: str) -> None:
-        from zagent_contracts import StepEvent, StepKind
-        event = StepEvent(
-            run_id=self.run_id, thread_id=self.thread_id, context_id=self.context_id,
-            task_id=self.task_id, seq=self.emitter._seq,
-            kind=StepKind.STATUS, title="engine error",
-            detail={"error": error},
+        from zagent_contracts import StepKind
+        # Route through _next so seq is allocated monotonically — reading
+        # emitter._seq without advancing it made the NEXT event reuse the
+        # same seq, so consumers deduping on seq dropped legitimate events.
+        event = self.emitter._next(
+            StepKind.STATUS, "engine error", {"error": error}, self.task_id, None,
         )
         await self.forwarder.publish_events([event])
 

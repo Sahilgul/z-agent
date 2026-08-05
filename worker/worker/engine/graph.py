@@ -171,7 +171,9 @@ def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMes
             try:
                 stage_text = STAGE_ENVELOPES[GoalStage(stage_raw)]
                 parts.append(stage_text)
-            except ValueError:
+            except (ValueError, KeyError):
+                # DONE/BLOCKED have no envelope by design — a nudge on a
+                # blocked/finished goal thread must not crash the turn.
                 pass
 
     if not parts:
@@ -422,7 +424,13 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
             metrics.increment("approvals_requested")
         decision = interrupt(payload)
         verdict = decision.get("decision", "deny")
-        if verdict in ("allow", "allow_once", "always_allow", "edited_allow"):
+        if verdict == "edited_allow" and "edited_args" not in decision:
+            # An "edited" allow with no edited_args must not silently execute
+            # the original args — treat as a malformed decision (deny).
+            approved[tc_id] = {"approved": False,
+                               "reason": "edited_allow without edited_args — denied"}
+            denial_streak += 1
+        elif verdict in ("allow", "allow_once", "always_allow", "edited_allow"):
             # Edit-and-resend: the human may EDIT the verbatim args before
             # approving — the edited args are what executes (still verbatim).
             exec_args = decision.get("edited_args", args)
@@ -515,7 +523,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             # Two-artifact model: the reducer owns state; every mutation is
             # a durable event (recovery reconstructs from the event log).
             from worker.engine.tools.extended import apply_task_updates
-            new_tasks, err = apply_task_updates(state.get("tasks"), args.get("updates", []))
+            new_tasks, err = apply_task_updates(state.get("tasks"), effective_args.get("updates", []))
             if err:
                 result = {"kind": "error", "ok": False, "output": err}
             else:
@@ -592,7 +600,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                 out["pending_questions"] = get_pending_questions(tid)
                 clear_pending_questions(tid)
 
-        detail: dict[str, Any] = {"tool": name, "input": args, "output": result["output"],
+        detail: dict[str, Any] = {"tool": name, "input": effective_args, "output": result["output"],
                                   "ok": result["ok"]}
         if result.get("detail_tasks") is not None:
             detail["tasks"] = result["detail_tasks"]
@@ -614,8 +622,10 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         if name == "ask_user" and result["ok"]:
             out["done"] = True
 
-        # Stuck-loop watchdog
-        sig = _call_signature(name, args)
+        # Stuck-loop watchdog — hash the EXECUTED args (gate-edited), not the
+        # original LLM args: an edited retry is a changed call, and edited
+        # retries of one original call must not collide on one streak key.
+        sig = _call_signature(name, effective_args)
         if result["ok"]:
             streaks.pop(sig, None)
         else:
@@ -739,6 +749,10 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
         # M-03: a summarizer/LLM failure used to propagate and kill the whole
         # turn. Log it, emit a warning card, and skip compaction this cycle
         # so the turn survives with the original messages intact.
+        # The retry counter MUST advance here too: without it the overflow
+        # loop guard (agent_node) never trips on a persistent summarizer
+        # outage and the run spins agent->compaction->agent until the
+        # recursion limit kills the thread.
         log.warning("compaction failed — skipping this cycle", error=str(exc))
         await _publish_events(config, [emitter._next(
             StepKind.STATUS, "⚠ compaction failed",
@@ -746,7 +760,8 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
              "detail": str(exc)[:500]},
             task_id, None,
         )])
-        return {"needs_compaction": False, "force_compact": False}
+        return {"needs_compaction": False, "force_compact": False,
+                "compaction_retries": state.get("compaction_retries", 0) + 1}
     out: dict[str, Any] = {
         "needs_compaction": False,
         "force_compact": False,
@@ -754,7 +769,10 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
     if force:
         out["compaction_retries"] = state.get("compaction_retries", 0) + 1
 
-    if result.pruned_count > 0 or result.rolled_back or force:
+    # A forced pass over an all-protected span prunes nothing — splicing the
+    # summary then would write a spurious "0 messages pruned" marker into
+    # durable state. Only real work (or a rollback) splices and emits a card.
+    if result.pruned_count > 0 or result.rolled_back:
         out["messages"] = new_messages
         out["last_compaction_at"] = time.time()
         out["compaction_count"] = state.get("compaction_count", 0) + 1
@@ -975,7 +993,10 @@ def _clarify_answered(state: EngineState) -> bool:
     if not messages:
         return False
     last = messages[-1]
-    return isinstance(last, HumanMessage) and (last.additional_kwargs or {}).get("prompt_origin") == "user"
+    # Clarify answers reach the graph either as a USER-tagged message or via
+    # the runner's nudge channel (tagged "nudge") — both are human input.
+    return isinstance(last, HumanMessage) and \
+        (last.additional_kwargs or {}).get("prompt_origin") in ("user", "nudge")
 
 
 def _extract_evidence(state: EngineState) -> dict[str, Any]:

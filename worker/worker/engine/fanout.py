@@ -107,7 +107,7 @@ class SpawnRegistry:
         sp = self.spawns.get(spawn_id)
         if sp is None or sp.get("watchdog") is not None:
             return
-        sp["watchdog"] = asyncio.ensure_future(enforce_timeout(spawn_id), loop=loop)
+        sp["watchdog"] = loop.create_task(enforce_timeout(spawn_id))
 
     def finish(self, spawn_id: str, status: str = "completed") -> None:
         """Mark a spawn finished and cancel its watchdog (the 2h cap is moot

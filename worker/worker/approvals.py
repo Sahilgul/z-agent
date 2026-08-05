@@ -48,13 +48,18 @@ class ApprovalBridge:
             return PermissionResultAllow(updated_input=tool_input)
 
         approval_id = str(uuid.uuid4())
-        await self.redis.xadd(f"approvals:{self.run_id}", {
-            "approval_id": approval_id,
-            "thread_id": self.thread_id,
-            "kind": "tool",
-            "payload": json.dumps({"tool": tool_name, "input": tool_input}),
-            "requested_at": str(time.time()),
-        })
+        try:
+            await self.redis.xadd(f"approvals:{self.run_id}", {
+                "approval_id": approval_id,
+                "thread_id": self.thread_id,
+                "kind": "tool",
+                "payload": json.dumps({"tool": tool_name, "input": tool_input}),
+                "requested_at": str(time.time()),
+            })
+        except redis.RedisError:
+            # Publishing the request can fail too — a dropped connection here
+            # must not crash the can_use_tool callback into the SDK either.
+            return PermissionResultDeny(message="approval channel error — denied deterministically")
         decision_key = f"approval:{approval_id}:decision"
         try:
             result = await self.redis.blpop(decision_key, timeout=self.timeout_seconds)

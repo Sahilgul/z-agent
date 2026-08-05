@@ -49,40 +49,62 @@ async def _agent_node(state: State, config: dict[str, Any]) -> dict[str, Any]:
         )
         full_nudge = f"{nudge}\n\n{NUDGE_TEXT}" if nudge else NUDGE_TEXT
         state["messages"].append(HumanMessage(content=full_nudge))
-        state["nudge_injected"] = True
         recorder.events.append({"kind": "nudge_injected", "nudge": full_nudge})
+        # nudge_injected MUST be in the node return value: with the replace
+        # reducer, mutating state in place does not persist to the checkpoint,
+        # so the flag was lost and the interrupt re-fired every agent step.
 
     llm = make_llm(model, streaming=True).bind_tools(SPIKE_TOOLS)
     messages = state["messages"]
     ai_message: AIMessage | None = None
     first_delta = True
+    nudge_just_injected = bool(state.get("nudge_pending")) and not state.get("nudge_injected")
     try:
         async for chunk in llm.astream(messages, stream_mode="messages"):
-            if hasattr(chunk, "content") and chunk.content and first_delta:
+            # stream_mode="messages" yields (message, metadata) TUPLES —
+            # unwrap first; hasattr(tuple, "content") is always False.
+            msg = chunk[0] if isinstance(chunk, tuple) else chunk
+            if getattr(msg, "content", None) and first_delta:
                 recorder.record_delta()
                 first_delta = False
-            ai_message = chunk if not isinstance(chunk, tuple) else chunk[0]
+            # Chunks ACCUMULATE (same fix as agent_loop.py) — reassigning keeps
+            # only the last delta, which has no content and no tool_calls, so
+            # the tools node never ran and the interrupt was never exercised.
+            ai_message = msg if ai_message is None else ai_message + msg
     except Exception as exc:  # noqa: BLE001
         recorder.record_turn(None, is_error=True)
         recorder.events.append({"kind": "error", "error": str(exc)})
-        return {"messages": [], "done": True}
+        # Do NOT return {"messages": []} — the replace reducer would wipe the
+        # whole conversation. End the turn with state intact.
+        out: dict[str, Any] = {"done": True}
+        if nudge_just_injected:
+            out["nudge_injected"] = True
+        return out
 
     if ai_message is None:
-        return {"messages": [], "done": True}
+        out = {"done": True}
+        if nudge_just_injected:
+            out["nudge_injected"] = True
+        return out
 
     messages.append(ai_message)
     from spike.agent_loop import _extract_usage, _is_error
     recorder.record_turn(_extract_usage(ai_message), _is_error(ai_message))
 
     tool_calls = getattr(ai_message, "tool_calls", None) or []
+    out = {"messages": messages, "tool_calls": tool_calls}
+    if nudge_just_injected:
+        out["nudge_injected"] = True
     if not tool_calls:
         text = ai_message.content if isinstance(ai_message.content, str) else json.dumps(ai_message.content, default=str)
         recorder.nudge_incorporated = NUDGE_CANARY in text or NUDGE_CANARY in json.dumps(
             recorder.events, default=str
         )
-        return {"messages": messages, "done": True}
+        out["done"] = True
+        return out
 
-    return {"messages": messages, "tool_calls": tool_calls, "done": False}
+    out["done"] = False
+    return out
 
 
 async def _tools_node(state: State, config: dict[str, Any]) -> dict[str, Any]:

@@ -125,7 +125,17 @@ class Normalizer:
                     deltas.append(self._delta(_tool_kind(block.name), _tool_title(block.name, block.input)))
 
         elif isinstance(msg, UserMessage):
-            content = msg.content if isinstance(msg.content, list) else []
+            if isinstance(msg.content, str):
+                # A plain-string user message (the common user-prompt shape)
+                # must reach the transcript — `else []` silently dropped it.
+                if msg.content.strip():
+                    events.append(self._next(
+                        StepKind.MESSAGE, msg.content.splitlines()[0][:120],
+                        {"text": msg.content}, uuid,
+                    ))
+                content = []
+            else:
+                content = msg.content
             for block in content:
                 if isinstance(block, ToolResultBlock):
                     events.append(self._complete_tool(block, uuid))

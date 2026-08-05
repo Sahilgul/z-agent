@@ -373,7 +373,10 @@ async def main() -> int:
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     all_results = await run_engine_matrix(args.command, Path(args.golden), args.repo, args.branch, models)
     gate = evaluate_gate(all_results) if args.command == "all" else {
-        "model_verdicts": {}, "passing_models": [], "gate_passed": False,
+        # gate_passed: None (not False) — a not-evaluated gate must be
+        # distinguishable from a gate that ran and FAILED (M-23; matrix.py
+        # was fixed, this file re-introduced the false negative).
+        "model_verdicts": {}, "passing_models": [], "gate_passed": None,
         "note": "partial run — gate only evaluated on 'all'",
     }
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

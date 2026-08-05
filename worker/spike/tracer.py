@@ -262,6 +262,11 @@ async def check_structured() -> dict[str, Any]:
             async for msg in client.receive_response():
                 if isinstance(msg, ResultMessage):
                     rec.result = msg
+        if rec.result is None:
+            # No ResultMessage (failed/empty stream) — score 0 like the other
+            # failure modes instead of crashing the whole check.
+            print(f"[spike] no ResultMessage on attempt {i} — scored 0")
+            continue
         structured = (rec.result.usage or {}) and getattr(rec.result, "structured_output", None)
         try:
             raw = getattr(rec.result, "structured_output", None) or json.loads(rec.result.result or "{}")

@@ -147,9 +147,10 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
 # No trailing \b: commands can end in non-word chars (e.g. "rm -rf /").
 DESTRUCTIVE_COMMANDS = re.compile(
     r"\b("
-    r"git\s+push\s+(-f|--force)"
+    r"git\s+push\s+.*(-f\b|--force\b|--force-with-lease\b)"
     r"|git\s+reset\s+--hard"
-    r"|rm\s+-rf?\s+/"
+    r"|rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--recursive\s+--force|--force\s+--recursive)[a-zA-Z]*\s+[/~$]"
+    r"|rm\s+-[a-zA-Z]*r[a-zA-Z]*\s+/"
     r"|mkfs"
     r"|fdisk"
     r"|dd\s+if="

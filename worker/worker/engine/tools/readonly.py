@@ -110,7 +110,12 @@ def file_glob(pattern: str) -> str:
     for root, _dirs, files in os.walk(ws):
         for name in files:
             full = Path(root) / name
-            rel = full.relative_to(ws)
+            try:
+                rel = full.relative_to(ws)
+            except ValueError:
+                # A symlink pointing outside the workspace must not fail the
+                # whole glob — skip it.
+                continue
             # H-06: a pattern WITH a slash (`src/*.py`, `**/*.py`) must match the
             # relative PATH so the directory component is respected — the old
             # code stripped to the last component and matched the filename

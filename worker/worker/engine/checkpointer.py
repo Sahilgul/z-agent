@@ -80,9 +80,57 @@ class MirroredSaver(BaseCheckpointSaver):
         self._context_id = context_id
 
     def __getattr__(self, name: str) -> Any:
-        # Delegate everything not explicitly overridden (aget, aget_tuple,
-        # alist, aput_writes, adelete_thread, get_next_version, ...).
+        # Fallback delegation only — __getattr__ never fires for methods the
+        # base class defines, so the explicit overrides below are load-bearing.
+        # Guard _inner itself: unpickle/deepcopy bypass __init__, and an
+        # unguarded self._inner lookup here would recurse forever.
+        if name == "_inner":
+            raise AttributeError(name)
         return getattr(self._inner, name)
+
+    # BaseCheckpointSaver defines these as concrete methods, so __getattr__
+    # would never delegate them — they must be overridden explicitly.
+    async def aget(self, config: Any) -> Any:
+        return await self._inner.aget(config)
+
+    async def aget_tuple(self, config: Any) -> Any:
+        return await self._inner.aget_tuple(config)
+
+    async def alist(self, config: Any, *, filter: Any = None,
+                    before: Any = None, limit: Any = None) -> Any:
+        async for item in self._inner.alist(config, filter=filter, before=before, limit=limit):
+            yield item
+
+    async def aput_writes(self, config: Any, writes: Any, task_id: Any,
+                          task_path: Any = "") -> Any:
+        return await self._inner.aput_writes(config, writes, task_id, task_path)
+
+    async def adelete_thread(self, thread_id: Any) -> Any:
+        return await self._inner.adelete_thread(thread_id)
+
+    def get(self, config: Any) -> Any:
+        return self._inner.get(config)
+
+    def get_tuple(self, config: Any) -> Any:
+        return self._inner.get_tuple(config)
+
+    def list(self, config: Any, *, filter: Any = None,
+             before: Any = None, limit: Any = None) -> Any:
+        return self._inner.list(config, filter=filter, before=before, limit=limit)
+
+    def put(self, config: Any, checkpoint: Any, metadata: Any,
+            new_versions: Any) -> Any:
+        return self._inner.put(config, checkpoint, metadata, new_versions)
+
+    def put_writes(self, config: Any, writes: Any, task_id: Any,
+                   task_path: Any = "") -> Any:
+        return self._inner.put_writes(config, writes, task_id, task_path)
+
+    def delete_thread(self, thread_id: Any) -> Any:
+        return self._inner.delete_thread(thread_id)
+
+    def get_next_version(self, current: Any, channel: Any) -> Any:
+        return self._inner.get_next_version(current, channel)
 
     async def aput(self, config: Any, checkpoint: Any, metadata: Any,
                    new_versions: Any) -> Any:

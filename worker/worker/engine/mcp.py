@@ -89,7 +89,13 @@ class MCPManager:
                 self._clients.pop(name, None)
                 if _is_auth_error(exc) and name not in self._authed:
                     st.needs_auth = True
-                    await self._lazy_auth(name, cfg)
+                    try:
+                        await self._lazy_auth(name, cfg)
+                    except Exception as auth_exc:  # noqa: BLE001
+                        # A failing auth hook must not escape the retry loop
+                        # and crash the whole batch refresh — the contract is
+                        # "one server's failure never fails the batch".
+                        last_error = f"{last_error}; auth hook failed: {auth_exc}"
                     continue
         st.connected = False
         st.error = last_error

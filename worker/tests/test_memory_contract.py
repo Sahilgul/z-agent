@@ -139,10 +139,19 @@ async def test_compaction_floor_enforced_on_output():
     messages until the output meets the floor."""
     policy = CompactionPolicy(context_limit=100, recent_window=10, floor_messages=20)
     compactor = Compactor(policy=policy)
+    # Real conversations pair every ToolMessage with an issuing AIMessage
+    # (unpaired tool results are gateway-400 orphans and are never restored).
+    # Give the fixture's "fake-tc-id" tool results a live issuer in the
+    # recent window so the floor restoration has legitimate candidates.
+    issuer = tag_message(AIMessage(
+        content="recent tool batch",
+        tool_calls=[{"id": "fake-tc-id", "name": "terminal_exec", "args": {}}],
+    ), PromptOrigin.ASSISTANT)  # type: ignore[arg-type]
     messages = [
         _msg("system", PromptOrigin.SYSTEM),
         *[_msg(f"tool {i}" * 10, PromptOrigin.TOOL) for i in range(20)],
-        *[_msg(f"recent {i}", PromptOrigin.ASSISTANT) for i in range(10)],
+        issuer,
+        *[_msg(f"recent {i}", PromptOrigin.ASSISTANT) for i in range(9)],
     ]
     new, result = await compactor.compact(messages)
     assert result.rolled_back is False

@@ -81,8 +81,11 @@ def with_gateway_retry(fn: Any, *, max_retries: int = 3, base_delay: float = 1.0
         except Exception as exc:
             last_exc = exc
             retryable = _is_retryable(exc)
-            if not retryable or attempt == max_retries:
+            if not retryable:
                 raise
+            if attempt == max_retries:
+                raise GatewayRetryError(
+                    f"gateway unreachable after {max_retries} retries") from exc
             # Retry-After header (httpx raises HTTPStatusError with response)
             delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
             retry_after = _retry_after(exc)
@@ -105,16 +108,30 @@ async def with_gateway_retry_aiter(stream_factory: Any, *, max_retries: int = 2,
     """
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
-        stream = stream_factory()
+        stream = None
         try:
+            # Construction is inside the try per the contract above: a factory
+            # that raises a retryable error is retried like a first-chunk one.
+            stream = stream_factory()
             iterator = stream.__aiter__()
             first = await iterator.__anext__()
         except StopAsyncIteration:
             return  # empty stream — nothing to retry
         except Exception as exc:
+            # Close the abandoned stream before retrying — an unclosed
+            # ChatOpenAI.astream generator holds an httpx connection hostage
+            # until GC, which exhausts the pool under a 429/503 storm.
+            if stream is not None:
+                try:
+                    await stream.aclose()
+                except Exception:  # noqa: BLE001
+                    pass
             last_exc = exc
-            if not _is_retryable(exc) or attempt == max_retries:
+            if not _is_retryable(exc):
                 raise
+            if attempt == max_retries:
+                raise GatewayRetryError(
+                    f"gateway unreachable after {max_retries} retries") from exc
             delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
             retry_after = _retry_after(exc)
             if retry_after is not None:

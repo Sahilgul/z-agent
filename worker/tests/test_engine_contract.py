@@ -132,8 +132,10 @@ def test_readonly_tools_need_no_approval():
 
 
 def test_autonomous_bypasses_all_approval():
-    # Even a (future) mutating tool wouldn't need approval in autonomous mode
-    assert needs_approval("file_read", "autonomous") is False
+    # Pin a MUTATING tool — a readonly tool never needs approval in ANY mode,
+    # so asserting on file_read would pass even if autonomous didn't bypass.
+    assert needs_approval("terminal_exec", "autonomous") is False
+    assert needs_approval("file_edit", "autonomous") is False
 
 
 def test_idempotency_key_stable_for_identical_calls():

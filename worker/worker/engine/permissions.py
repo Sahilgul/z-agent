@@ -25,8 +25,14 @@ Effects:
 from __future__ import annotations
 
 import fnmatch
+import re
 from enum import Enum
 from typing import Any
+
+# Shell statement boundaries a glob `*` must never cross. fnmatch's `*`
+# matches EVERY character (including `;`, `&`, `|`, newlines), so an allow
+# rule like "git status*" would otherwise also match "git status; rm -rf /".
+_SHELL_METACHARS = re.compile(r"[;&|`$\n]|\$\(")
 
 
 class Effect(str, Enum):
@@ -42,6 +48,11 @@ def _matches(rule: dict[str, Any], tool_name: str, args: dict[str, Any]) -> bool
     for arg_name, pattern in (rule.get("args") or {}).items():
         value = args.get(arg_name)
         if value is None:
+            return False
+        # Fail-closed against glob injection: a wildcarded pattern must not
+        # match a value that crosses a shell-statement boundary. A non-match
+        # here falls back to the capability default (the gate), never allow.
+        if ("*" in str(pattern) or "?" in str(pattern)) and _SHELL_METACHARS.search(str(value)):
             return False
         if not fnmatch.fnmatchcase(str(value), str(pattern)):
             return False

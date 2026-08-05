@@ -44,7 +44,10 @@ def file_delete(file_path: str) -> str:
     try:
         p = _resolve_path(file_path)
     except ValueError as exc:
-        return str(exc)
+        # The "error:" prefix is load-bearing — every dispatcher classifies
+        # success vs. error by output.startswith("error:"). Without it a
+        # path-escape refusal is reported to the agent as a SUCCESSFUL delete.
+        return f"error: {exc}"
     # M-10: contain the delete to the workspace. _resolve returns absolute
     # paths as-is, so file_delete("/etc/passwd") used to escape the workspace
     # and delete arbitrary files. Reject anything that doesn't resolve under

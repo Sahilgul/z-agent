@@ -69,7 +69,9 @@ def _repair_tool_pairs(msgs: list[BaseMessage]) -> list[BaseMessage]:
         # No tool calls anywhere in the kept list — there is nothing to pair
         # against (e.g. synthetic/prune-only conversations). Enforcing here
         # would drop every ToolMessage and break the output floor; leave
-        # the list untouched.
+        # the list untouched. (Real orphans are prevented upstream: the
+        # floor-restoration step skips pruned ToolMessages whose issuing
+        # AIMessage is not being kept or restored.)
         return msgs
 
     answered: set[str] = set()
@@ -231,9 +233,35 @@ class Compactor:
         if projected < min_output and pruned:
             deficit = min_output - projected
             pruned.sort(key=lambda x: x[0])
-            restored = pruned[-deficit:] if deficit <= len(pruned) else pruned
+            # Never restore an orphaned ToolMessage: its issuing AIMessage
+            # stays pruned, and the gateway 400s on an unpaired tool_call_id
+            # (terminal — the 400 does not match overflow signatures). Skip
+            # those and restore further back instead.
+            live_call_ids: set[str] = set()
+            for _, m in [*kept_in_span, *[(i, m) for i, m in enumerate(recent)]]:
+                for tc in getattr(m, "tool_calls", None) or []:
+                    cid = tc.get("id")
+                    if cid:
+                        live_call_ids.add(cid)
+            from langchain_core.messages import ToolMessage as _TM
+            restored: list[tuple[int, BaseMessage]] = []
+            still_pruned: list[tuple[int, BaseMessage]] = []
+            for item in reversed(pruned):
+                m = item[1]
+                if (len(restored) < deficit
+                        and not (isinstance(m, _TM) and m.tool_call_id
+                                 and m.tool_call_id not in live_call_ids)):
+                    restored.append(item)
+                    for tc in getattr(m, "tool_calls", None) or []:
+                        cid = tc.get("id")
+                        if cid:
+                            live_call_ids.add(cid)
+                else:
+                    still_pruned.append(item)
+            restored.sort(key=lambda x: x[0])
+            still_pruned.sort(key=lambda x: x[0])
             kept_in_span.extend(restored)
-            pruned = pruned[:-deficit] if deficit <= len(pruned) else []
+            pruned = still_pruned
             kept_in_span.sort(key=lambda x: x[0])
 
         result.pruned_count = len(pruned)
@@ -315,8 +343,13 @@ class SelfTuningLimit:
         return self._current
 
     def observe_error(self, error: str) -> None:
-        """A context-length error was observed — tighten the limit."""
-        if "context" in error.lower() and "length" in error.lower():
+        """A context-overflow error was observed — tighten the limit.
+        Matches the same signatures as graph._looks_like_context_overflow;
+        tightening on only one of them let the loop keep re-breaching on
+        the other error shapes."""
+        low = error.lower()
+        if (("context" in low and "length" in low)
+                or "maximum context" in low or "too many tokens" in low):
             self._current = max(self.floor, self._current - self.step_down)
             self._healthy_turns = 0
 
