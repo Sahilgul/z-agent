@@ -69,6 +69,13 @@ class EngineRunner:
         self.mirror_dir = Path(os.environ.get("CHECKPOINT_MIRROR_DIR", "./checkpoints"))
         self.idle_ttl_s = float(os.environ.get("IDLE_TTL_SECONDS", "900"))
         self.approval_timeout_s = int(os.environ.get("APPROVAL_TIMEOUT_S", "900"))
+        # Canary mode (plan §17/RB): the custom engine serves READ-ONLY
+        # production threads before the flag flip — ask-mode tools only,
+        # supervised autonomy, regardless of what the request asked for.
+        self.canary = os.environ.get("CANARY", "").strip().lower() in ("1", "true", "yes")
+        if self.canary:
+            self.mode = Mode.ASK
+            self.autonomy = Autonomy.SUPERVISED
 
         self.context_id = self.resume_context_id or self.thread_id
         self.task_id = str(uuid.uuid4())
@@ -101,7 +108,9 @@ class EngineRunner:
             "task_id": self.task_id,
             "mode": self.mode,
             "autonomy": self.autonomy,
-            "budget": self.budget,
+            # dict form — msgpack-safe across the Postgres serde (graph.py
+            # accepts both shapes on read).
+            "budget": {"used": self.budget.used, "cap": self.budget.cap},
             "messages": [user_msg],
             "done": False,
             "error": None,
@@ -182,6 +191,12 @@ class EngineRunner:
     # ---------------------------------------------------------------- turn loop
 
     async def run(self) -> int:
+        if self.canary:
+            from zagent_contracts import StepKind
+            await self.forwarder.publish_events([self.emitter._next(
+                StepKind.STATUS, "canary: read-only thread on the custom engine",
+                {"kind": "warning", "canary": True}, self.task_id, None,
+            )])
         await self.forwarder.heartbeat(self.status)
         episodic = EpisodicMemory(self.mirror_dir / f"{self.thread_id}-episodes.db")
         set_episodic_memory(episodic)
@@ -192,7 +207,7 @@ class EngineRunner:
         watchdog = asyncio.create_task(self._idle_watchdog(), name="idle-watchdog")
 
         try:
-            async with open_checkpointer(mirror_dir=self.mirror_dir) as saver:
+            async with open_checkpointer() as saver:
                 graph = build_graph(checkpointer=saver)
                 config = self._config()
 

@@ -75,7 +75,7 @@ class EngineState(TypedDict, total=False):
     autonomy: Autonomy
 
     # Budget (plan §13 — gateway > thread > goal)
-    budget: Budget
+    budget: Budget | dict[str, Any]  # dict form: msgpack-safe (see graph.py)
 
     # The frozen plan artifact + live execution tracker (plan §7 update_tasks)
     plan_artifact: dict[str, Any] | None

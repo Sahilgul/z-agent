@@ -539,7 +539,9 @@ async def test_budget_reminder_fires_at_threshold(monkeypatch: pytest.MonkeyPatc
     result = await graph.ainvoke(state, config)
     await collector.flush()
 
-    assert result["budget"].used > 0
+    budget = result["budget"]
+    used = budget.used if isinstance(budget, Budget) else budget["used"]
+    assert used > 0
     warnings = [e for e in collector.events
                 if e.detail.get("kind") == "warning" and e.detail.get("warning") == "budget"]
     assert warnings, "a budget warning event must fire when a threshold is crossed"

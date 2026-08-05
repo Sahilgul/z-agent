@@ -1,13 +1,13 @@
 """Sandbox manager (plan §3/§8): Docker SDK — stamp, run, destroy, session volumes.
 
-Stamping (DECIDED): WRITABLE lanes get a self-contained local clone from golden
-(same-fs hardlinks — seconds; the lane owns its .git; shredding is rm -rf).
+Stamping (DECIDED): WRITABLE threads get a self-contained local clone from golden
+(same-fs hardlinks — seconds; the thread owns its .git; shredding is rm -rf).
 READ-ONLY context repos are read-only bind mounts of golden. Worktrees are
-rejected for writable lanes (absolute .git pointer, shared object store writes,
+rejected for writable threads (absolute .git pointer, shared object store writes,
 prune lifecycle — three collisions with the mount rules).
 
 Durable session volume (BUG-1 fix): ~/.claude mounts PER-LANE to
-sessions/<run_id>/<lane_id>/ so resume/fork_session survive workspace shredding.
+sessions/<run_id>/<thread_id>/ so resume/fork_session survive workspace shredding.
 Retention 30d default; after expiry the run is replay-only.
 """
 
@@ -24,7 +24,7 @@ from docker.errors import DockerException
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
 
@@ -42,14 +42,14 @@ def _docker() -> docker.DockerClient:
         raise SandboxUnavailable(str(exc)) from exc
 
 
-def session_subpath(run_id: str, lane_id: str) -> Path:
+def session_subpath(run_id: str, thread_id: str) -> Path:
     settings = get_settings()
-    path = settings.sessions_dir / run_id / lane_id
+    path = settings.sessions_dir / run_id / thread_id
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def stamp_clone(repo: Repo, run_id: str, lane_id: str) -> Path:
+def stamp_clone(repo: Repo, run_id: str, thread_id: str) -> Path:
     """Synchronous final fetch (agent always starts on latest), then a
     self-contained clone stamp at origin/<integration_branch> (plan §3)."""
     settings = get_settings()
@@ -64,7 +64,7 @@ def stamp_clone(repo: Repo, run_id: str, lane_id: str) -> Path:
                                                  **_env()})
     subprocess.run(["git", "clone", "--quiet", str(golden_repo), str(dest)], check=True, timeout=600)
     subprocess.run(
-        ["git", "-C", str(dest), "checkout", "--quiet", "-B", f"lane/{lane_id[:8]}",
+        ["git", "-C", str(dest), "checkout", "--quiet", "-B", f"thread/{thread_id[:8]}",
          f"origin/{repo.integration_branch}"],
         check=True, timeout=120,
     )
@@ -79,7 +79,7 @@ def _env() -> dict[str, str]:
 def stamp_mcp_config(workspace: Path, repo: Repo) -> bool:
     """Playwright MCP wiring (plan §2/WU3): when the repo profile opts in
     (``repo.profile.extra["playwright_mcp"]`` — the UI-repo flag), write a
-    .mcp.json into the stamped workspace so the lane's agent SDK picks up the
+    .mcp.json into the stamped workspace so the thread's agent SDK picks up the
     playwright-mcp server at session start. The backend never RUNS a Playwright
     server — it only stamps the config. Returns True when the file was written.
     """
@@ -103,31 +103,49 @@ def stamp_mcp_config(workspace: Path, repo: Repo) -> bool:
     return True
 
 
+def _engine_autonomy(permission_mode: str) -> str:
+    """Map the CAS-style permission mode to the engine's autonomy enum."""
+    return {
+        "bypassPermissions": "autonomous",
+        "acceptEdits": "gated",
+    }.get(permission_mode, "supervised")
+
+
 class SandboxManager:
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def lane_env(self, run: Run, lane: Lane, prompt: str, persona_prompt: str,
+    def thread_env(self, run: Run, thread: Thread, prompt: str, persona_prompt: str,
                  permission_mode: str, writable: bool) -> dict[str, str]:
         env = {
             "RUN_ID": run.id,
-            "LANE_ID": lane.id,
+            "THREAD_ID": thread.id,
             "TASK_PROMPT": prompt,
             "PERSONA_PROMPT": persona_prompt,
             "PERMISSION_MODE": permission_mode,
-            "BUDGET_USD": str(lane.budget_usd),
+            "BUDGET_USD": str(thread.budget_usd),
             "REDIS_URL": self.settings.worker_redis_url,
             "ANTHROPIC_BASE_URL": self.settings.worker_gateway_url,
-            "ANTHROPIC_AUTH_TOKEN": lane.gateway_key or "",
+            "ANTHROPIC_AUTH_TOKEN": thread.gateway_key or "",
             # Without this the SDK sends its own default Claude model name, which
-            # the gateway does not publish and the lane key is not scoped to.
+            # the gateway does not publish and the thread key is not scoped to.
             "MODEL": self.settings.gateway_model,
             "WORKSPACE_DIR": "/workspace",
+            # --- Custom engine (RB cutover) ---
+            "ENGINE": self.settings.engine_runtime,
+            "MODE": self.settings.engine_default_mode,
+            "AUTONOMY": _engine_autonomy(permission_mode),
+            "LITELLM_BASE_URL": self.settings.worker_gateway_url,
+            "LITELLM_API_KEY": thread.gateway_key or "",
         }
-        if lane.session_id:
-            env["RESUME_SESSION_ID"] = lane.session_id
+        if self.settings.engine_canary:
+            env["CANARY"] = "1"
+        if self.settings.engine_database_url:
+            env["DATABASE_URL"] = self.settings.engine_database_url
+        if thread.session_id:
+            env["RESUME_SESSION_ID"] = thread.session_id
         if self.settings.package_proxy_url:
-            # Phase 2: lanes install deps through the allowlisting proxy only.
+            # Phase 2: threads install deps through the allowlisting proxy only.
             proxy = self.settings.package_proxy_url
             env["HTTP_PROXY"] = proxy
             env["HTTPS_PROXY"] = proxy
@@ -141,35 +159,35 @@ class SandboxManager:
             env["ZAGENT_CREDENTIAL_SCOPE"] = "fleet"
         return env
 
-    def run_lane_container(self, run: Run, lane: Lane, prompt: str, persona_prompt: str,
+    def run_thread_container(self, run: Run, thread: Thread, prompt: str, persona_prompt: str,
                            permission_mode: str, writable_repo: Repo | None,
                            context_repos: list[Repo],
-                           resume_from_lane_id: str | None = None) -> str:
+                           resume_from_thread_id: str | None = None) -> str:
         """Start the worker container. Phase 1 ladder: Ask = read-only golden
-        mounts only; writable clone stamps arrive with Phase 2 coding lanes.
+        mounts only; writable clone stamps arrive with Phase 2 coding threads.
 
-        When resume_from_lane_id is set, the new lane mounts the PREVIOUS
-        lane's session volume instead of a fresh one — the SDK's conversation
+        When resume_from_thread_id is set, the new thread mounts the PREVIOUS
+        thread's session volume instead of a fresh one — the SDK's conversation
         state lives there, so the replacement picks up the thread instead of
-        starting a stranger. The new lane's session_id is also set from the
-        old one (handled in lane_manager.spawn) so RESUME_SESSION_ID is wired."""
+        starting a stranger. The new thread's session_id is also set from the
+        old one (handled in thread_manager.spawn) so RESUME_SESSION_ID is wired."""
         client = _docker()
         volumes: dict[str, dict] = {}
 
-        # Mount the prior lane's session directory when resuming; otherwise the
-        # lane's own. session_subpath creates the dir if missing, so a fresh
-        # lane still gets a clean volume.
-        session_lane_id = resume_from_lane_id or lane.id
-        session_path = session_subpath(run.id, session_lane_id)
+        # Mount the prior thread's session directory when resuming; otherwise the
+        # thread's own. session_subpath creates the dir if missing, so a fresh
+        # thread still gets a clean volume.
+        session_thread_id = resume_from_thread_id or thread.id
+        session_path = session_subpath(run.id, session_thread_id)
         volumes[str(session_path)] = {"bind": "/root/.claude", "mode": "rw"}
 
         if self.settings.package_proxy_url:
-            # Shared dependency caches — lanes never re-download the world.
+            # Shared dependency caches — threads never re-download the world.
             volumes[self.settings.pip_cache_volume] = {"bind": "/cache/pip", "mode": "rw"}
             volumes[self.settings.npm_cache_volume] = {"bind": "/cache/npm", "mode": "rw"}
 
         if writable_repo is not None:
-            stamp = stamp_clone(writable_repo, run.id, lane.id)
+            stamp = stamp_clone(writable_repo, run.id, thread.id)
             # UI repos (ClientApp) get the Playwright MCP config stamped into the
             # workspace — the agent SDK reads .mcp.json at session start.
             stamp_mcp_config(stamp, writable_repo)
@@ -180,7 +198,7 @@ class SandboxManager:
                 continue
             volumes[str(golden_repo)] = {"bind": f"/workspace/{repo.name}", "mode": "ro"}
 
-        env = self.lane_env(run, lane, prompt, persona_prompt, permission_mode,
+        env = self.thread_env(run, thread, prompt, persona_prompt, permission_mode,
                             writable=writable_repo is not None)
         container = client.containers.run(
             self.settings.worker_image,
@@ -188,10 +206,10 @@ class SandboxManager:
             volumes=volumes,
             network=self.settings.worker_network,
             detach=True,
-            name=f"zagent-lane-{lane.id[:8]}",
+            name=f"zagent-thread-{thread.id[:8]}",
             remove=False,
         )
-        log.info("lane container started", lane_id=lane.id, container=container.short_id)
+        log.info("thread container started", thread_id=thread.id, container=container.short_id)
         return container.id
 
     def stop_container(self, container_id: str) -> None:

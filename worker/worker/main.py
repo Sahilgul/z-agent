@@ -9,10 +9,10 @@ Nudge semantics (decided): graceful interrupt() + inject + resume — one SDK tu
 is the entire agentic loop, so queued delivery would land after the work is done.
 
 Config arrives via env at container start (plan §10: API keys never baked in):
-  RUN_ID, LANE_ID, PERSONA_PROMPT, TASK_PROMPT, PERMISSION_MODE, BUDGET_USD,
+  RUN_ID, THREAD_ID, PERSONA_PROMPT, TASK_PROMPT, PERMISSION_MODE, BUDGET_USD,
   REDIS_URL, WORKSPACE_DIR, RESUME_SESSION_ID (optional), MODEL (optional),
-  ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN (gateway + per-lane virtual key),
-  IDLE_TTL_SECONDS (lane lingers for nudges after its turn ends).
+  ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN (gateway + per-thread virtual key),
+  IDLE_TTL_SECONDS (thread lingers for nudges after its turn ends).
 """
 
 from __future__ import annotations
@@ -22,7 +22,18 @@ import os
 import signal
 import sys
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
+# The CAS SDK is an OPTIONAL extra (worker[cas]) — kept for the dual-runtime
+# soak (Phase 5) and as the fallback target. The new LangGraph engine
+# (worker/engine/, Phase 2+) does NOT depend on it. Import lazily so the worker
+# package imports cleanly without the cas extra installed.
+try:
+    from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
+    _CAS_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised only without the cas extra
+    ClaudeAgentOptions = None  # type: ignore[assignment,misc]
+    ClaudeSDKClient = None  # type: ignore[assignment,misc]
+    ResultMessage = None  # type: ignore[assignment,misc]
+    _CAS_AVAILABLE = False
 
 from worker.approvals import ApprovalBridge
 from worker.control import ControlListener, ControlMessage
@@ -30,10 +41,19 @@ from worker.forwarder import Forwarder
 from worker.normalize import Normalizer
 
 
-class LaneConfig:
+def _require_cas() -> None:
+    if not _CAS_AVAILABLE:
+        raise RuntimeError(
+            "The Claude Agent SDK runtime requires the 'cas' extra: "
+            "uv sync --extra cas (or --all-extras). The custom LangGraph engine "
+            "(worker/engine) does not need it."
+        )
+
+
+class ThreadConfig:
     def __init__(self) -> None:
         self.run_id = os.environ["RUN_ID"]
-        self.lane_id = os.environ["LANE_ID"]
+        self.thread_id = os.environ["THREAD_ID"]
         self.persona_prompt = os.environ.get("PERSONA_PROMPT", "")
         self.task_prompt = os.environ["TASK_PROMPT"]
         self.permission_mode = os.environ.get("PERMISSION_MODE", "default")
@@ -45,15 +65,15 @@ class LaneConfig:
         self.idle_ttl_seconds = int(os.environ.get("IDLE_TTL_SECONDS", "600"))
 
 
-class LaneRuntime:
-    """One lane = one worker container = one ClaudeSDKClient session."""
+class ThreadRuntime:
+    """One thread = one worker container = one ClaudeSDKClient session."""
 
-    def __init__(self, config: LaneConfig) -> None:
+    def __init__(self, config: ThreadConfig) -> None:
         self.cfg = config
-        self.normalizer = Normalizer(config.run_id, config.lane_id)
-        self.forwarder = Forwarder(config.redis_url, config.run_id, config.lane_id)
-        self.control = ControlListener(config.redis_url, config.lane_id)
-        self.approvals = ApprovalBridge(config.redis_url, config.run_id, config.lane_id)
+        self.normalizer = Normalizer(config.run_id, config.thread_id)
+        self.forwarder = Forwarder(config.redis_url, config.run_id, config.thread_id)
+        self.control = ControlListener(config.redis_url, config.thread_id)
+        self.approvals = ApprovalBridge(config.redis_url, config.run_id, config.thread_id)
         self.status = "starting"
         self.last_activity = asyncio.get_event_loop().time()
         self._stop = asyncio.Event()
@@ -61,6 +81,7 @@ class LaneRuntime:
         self._pump_task: asyncio.Task | None = None
 
     def _options(self) -> ClaudeAgentOptions:
+        _require_cas()
         kwargs: dict = {
             "permission_mode": self.cfg.permission_mode,
             "cwd": self.cfg.workspace_dir,
@@ -76,6 +97,7 @@ class LaneRuntime:
         return ClaudeAgentOptions(**kwargs)
 
     async def run(self) -> int:
+        _require_cas()
         self.status = "running"
         await self.forwarder.heartbeat(self.status)
         async with ClaudeSDKClient(options=self._options()) as client:
@@ -87,12 +109,12 @@ class LaneRuntime:
             try:
                 # Wait for the CONTROL loop, not the pump: the pump legitimately
                 # ends after every turn and is re-armed by nudges; control ends
-                # only on kill. A pump exception is the lane's death, though.
+                # only on kill. A pump exception is the thread's death, though.
                 while not self._stop.is_set():
                     if control.done():
                         break
                     if self._pump_task.done() and (exc := self._pump_task.exception()):
-                        # Gateway-down failure story: lane FAILS SAFE — the session
+                        # Gateway-down failure story: thread FAILS SAFE — the session
                         # volume makes it resumable (plan §10).
                         self.status = "failed"
                         await self.forwarder.heartbeat(self.status)
@@ -117,7 +139,7 @@ class LaneRuntime:
             await self.forwarder.publish_events(events)
             if isinstance(msg, ResultMessage):
                 # Turn-boundary bookkeeping: one SDK turn = the entire agentic
-                # loop; after it ends the lane idles for nudges until idle TTL.
+                # loop; after it ends the thread idles for nudges until idle TTL.
                 self.status = "idle" if not msg.is_error else "failed"
                 await self.forwarder.heartbeat(self.status)
         self._pump_done.set()
@@ -177,9 +199,11 @@ class LaneRuntime:
         await self.approvals.close()
 
 
-def main() -> int:
-    config = LaneConfig()
-    runtime = LaneRuntime(config)
+def _main_sdk() -> int:
+    """Legacy Claude Agent SDK runtime — the ENGINE=sdk fallback (kept through
+    the RE hardening soak, then the seam is cut)."""
+    config = ThreadConfig()
+    runtime = ThreadRuntime(config)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -189,6 +213,26 @@ def main() -> int:
     finally:
         loop.run_until_complete(runtime.close())
         loop.close()
+
+
+def main() -> int:
+    """ENGINE=sdk|custom dispatch (plan §20/RB). Default: the custom LangGraph
+    engine runner. The boot line is the RB exit evidence — the container log
+    shows WHICH runtime is serving the thread."""
+    engine = os.environ.get("ENGINE", "custom").strip().lower()
+    if engine == "sdk":
+        print("[worker] ENGINE=sdk — legacy Claude Agent SDK runtime", flush=True)
+        return _main_sdk()
+    if engine != "custom":
+        print(f"[worker] unknown ENGINE={engine!r}, defaulting to custom", flush=True)
+    canary = os.environ.get("CANARY", "").strip().lower() in ("1", "true", "yes")
+    print(
+        f"[worker] ENGINE=custom — custom LangGraph engine runner "
+        f"(worker.engine.runner){' [CANARY: read-only]' if canary else ''}",
+        flush=True,
+    )
+    from worker.engine.runner import main as engine_main
+    return engine_main()
 
 
 if __name__ == "__main__":

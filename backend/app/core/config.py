@@ -21,18 +21,29 @@ class Settings(BaseSettings):
     gateway_url: str = "http://localhost:4000"
     litellm_master_key: str = ""
     # The gateway's public model alias (infra/litellm/config.yaml model_name).
-    # Lane virtual keys are scoped to it, so every caller must use this exact
+    # Thread virtual keys are scoped to it, so every caller must use this exact
     # string — asking for anything else is rejected by the gateway.
     gateway_model: str = "kimi-foundry"
     # URLs as seen FROM WORKER CONTAINERS (compose network / host.docker.internal)
     worker_redis_url: str = "redis://redis:6379/0"
     worker_gateway_url: str = "http://gateway:4000"
-    worker_image: str = "zagent-worker:0.1.0"
-    # Egress-locked compose network for lane containers (plan §10): internal-only,
-    # no internet route — lanes reach gateway + redis and nothing else.
-    worker_network: str = "zagent_lane"
-    # Package-registry egress (Phase 2): allowlisting squid on the lane network.
-    # Empty string disables proxy injection (Phase 1 read-only lanes).
+    worker_image: str = "zagent-worker:0.2.0"
+    # Engine cutover (plan §20/RB): custom LangGraph engine by default; "sdk"
+    # keeps the legacy CAS fallback alive through the RE soak.
+    engine_runtime: str = "custom"
+    # Canary mode: read-only production threads on the custom engine before the
+    # flag flip — ask-mode tools only, supervised autonomy (engine-enforced).
+    engine_canary: bool = False
+    engine_default_mode: str = "development"
+    # Postgres checkpointer DSN reachable FROM WORKER CONTAINERS. Empty in the
+    # local-era stack (app Postgres arrives at the VM move) — the engine falls
+    # back to MemorySaver with a loud warning.
+    engine_database_url: str = ""
+    # Egress-locked compose network for thread containers (plan §10): internal-only,
+    # no internet route — threads reach gateway + redis and nothing else.
+    worker_network: str = "zagent_thread"
+    # Package-registry egress (Phase 2): allowlisting squid on the thread network.
+    # Empty string disables proxy injection (Phase 1 read-only threads).
     package_proxy_url: str = ""
     pip_cache_volume: str = "zagent_pip-cache"
     npm_cache_volume: str = "zagent_npm-cache"
@@ -75,11 +86,11 @@ class Settings(BaseSettings):
     # on the same clock or the console keeps offering a dead button.
     approval_timeout_seconds: int = 900
 
-    global_lane_cap: int = 12
-    default_lane_budget_usd: float = 5.0
+    global_thread_cap: int = 12
+    default_thread_budget_usd: float = 5.0
 
     # PREWARM_POOL (documented-not-implemented, plan §2): semantics live in
-    # orchestrator/lane_manager.py; prewarm_status() reports {"enabled": false}.
+    # orchestrator/thread_manager.py; prewarm_status() reports {"enabled": false}.
     prewarm_pool_enabled: bool = False
     prewarm_pool_size: int = 2
 

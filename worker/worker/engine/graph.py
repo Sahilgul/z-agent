@@ -191,7 +191,10 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             if content and delta_sink:
                 await delta_sink(_delta(state, content))
             if chunk is not None:
-                ai_message = chunk
+                # Chunks ACCUMULATE — keeping only the last loses everything
+                # (real SSE streams end with a usage-only chunk). The scripted
+                # LLM in tests yields one chunk per call, which masked this.
+                ai_message = chunk if ai_message is None else ai_message + chunk
     except Exception as exc:  # noqa: BLE001
         err = str(exc)
         # Context-length overflow -> force one compaction and retry the turn
@@ -224,7 +227,10 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         cap = budget.cap if isinstance(budget, Budget) else float(budget.get("cap", 5.0))
         cost = estimate_cost(model, dict(usage))
         new_used = used + cost
-        out["budget"] = Budget(used=new_used, cap=cap)
+        # Plain dict, not the Budget model — the Postgres serde is msgpack and
+        # unregistered pydantic types warn now and hard-fail in a future
+        # langgraph (LANGGRAPH_STRICT_MSGPACK). Readers accept both shapes.
+        out["budget"] = {"used": new_used, "cap": cap}
         reminder = _budget_reminder(emitter, task_id, used, new_used, cap)
         if reminder is not None:
             _publish_events(config, [reminder])
@@ -268,7 +274,7 @@ def _aiter(llm: Any, messages: list) -> Any:
     returns a coroutine instead, which `async for` cannot consume — a latent
     crash the Round-33 audit's "nothing ran live" finding predicted.)
     """
-    return llm.astream(messages, stream_mode="messages")
+    return llm.astream(messages)
 
 
 def _delta(state: EngineState, content: Any) -> TypingDelta:
