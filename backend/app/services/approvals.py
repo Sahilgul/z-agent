@@ -75,7 +75,15 @@ class ApprovalService:
             for stream, messages in results or []:
                 run_id = stream.removeprefix("approvals:")
                 for msg_id, fields in messages:
-                    await self._create_card(run_id, fields)
+                    # M-35: one bad message used to propagate out of _loop
+                    # and kill ALL approvals (the whole consumer died). Per-
+                    # message try/except: log the failure and ACK the bad
+                    # message so it's not re-processed forever (poison msg).
+                    try:
+                        await self._create_card(run_id, fields)
+                    except Exception:  # noqa: BLE001
+                        log.exception("approval card create failed; acking to drop",
+                                       run_id=run_id, msg_id=msg_id)
                     await self.redis.xack(stream, "approvals", msg_id)
 
     async def _expire_stale(self) -> None:
@@ -114,34 +122,58 @@ class ApprovalService:
 
     async def _create_card(self, run_id: str, fields: dict) -> None:
         ttl = get_settings().approval_timeout_seconds
-        approval = Approval(
-            id=fields.get("approval_id", str(uuid.uuid4())),
-            run_id=run_id,
-            thread_id=fields.get("thread_id"),
-            kind=fields.get("kind", "tool"),
-            payload=json.loads(fields.get("payload", "{}")),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl),
-        )
+        approval_id = fields.get("approval_id", str(uuid.uuid4()))
+        # M-34: build the fanout payload from the INPUT fields so we don't
+        # touch a detached Approval object after the session closes (and so
+        # a retried/duplicate create fans out the SAME card).
+        card = {
+            "id": approval_id,
+            "kind": fields.get("kind", "tool"),
+            "payload": json.loads(fields.get("payload", "{}")),
+            "thread_id": fields.get("thread_id"),
+        }
         session = get_session()
         try:
-            session.add(approval)
-            session.commit()
+            # M-34: idempotency — a duplicate or retried create used to
+            # INSERT again and IntegrityError on the PK, and a transient
+            # fanout failure after the commit lost the card forever (committed
+            # but never published). Skip re-insert if the card exists; the
+            # card is durable in the DB either way.
+            existing = session.get(Approval, approval_id)
+            if existing is None:
+                session.add(Approval(
+                    id=approval_id,
+                    run_id=run_id,
+                    thread_id=fields.get("thread_id"),
+                    kind=fields.get("kind", "tool"),
+                    payload=card["payload"],
+                    expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl),
+                ))
+                session.commit()
         finally:
             session.close()
         # Approval cards ALWAYS break through: even while the agent works,
         # Supervised autonomy surfaces tool-permission cards.
         await self.relay.publish_run_stage(run_id, "awaiting_user",
                                            ["allow_once", "always_allow", "deny_tool"])
-        await self.relay._fanout(run_id, {"type": "approval_card", "approval": {
-            "id": approval.id, "kind": approval.kind, "payload": approval.payload,
-            "thread_id": approval.thread_id,
-        }})
-        self._push_to_owner(run_id, approval)
+        # M-34: the fanout is best-effort — a transient relay failure here
+        # used to lose the card forever. Log it; the card is durable in the
+        # DB and the consumer/UI can re-fetch.
+        try:
+            await self.relay._fanout(run_id, {"type": "approval_card", "approval": card})
+        except Exception:  # noqa: BLE001
+            log.exception("approval card fanout failed (card is durable in DB)",
+                           approval_id=approval_id)
+        self._push_to_owner(run_id, card)
 
     @staticmethod
-    def _push_to_owner(run_id: str, approval: Approval) -> None:
+    def _push_to_owner(run_id: str, approval: dict) -> None:
         """Well-timed ask: the push deep-links THIS card, and a
-        push failure must never delay the approval flow."""
+        push failure must never delay the approval flow.
+
+        M-34: accepts the card dict (id/kind) so the caller doesn't need a
+        live Approval object (which would be detached after its session
+        closed)."""
         try:
             from app.services import push
             from app.db.models.run import Run
@@ -154,8 +186,8 @@ class ApprovalService:
                 session.close()
             if owner:
                 push.send_to_user(owner, "Approval needed",
-                                  f"{approval.kind}: {title[:80]}",
-                                  push.approval_deep_link(run_id, approval.id))
+                                  f"{approval['kind']}: {title[:80]}",
+                                  push.approval_deep_link(run_id, approval['id']))
         except Exception:  # noqa: BLE001 — notify never fails the ask
             pass
 

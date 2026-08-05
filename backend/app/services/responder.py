@@ -52,8 +52,12 @@ def _pr_link(pr_id: int) -> dict | None:
 def _active_thread(run_id: str) -> str | None:
     session = get_session()
     try:
+        # M-40: an idle thread is still ALIVE (lingering for nudges). Excluding
+        # it made _active_thread return None on a live-but-idle session, so the
+        # responder spawned a DUPLICATE thread on the next trigger event.
+        # Include idle so the existing thread is nudged, not replaced.
         thread = (session.query(Thread).filter_by(run_id=run_id)
-                .filter(Thread.status.in_(["running", "queued"]))
+                .filter(Thread.status.in_(["running", "queued", "idle"]))
                 .order_by(Thread.created_at).first())
         return thread.id if thread else None
     finally:
@@ -89,6 +93,11 @@ async def respond(event: TriggerEvent, trigger, run_manager) -> dict:
         session.expunge_all()
     finally:
         session.close()
+    # M-42: a missing run (deleted / never created) used to crash on `run.id`
+    # with an opaque AttributeError after the expunge+close detached the
+    # instance. Surface a clear, durable verdict instead of a 500.
+    if run is None:
+        return {"status": "ignored", "reason": "run_not_found", "run_id": run_id}
     thread = await run_manager.thread_manager.spawn(
         run, persona="responder", prompt=_comment_prompt(event),
         persona_prompt=RESPONDER_PERSONA, writable_repo=repo, context_repos=[],

@@ -25,7 +25,10 @@ class Approval(Base):
     )
 
     id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid
-    run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)
+    # M-36: nullable so a user-authored knowledge draft (no source run) can
+    # still get a decidable Approval card — otherwise it was orphaned from the
+    # card flow (stuck in "draft", never surfaced for review).
+    run_id: Mapped[str | None] = mapped_column(sa.ForeignKey("runs.id"), nullable=True, index=True)
     thread_id: Mapped[str | None] = mapped_column(nullable=True)
     kind: Mapped[str] = mapped_column(sa.String(16))  # plan | tool | knowledge | pr
     payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)

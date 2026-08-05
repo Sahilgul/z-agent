@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import OrderedDict
 from datetime import datetime, timezone
 
 import httpx
@@ -36,7 +37,20 @@ SCOPES = {"global", "repo", "user"}
 
 # Per-run prompt-block cache: the first thread of a run pays the rerank, the
 # rest reuse the block. Single-host local era; cross-host store lands later.
-_block_cache: dict[str, str] = {}
+# M-37: bounded (LRU, capped) + version-stamped so approve/reject invalidates
+# every cached block (the corpus changed) — the old cache was unbounded and
+# never invalidated, so a run kept serving a stale block after an item it
+# included/excluded was approved/rejected.
+_BLOCK_CACHE_MAX = 256
+_block_cache: "OrderedDict[str, tuple[str, int]]" = OrderedDict()
+_block_cache_version = 0
+
+
+def _bump_block_cache_version() -> None:
+    """Invalidate every cached prompt block (the corpus changed on
+    approve/reject). Stale entries are recomputed on next lookup."""
+    global _block_cache_version
+    _block_cache_version += 1
 
 
 class KnowledgeError(ValueError):
@@ -71,15 +85,20 @@ def draft(content: str, trigger_description: str, created_by: int,
         )
         session.add(item)
         session.flush()  # item.id for the approval payload
-        if source_run_id is not None:
-            import uuid as _uuid
-            session.add(Approval(
-                id=str(_uuid.uuid4()), run_id=source_run_id, kind="knowledge",
-                payload={"item_id": item.id, "content": content,
-                         "trigger_description": trigger_description,
-                         "proposed_scope": proposed_scope, "repo": repo,
-                         **(extra_payload or {})},
-            ))
+        # M-36: a draft WITHOUT a source_run_id (a user-authored draft from
+        # the knowledge UI) used to get NO approval card — orphaned from the
+        # card flow (stuck in "draft", never surfaced for review). Create the
+        # card with run_id=NULL in that case; the decide endpoint acts by
+        # approval_id (not run_id), so the card is decidable, and the draft
+        # is already in pending() for the knowledge screen.
+        import uuid as _uuid
+        session.add(Approval(
+            id=str(_uuid.uuid4()), run_id=source_run_id, kind="knowledge",
+            payload={"item_id": item.id, "content": content,
+                     "trigger_description": trigger_description,
+                     "proposed_scope": proposed_scope, "repo": repo,
+                     **(extra_payload or {})},
+        ))
         session.commit()
         session.refresh(item)
         return item
@@ -188,6 +207,9 @@ def approve(item_id: int, scope: str, decided_by: int,
             item.repo = repo
         _resolve_linked_approval(session, item, "approved", decided_by)
         session.commit()
+        # M-37: the corpus changed — invalidate every cached prompt block so
+        # runs don't keep serving a block built from the old corpus.
+        _bump_block_cache_version()
         return _serialize(item)
     finally:
         session.close()
@@ -202,6 +224,8 @@ def reject(item_id: int, decided_by: int) -> dict:
         item.status = "rejected"
         _resolve_linked_approval(session, item, "denied", decided_by)
         session.commit()
+        # M-37: the corpus changed — invalidate every cached prompt block.
+        _bump_block_cache_version()
         return _serialize(item)
     finally:
         session.close()
@@ -324,11 +348,23 @@ async def prompt_block_for_run(run_id: str, task_text: str, user_id: int,
                                repo: str | None, ranker=None) -> str:
     """The per-run pinned-knowledge block. Cached per run_id so only the first
     thread of a run pays the rerank; swarm threads share the block."""
-    if run_id in _block_cache:
-        return _block_cache[run_id]
+    # M-37: version-stamped — a block is valid only while its version matches
+    # the current corpus version; approve/reject bumps the version so a stale
+    # block is recomputed (not served stale).
+    cached = _block_cache.get(run_id)
+    if cached is not None:
+        block, version = cached
+        if version == _block_cache_version:
+            # LRU touch.
+            _block_cache.move_to_end(run_id)
+            return block
     pinned = await rerank(task_text, _search_space(user_id, repo), ranker=ranker)
     block = render_block(pinned)
-    _block_cache[run_id] = block
+    _block_cache[run_id] = (block, _block_cache_version)
+    _block_cache.move_to_end(run_id)
+    # M-37: bound the cache (evict least-recently-used when over cap).
+    while len(_block_cache) > _BLOCK_CACHE_MAX:
+        _block_cache.popitem(last=False)
     return block
 
 

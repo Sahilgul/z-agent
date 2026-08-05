@@ -82,13 +82,19 @@ class HeartbeatPersister:
 
     def _persist(self, thread_id: str, status: str | None) -> None:
         now_mono = asyncio.get_event_loop().time()
-        last = self._last_write.get(thread_id, 0.0)
+        last = self._last_write.get(thread_id)
+        # M-41: the throttle used `self._last_write.get(thread_id, 0.0)`, so
+        # for a NEW thread the first beat's `now_mono - 0.0` was measured against
+        # loop-start (a small value early in the run), landing inside the
+        # throttle window -> the first no-status beat was silently dropped.
+        # Always persist the first beat per thread (no prior write to throttle).
+        first_beat = last is None
         # A status transition bypasses the throttle: the running->idle beat is
         # the one that stops the watchdog from nagging a finished thread, and it
         # is unscheduled so it is the beat most likely to land inside the
         # window. Throttling is about write volume, not about losing state.
         status_changed = status is not None and self._last_status.get(thread_id) != status
-        if not status_changed and now_mono - last < _MIN_WRITE_INTERVAL_SECONDS:
+        if not first_beat and not status_changed and now_mono - last < _MIN_WRITE_INTERVAL_SECONDS:
             return
         self._last_write[thread_id] = now_mono
         if status is not None:

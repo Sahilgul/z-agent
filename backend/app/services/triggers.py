@@ -282,6 +282,7 @@ def _rate_limited(trigger) -> bool:
         # falling back to the legacy top-level payload["trigger_name"] for
         # rows written before the fix.
         count = 0
+        cap = trigger.rate_limit_per_hour
         for entry in logs:
             payload = entry.payload or {}
             verdicts = payload.get("verdicts")
@@ -291,7 +292,12 @@ def _rate_limited(trigger) -> bool:
                             and v.get("status") == "started")
             elif payload.get("trigger_name") == trigger.name:
                 count += 1
-        return count >= trigger.rate_limit_per_hour
+            # M-39: early exit — we only need to know if count >= cap, so stop
+            # scanning once we hit the cap. Bounds the Python iteration at
+            # O(cap) instead of O(all matched logs) under a blast.
+            if count >= cap:
+                return True
+        return count >= cap
     finally:
         session.close()
 

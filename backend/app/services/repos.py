@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 import subprocess
 from datetime import datetime, timezone
 
@@ -23,6 +24,19 @@ from app.db.base import get_session
 from app.db.models.repo import Repo, RepoProfile, RepoStatus
 
 log = get_logger(service="repo_onboarding")
+
+# M-43: a repo name is used as a path segment under golden_dir
+# (settings.golden_dir / name) and as a git ref namespace. A name with ".."
+# or a path separator used to escape golden_dir (path traversal) or break
+# refs. Allow a single safe path component only.
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_repo_name(name: str) -> None:
+    if not name or not _REPO_NAME_RE.match(name) or ".." in name:
+        raise OnboardingError(
+            f"invalid repo name {name!r}: must be a single path component "
+            f"(letters, digits, '.', '_', '-'; no '..' or separators)")
 
 
 class OnboardingError(RuntimeError):
@@ -70,6 +84,9 @@ def validate_remote(remote_url: str, pat: str) -> list[str]:
 def register_repo(name: str, remote_url: str, integration_branch: str,
                   added_by: int | None) -> Repo:
     """Dedupe by URL: re-registering an existing remote returns the live row."""
+    # M-43: validate the name BEFORE it becomes a path segment under
+    # golden_dir — a name like "../x" used to escape golden_dir on clone.
+    _validate_repo_name(name)
     session = get_session()
     try:
         existing = session.query(Repo).filter(

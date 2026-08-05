@@ -303,5 +303,16 @@ async def merge_pr(run_id: str, user_id: int,
         session.commit()
         log.info("pr merged", run_id=run_id, pr=pr_id, merged_by=user_id)
         return {"link": link, "handoff_url": None}
+    except Exception:
+        # M-38: the ADO merge already succeeded (complete_pull_request
+        # returned). A DB failure here used to leave the evidence trail stale
+        # — link.status stayed "open" while the PR was actually merged in
+        # ADO, so the UI showed an open PR that was already merged. Log a
+        # critical reconciliation warning so a reconciler can repair the row;
+        # re-raise so the caller knows the DB leg failed.
+        log.critical(
+            "pr merged in ADO but DB link update failed — evidence trail stale; needs reconciliation",
+            run_id=run_id, pr=pr_id, merged_by=user_id)
+        raise
     finally:
         session.close()

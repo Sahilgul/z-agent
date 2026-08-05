@@ -49,10 +49,16 @@ def test_draft_from_run_creates_knowledge_approval_card(session, make_user):
     assert card.decision is None
 
 
-def test_draft_without_run_has_no_card(session, make_user):
+def test_draft_without_run_gets_decidable_card(session, make_user):
+    # M-36: a user-authored draft (no source run) used to get NO approval card
+    # — orphaned from the card flow (stuck in "draft", never surfaced for
+    # review). It now gets a decidable card with run_id=NULL; the decide
+    # endpoint acts by approval_id, so the card is decidable.
     u = make_user()
     knowledge.draft("lesson", "trig", u.id)
-    assert session.query(Approval).filter_by(kind="knowledge").count() == 0
+    card = session.query(Approval).filter_by(kind="knowledge").one()
+    assert card.run_id is None
+    assert card.decision is None
 
 
 # ------------------------------------------------------------------- inbox
