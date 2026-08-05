@@ -10,7 +10,7 @@ name: zagent
 #   gateway-db  — LiteLLM-internal Postgres (disposable; re-mint keys to rebuild)
 #   gateway     — LiteLLM proxy, sole LLM egress, virtual keys + budgets
 #   migrate     — one-shot: alembic upgrade head + seed (runs before backend)
-#   backend     — FastAPI control plane; spawns lane containers via docker.sock
+#   backend     — FastAPI control plane; spawns thread containers via docker.sock
 #   web         — nginx: apps/web dist + API/WS reverse proxy (single origin)
 
 networks:
@@ -18,8 +18,8 @@ networks:
     driver: bridge
   egress:
     driver: bridge
-  lane:
-    # Worker lane lockdown: NO internet route — lanes reach ONLY the
+  thread:
+    # Worker thread lockdown: NO internet route — threads reach ONLY the
     # gateway (LLM) and redis (events/control).
     driver: bridge
     internal: true
@@ -46,7 +46,7 @@ services:
     command: redis-server --appendonly yes --appendfsync everysec
     volumes:
       - redis-data:/data
-    networks: [internal, lane]
+    networks: [internal, thread]
     restart: unless-stopped
 
   gateway-db:
@@ -82,7 +82,7 @@ services:
     networks:
       - internal
       - egress        # only the gateway may reach Foundry / the internet
-      - lane          # lanes' sole LLM egress point
+      - thread          # threads' sole LLM egress point
     restart: unless-stopped
 
   migrate:
@@ -139,10 +139,10 @@ services:
       ZAGENT_PLAYBOOKS_DIR: /app/backend/playbooks
     volumes:
       # PATH PARITY (required, not cosmetic): the sandbox manager asks the HOST
-      # daemon over docker.sock to bind these dirs into sibling lane containers,
+      # daemon over docker.sock to bind these dirs into sibling thread containers,
       # and the daemon resolves those sources in the HOST namespace. A named
       # volume mounted at /golden here does not exist at /golden on the host, so
-      # Docker would silently create an empty dir and every lane would see an
+      # Docker would silently create an empty dir and every thread would see an
       # empty repo. Mounting host path -> identical container path keeps the
       # paths the backend writes and the paths the daemon reads the same string.
       - ${ZAGENT_DATA_ROOT:-/srv/zagent}/golden:${ZAGENT_DATA_ROOT:-/srv/zagent}/golden
@@ -161,7 +161,7 @@ services:
         condition: service_started
       gateway:
         condition: service_started
-    networks: [internal, lane]
+    networks: [internal, thread]
     restart: unless-stopped
 
   web:
@@ -184,7 +184,7 @@ services:
       - ../squid/squid.conf:/etc/squid/squid.conf:ro
       - pkg-cache:/var/spool/squid
     networks:
-      - lane
+      - thread
       - egress
     restart: unless-stopped
 
