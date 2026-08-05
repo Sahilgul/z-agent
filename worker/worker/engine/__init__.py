@@ -12,7 +12,7 @@ Layout:
   checkpointer.py — LangGraph persistence + DeltaChannel JSONL mirror
   graph.py        — the StateGraph (agent -> tools -> agent ... -> end)
   tools/          — read-only tools; mutating + approvals
-  prompts/        — base.md + model suffixes + per-turn envelopes
+  prompts/        — system_prompt.md + per-turn envelopes
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from worker.engine.compaction import (
 )
 from worker.engine.events import EventEmitter
 from worker.engine.graph import build_graph
-from worker.engine.llm import estimate_cost, get_capabilities, make_llm, suffix_for
+from worker.engine.llm import estimate_cost, get_capabilities, make_llm
 from worker.engine.mcp import MCPManager, mcp_manager
 from worker.engine.memory import (
     EpisodicMemory,
@@ -80,7 +80,6 @@ __all__ = [
     "read_handoff",
     "resolve_tool_name",
     "set_episodic_memory",
-    "suffix_for",
     "tag_message",
     "tools_for_mode",
 ]

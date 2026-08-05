@@ -19,7 +19,7 @@ from zagent_contracts import StepKind
 
 from worker.engine.events import EventEmitter
 from worker.engine.graph import _should_continue, _tool_kind, _tool_title, build_graph
-from worker.engine.llm import get_capabilities, suffix_for
+from worker.engine.llm import get_capabilities
 from worker.engine.security import is_sensitive_path, redact, redact_dict
 from worker.engine.state import Budget, EngineState, PromptOrigin, tag_message
 from worker.engine.tools import (
@@ -276,12 +276,6 @@ def test_tag_message_sets_origin():
     msg = HumanMessage(content="hi")
     tagged = tag_message(msg, PromptOrigin.USER)  # type: ignore[arg-type]
     assert tagged.additional_kwargs["prompt_origin"] == "user"
-
-
-def test_model_suffix_selection():
-    assert suffix_for("kimi-foundry").endswith("kimi.md")
-    assert suffix_for("qwen-foundry").endswith("default-open.md")
-    assert suffix_for("unknown-model").endswith("default-open.md")
 
 
 def test_model_capabilities_registry():

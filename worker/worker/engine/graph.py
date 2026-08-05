@@ -88,25 +88,10 @@ def _read_prompt(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _build_system_message(model: str, mode: Mode) -> SystemMessage:
-    """base.md + model suffix — ONE system message per turn."""
-    base = _read_prompt("base.md")
-    marker = "--- PROMPT START ---"
-    if marker in base:
-        base = base.split(marker, 1)[1]
-    end = "--- PROMPT END ---"
-    if end in base:
-        base = base.split(end, 1)[0]
-    suffix_path = _suffix_path(model)
-    suffix = Path(suffix_path).read_text(encoding="utf-8") if suffix_path and Path(suffix_path).exists() else ""
-    base = base.replace("{{SKILLS_LISTING}}", "")
-    msg = SystemMessage(content=base + suffix)
+def _build_system_message() -> SystemMessage:
+    """system_prompt.md, verbatim — ONE system message per turn."""
+    msg = SystemMessage(content=_read_prompt("system_prompt.md"))
     return tag_message(msg, "system")  # type: ignore[arg-type]
-
-
-def _suffix_path(model: str) -> str:
-    from worker.engine.llm import suffix_for
-    return suffix_for(model)
 
 
 def _mode_of(state: EngineState) -> str:
@@ -225,7 +210,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
 
     mode = _mode_of(state)
     llm = make_llm(model, streaming=True, tools=_bound_tools(state, mode))
-    system = _build_system_message(model, mode)  # type: ignore[arg-type]
+    system = _build_system_message()
     messages = [system] + state.get("messages", [])
     envelope = _build_turn_envelope(state, config)
     if envelope is not None:

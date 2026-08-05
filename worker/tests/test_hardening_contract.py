@@ -137,6 +137,47 @@ async def test_redis_stream_survives_consumer_disconnect():
     await r.aclose()
 
 
+@pytest.mark.asyncio
+async def test_approval_request_bridges_to_backend_stream():
+    """The engine's approval card must ALSO land on approvals:{run_id} — the
+    stream the backend ApprovalService consumes to create the DECIDABLE
+    Approval row. The old engine path only emitted a display-only StepEvent,
+    so no decision could ever arrive and every gated call timed out into a
+    deny. Drive the real Forwarder.publish_approval_request (fakeredis
+    injected) and assert the bridge fields the backend _create_card reads."""
+    pytest.importorskip("fakeredis.aioredis")
+    import fakeredis.aioredis as fake_mod
+    from worker.forwarder import Forwarder
+
+    r = fake_mod.FakeRedis(decode_responses=True)
+    fwd = Forwarder("redis://fake", "run-1", "t1")
+    fwd.redis = r
+
+    payload = {
+        "approval_id": "ap-123",
+        "tool": "terminal_exec",
+        "args": {"command": "az repos pr list"},
+        "preview": "$ az repos pr list",
+        "destructive": False,
+        "always_allowable": True,
+    }
+    await fwd.publish_approval_request(payload)
+
+    entries = await r.xrange("approvals:run-1")
+    assert len(entries) == 1
+    fields = entries[0][1]
+    assert fields["approval_id"] == "ap-123"  # the id the broker BLPOPs on
+    assert fields["thread_id"] == "t1"
+    assert fields["kind"] == "tool"
+    card = json.loads(fields["payload"])
+    assert card["tool"] == "terminal_exec"
+    assert card["args"] == {"command": "az repos pr list"}
+    assert card["preview"] == "$ az repos pr list"
+    assert card["always_allowable"] is True
+    assert "requested_at" in fields
+    await r.aclose()
+
+
 # --- DeltaChannel JSONL mirror durability ---
 
 @pytest.mark.asyncio

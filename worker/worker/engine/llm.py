@@ -126,20 +126,6 @@ class ChatOpenAIReasoning(ChatOpenAI):
         return generation_chunk
 
 
-# --- Per-model prompt suffix selection ---
-
-def suffix_for(model: str) -> str:
-    """Return the model-specific suffix path (or empty if none)."""
-    suffix_dir = os.path.join(os.path.dirname(__file__), "prompts", "suffixes")
-    # kimi models get the kimi suffix; everything else gets default-open
-    if "kimi" in model.lower():
-        path = os.path.join(suffix_dir, "kimi.md")
-        if os.path.exists(path):
-            return path
-    path = os.path.join(suffix_dir, "default-open.md")
-    return path if os.path.exists(path) else ""
-
-
 # --- Gateway retry/backoff ---
 
 class GatewayRetryError(Exception):
@@ -343,7 +329,6 @@ __all__ = [
     "estimate_cost",
     "get_capabilities",
     "make_llm",
-    "suffix_for",
     "with_gateway_retry",
     "with_gateway_retry_aiter",
 ]
