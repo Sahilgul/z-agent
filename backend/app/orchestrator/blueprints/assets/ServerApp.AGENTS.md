@@ -7,7 +7,7 @@
 
 ## What this service is
 
-NestJS backend — the central hub for HAMI. REST + three WebSocket namespaces;
+NestJS backend — the central hub for the fleet. REST + three WebSocket namespaces;
 all clients (ClientApp, LiveKit agents, PromptFlow callers) connect here.
 Owns auth, persistence (Postgres via Drizzle), and orchestration to LiveKit
 agents and PromptFlow. TypeScript, Jest, ESLint+Prettier, Azure DevOps CI.
@@ -104,9 +104,9 @@ agents and PromptFlow. TypeScript, Jest, ESLint+Prettier, Azure DevOps CI.
   is the `LoggingInterceptor`'s job via a registry — new free-text PHI columns
   register there in the same PR.
 
-## Fleet position (see hami-services.json for the full graph)
+## Fleet position (see services.json for the full graph)
 
 Upstream callers: ClientApp (REST + WS). Downstream: LivekitScribe /
-LiveKitIntake (LiveKit RPC), PromptFlowApp flows (HTTP), Postgres (hami DB),
+LiveKitIntake (LiveKit RPC), PromptFlowApp flows (HTTP), Postgres (app DB),
 Redis (adapter + throttler + blacklist), Azure Service Bus, Storage Queues,
 SendGrid, Twilio, Azure Key Vault.

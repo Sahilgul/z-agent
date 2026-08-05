@@ -1,7 +1,7 @@
 [project]
 name = "zagent"
 version = "0.1.0"
-description = "Zagent — ADO-native autonomous engineering platform for HAMI (uv workspace root)"
+description = "Zagent — ADO-native autonomous engineering platform (uv workspace root)"
 requires-python = ">=3.12,<3.13"
 
 [tool.uv.workspace]

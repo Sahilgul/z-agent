@@ -1,10 +1,11 @@
 """fleet-config loader (plan §5 Layer 0 + §7 registry).
 
 stdlib-only on purpose: importable by scripts AND the backend without dragging
-dependencies. Two artifacts:
-  - repos list (from hami-repos.json) -> seeds the `repos` DB table (bootstrap
-    SEED for the initial 10; the DB row is the LIVE registry afterwards).
-  - FleetGraph (from hami-services.json) -> in-memory Layer 0 inter-repo system
+dependencies. Org-adoptable: point `fleet_config_dir` at YOUR org's copy of
+these two files. Two artifacts:
+  - repos list (from repos.json) -> seeds the `repos` DB table (bootstrap
+    SEED; the DB row is the LIVE registry afterwards).
+  - FleetGraph (from services.json) -> in-memory Layer 0 inter-repo system
     map, loaded at startup, edited via PR, NEVER auto-generated.
 
 Ownership split: machine-manageable data in the DB, human judgment in files.
@@ -76,7 +77,7 @@ class FleetGraph:
 
 
 def load_repos(config_dir: Path) -> list[RepoSpec]:
-    data = json.loads((config_dir / "hami-repos.json").read_text(encoding="utf-8"))
+    data = json.loads((config_dir / "repos.json").read_text(encoding="utf-8"))
     return [
         RepoSpec(
             name=r["name"],
@@ -91,7 +92,7 @@ def load_repos(config_dir: Path) -> list[RepoSpec]:
 
 
 def load_fleet_graph(config_dir: Path) -> FleetGraph:
-    data = json.loads((config_dir / "hami-services.json").read_text(encoding="utf-8"))
+    data = json.loads((config_dir / "services.json").read_text(encoding="utf-8"))
     services = {
         s["name"]: ServiceNode(
             name=s["name"],

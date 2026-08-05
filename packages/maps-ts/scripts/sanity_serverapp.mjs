@@ -1,6 +1,7 @@
-// Sanity check: run the TS generator against the real ServerApp repo.
-// Does NOT write .zagent/ into the real repo — writes map.json/map.md to a temp
+// Sanity check: run the TS generator against a real repo checkout.
+// Does NOT write .zagent/ into the repo — writes map.json/map.md to a temp
 // dir and prints module count, top-5 hot files, and crash count.
+// Point SANITY_REPO at any local checkout (default: the golden tree layout).
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { join } from "node:path";
 import { generate } from "../src/generate.js";
 import { toDict, renderMarkdown } from "../src/grammar.js";
 
-const REPO = "d:\\HAMI-SAAS\\ServerApp";
+const REPO = process.env.SANITY_REPO || "./golden/repos/ServerApp";
 
 function main() {
   const { map, report } = generate(REPO);

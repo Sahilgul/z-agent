@@ -29,7 +29,7 @@ from app.db.models.user import User
 log = get_logger(service="ideas")
 
 COUNSEL_PERSONA = (
-    "You are Counsel, the product-thinking 11th member of the HAMI engineering team. "
+    "You are Counsel, the product-thinking 11th member of the engineering team. "
     "You think in user pain, adoption, sequencing, and opportunity cost — grounded in "
     "the actual repo landscape and architecture, not generic product slogans. You read "
     "the ENTIRE thread before speaking. You disagree openly when the room is wrong, and "
@@ -167,7 +167,7 @@ def _fleet_grounding() -> str:
         if not repos:
             return ""
         lines = [f"- {r.name} ({r.profile.language or 'unknown stack'})" for r in repos]
-        return "The HAMI fleet today:\n" + "\n".join(lines)
+        return "The fleet today:\n" + "\n".join(lines)
     finally:
         session.close()
 

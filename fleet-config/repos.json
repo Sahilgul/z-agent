@@ -1,11 +1,10 @@
 {
-  "$schema": "https://hami.internal/hami-repos.schema.json",
   "version": 1,
-  "description": "Source of truth for HAMI repos and their integration (PR-target) branches. The orchestrator reads this in Phase 0 RECON before creating any worktree. Executors MUST base worktrees on origin/<integrationBranch> after a fresh fetch, NEVER on the local checkout's current branch (which may be a personal/feature branch like 'sahil' or 'treatment/...'). Update this file when a repo's integration branch changes or a new repo is added.",
+  "description": "Source of truth for the org's repos and their integration (PR-target) branches. The orchestrator reads this in Phase 0 RECON before creating any worktree. Executors MUST base worktrees on origin/<integrationBranch> after a fresh fetch, NEVER on the local checkout's current branch (which may be a personal/feature branch like 'sahil' or 'treatment/...'). Update this file when a repo's integration branch changes or a new repo is added.",
   "repos": [
     {
       "name": "AIClusterApp",
-      "path": "D:\\HAMI-SAAS\\AIClusterApp",
+      "path": "AIClusterApp",
       "integrationBranch": "pg-main",
       "remote": "origin",
       "stack": "Azure App Service (legacy AI cluster host)",
@@ -13,28 +12,28 @@
     },
     {
       "name": "AIMedVision",
-      "path": "D:\\HAMI-SAAS\\AIMedVision",
+      "path": "AIMedVision",
       "integrationBranch": "pg-main",
       "remote": "origin",
       "stack": "Azure"
     },
     {
       "name": "Billing-Engine",
-      "path": "D:\\HAMI-SAAS\\Billing-Engine",
+      "path": "Billing-Engine",
       "integrationBranch": "pg-main",
       "remote": "origin",
       "stack": "Billing engine (Python per repo)"
     },
     {
       "name": "ClientApp",
-      "path": "D:\\HAMI-SAAS\\ClientApp",
+      "path": "ClientApp",
       "integrationBranch": "main",
       "remote": "origin",
       "stack": "React 18 + Ionic 8 + Vite + TanStack Query + Capacitor"
     },
     {
       "name": "ClinicalAIServices",
-      "path": "D:\\HAMI-SAAS\\ClinicalAIServices",
+      "path": "ClinicalAIServices",
       "integrationBranch": "pg-main",
       "remote": "origin",
       "stack": "FastAPI + pydantic-ai microservices (AVS, Assessment, Intake Summary, TRLLM, Treatment Summary, LiveKitIntake, LivekitScribe)",
@@ -42,28 +41,28 @@
     },
     {
       "name": "KnowledgeBase",
-      "path": "D:\\HAMI-SAAS\\KnowledgeBase",
+      "path": "KnowledgeBase",
       "integrationBranch": "main",
       "remote": "origin",
       "stack": "Docs / knowledge base"
     },
     {
       "name": "LivekitAgents",
-      "path": "D:\\HAMI-SAAS\\LivekitAgents",
+      "path": "LivekitAgents",
       "integrationBranch": "pg-main",
       "remote": "origin",
       "stack": "LiveKit voice agents (LiveKitIntake, LivekitScribe)"
     },
     {
       "name": "LLMQuality",
-      "path": "D:\\HAMI-SAAS\\LLMQuality",
+      "path": "LLMQuality",
       "integrationBranch": "main",
       "remote": "origin",
       "stack": "LLM quality evals"
     },
     {
       "name": "PromptFlowApp",
-      "path": "D:\\HAMI-SAAS\\PromptFlowApp",
+      "path": "PromptFlowApp",
       "integrationBranch": "pg-main",
       "remote": "origin",
       "stack": "Legacy PromptFlow app (being retired in favor of ClinicalAIServices pydantic-ai)",
@@ -71,14 +70,14 @@
     },
     {
       "name": "ServerApp",
-      "path": "D:\\HAMI-SAAS\\ServerApp",
+      "path": "ServerApp",
       "integrationBranch": "main",
       "remote": "origin",
       "stack": "NestJS + Postgres + Drizzle ORM + Socket.io"
     }
   ],
   "conventions": {
-    "prTarget": "Per-repo integrationBranch (see above). There is NO single branch across HAMI — some repos use main, some use pg-main. Do not assume.",
+    "prTarget": "Per-repo integrationBranch (see above). There is NO single branch across the fleet — some repos use main, some use pg-main. Do not assume.",
     "worktreeBase": "Always `git fetch origin` then base worktrees on `origin/<integrationBranch>`. Never on the local checkout's current branch.",
     "featureBranchPrefix": "feat/<slug>-<unit-name>",
     "integrationBranchPrefix": "integration/<slug>",

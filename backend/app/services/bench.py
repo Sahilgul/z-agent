@@ -1,4 +1,4 @@
-"""HAMI-bench (plan §9 Phase 5): the fleet's own benchmark, mined from closed
+"""fleet-bench (plan §9 Phase 5): the org's own benchmark, mined from closed
 ADO work items — the eval that decides whether the flywheel actually compounds.
 
 F2P/P2P scoring (SWE-bench semantics): a case is RESOLVED when every

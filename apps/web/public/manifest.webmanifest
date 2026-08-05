@@ -1,7 +1,7 @@
 {
   "name": "Zagent",
   "short_name": "Zagent",
-  "description": "Autonomous engineering platform for the HAMI fleet",
+  "description": "Autonomous engineering platform — org-agnostic, adoptable against any set of repositories",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#202A35",

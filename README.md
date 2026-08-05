@@ -1,9 +1,9 @@
 # Zagent
 
-An ADO-native autonomous engineering platform for the HAMI fleet. Zagent takes a
-task, plans it, runs LLM agents in isolated per-repo sandboxes, streams every
-step to a live console, and opens the pull request — with a human in the loop at
-whatever depth you choose.
+An ADO-native autonomous engineering platform — org-agnostic and adoptable
+against any set of repositories. Zagent takes a task, plans it, runs LLM agents
+in isolated per-repo sandboxes, streams every step to a live console, and opens
+the pull request — with a human in the loop at whatever depth you choose.
 
 The unit of work is a **run**. A run owns one or more **threads** (each a
 container running Zagent's custom agent engine against one repo), moves through
@@ -212,7 +212,7 @@ cd apps/web && npm test              # vitest — 118 tests incl. console-parity
 cd apps/web && npm run build         # typecheck + production build
 ```
 
-Tests are mock-only per the HAMI testing standard: no live ADO, gateway, Docker,
+Tests are mock-only per the repo's testing standard: no live ADO, gateway, Docker,
 or Redis. `memory://` Redis and SQLite make the backend suite hermetic; the
 engine suite runs against a mock gateway and fixture events.
 

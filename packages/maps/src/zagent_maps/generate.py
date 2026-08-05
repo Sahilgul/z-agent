@@ -301,7 +301,7 @@ def build_module_index(repo_root: Path, files: list[Path]) -> dict[str, str]:
 
     A file ``src/pkg/sub/mod.py`` is registered as ``"src.pkg.sub.mod"``.
     An ``__init__.py`` is registered as its package dotted name. This is a
-    heuristic that works for the common flat-ish HAMI service layouts.
+    heuristic that works for the common flat-ish service layouts.
     """
     index: dict[str, str] = {}
     for f in files:

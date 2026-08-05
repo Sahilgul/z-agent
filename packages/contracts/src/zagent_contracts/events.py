@@ -1,5 +1,5 @@
 """Canonical StepEvent schema — normalized at the worker edge, consumed by DB,
-WebSocket relay, UI EventStream, drift detection, critical-path math, and HAMI-bench.
+WebSocket relay, UI EventStream, drift detection, critical-path math, and fleet-bench.
 
 Hard rules (plan §1b):
 - A StepEvent is emitted ONCE, COMPLETE, at step end — the only thing ever stored.

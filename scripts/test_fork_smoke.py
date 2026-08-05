@@ -15,7 +15,7 @@ Flow under test:
      still contains the wrong turn (sibling branch preserved) and the fork
      contains the correction
 
-Run:  d:\\HAMI-SAAS\\Zagent\\.venv\\Scripts\\python scripts\\test_fork_smoke.py
+Run:  uv run python scripts/test_fork_smoke.py
 Exit 0 = fork semantics hold; non-zero prints which leg failed.
 """
 

@@ -1,16 +1,19 @@
-"""Sanity check: run the Python generator against the real PromptFlowApp repo.
+"""Sanity check: run the Python generator against a real repo checkout.
 
-Does NOT write .zagent/ into the real repo — writes map.json/map.md to a temp
+Does NOT write .zagent/ into the repo — writes map.json/map.md to a temp
 dir and prints module count, top-5 hot files, and crash count.
+
+Point SANITY_REPO at any local checkout (default: the golden tree layout).
 """
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
 
 from zagent_maps import generate, to_dict, render_markdown
 
-REPO = Path(r"d:\HAMI-SAAS\PromptFlowApp")
+REPO = Path(os.environ.get("SANITY_REPO", "./golden/repos/PromptFlowApp"))
 
 
 def main():

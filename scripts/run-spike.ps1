@@ -4,7 +4,7 @@
 param(
   [ValidateSet("ask","structured","soak","interrupt","cache","all")]
   [string]$Check = "all",
-  [string]$GoldenDir = "D:\HAMI-SAAS",
+  [string]$GoldenDir = "./golden/repos",
   [string]$Repo = "ServerApp",
   [string]$Branch = "main"
 )

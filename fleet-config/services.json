@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Source of truth for HAMI inter-service dependencies (code-verified). The planner reads this in Phase 1 to compute blast radius. ONLY live flows are listed — stale/dead flows are deliberately omitted to avoid context-window bloat. Update when wiring changes.",
+  "description": "Source of truth for the org's inter-service dependencies (code-verified). The planner reads this in Phase 1 to compute blast radius. ONLY live flows are listed — stale/dead flows are deliberately omitted to avoid context-window bloat. Update when wiring changes.",
   "callChain": "ClientApp -> ServerApp (REST + Socket.io) -> AIClusterApp (HTTP, BACKEND_*_ENDPOINT, v2) -> {ClinicalAIServices /score | Billing-Engine /icd,/cpt,/nbq | AIMedVision /message | PromptFlowApp intake-summary + after-visit-summary ONLY}. Separately: ClientApp -> LiveKit cloud (WebRTC, token from ServerApp) -> LivekitAgents (dispatch by agentName).",
   "liveServices": ["ClientApp", "ServerApp", "AIClusterApp", "ClinicalAIServices", "Billing-Engine", "LivekitAgents", "AIMedVision", "LLMQuality"],
   "legacyServicesStillPartiallyLive": ["PromptFlowApp"],
@@ -25,7 +25,7 @@
       "calls": [
         { "to": "AIClusterApp", "mechanism": "REST (axios, BACKEND_*_ENDPOINT, version:v2)", "citation": "ServerApp/src/services/intake/intake-summary.service.ts:36, configuration.ts:197-204" },
         { "to": "LiveKit cloud", "mechanism": "livekit-server-sdk", "citation": "ServerApp/src/common/services/livekit/livekit.service.ts:42-66" },
-        { "to": "Postgres-hami", "mechanism": "Drizzle/pg (schema source of truth)", "citation": "ServerApp/package.json:75,89" },
+        { "to": "Postgres-app", "mechanism": "Drizzle/pg (schema source of truth)", "citation": "ServerApp/package.json:75,89" },
         { "to": "Cosmos", "mechanism": "@azure/cosmos", "citation": "ServerApp/src/common/config/configuration.ts:119-121" },
         { "to": "ServiceBus", "mechanism": "@azure/service-bus queues", "citation": "ServerApp/src/common/config/configuration.ts:122-127" }
       ],
@@ -42,7 +42,7 @@
         { "to": "AIMedVision", "mechanism": "REST (med-vision-url, parse_image)", "citation": "AIClusterApp/api/helper.py:328-356" },
         { "to": "PromptFlowApp", "mechanism": "REST (as-pf-intake-url, as-pf-av-summary-url) — LIVE flows only", "citation": "AIClusterApp/api/helper.py:192-215,296-324" },
         { "to": "FHIR-service", "mechanism": "REST (background, fhir-url + fhir-func-key)", "citation": "AIClusterApp/api/helper.py:174-189" },
-        { "to": "Postgres-hami", "mechanism": "psycopg3 (encounterLlmMetrics, v2)", "citation": "AIClusterApp/api/helper.py:133-157" },
+        { "to": "Postgres-app", "mechanism": "psycopg3 (encounterLlmMetrics, v2)", "citation": "AIClusterApp/api/helper.py:133-157" },
         { "to": "Cosmos", "mechanism": "azure-cosmos (LLMUsage, v1)", "citation": "AIClusterApp/api/helper.py:68-74" }
       ],
       "calledBy": ["ServerApp"],
@@ -54,7 +54,7 @@
       "role": "LLM microservices: assessment-recommendation, treatment-recommendation. Replaces PromptFlowApp v1 flows.",
       "calls": [
         { "to": "Billing-Engine", "mechanism": "REST (httpx, fire_icd_trigger/fire_cpt_trigger, background)", "citation": "ClinicalAIServices/services/assessment-recommendation/assessment_recommendation/app/pipeline.py:281-305" },
-        { "to": "Postgres-hami", "mechanism": "psycopg3 AsyncConnectionPool", "citation": "ClinicalAIServices/common/config.py:36,116-125" },
+        { "to": "Postgres-app", "mechanism": "psycopg3 AsyncConnectionPool", "citation": "ClinicalAIServices/common/config.py:36,116-125" },
         { "to": "AzureOpenAI", "mechanism": "pydantic-ai", "citation": "ClinicalAIServices/common/config.py:37-49" }
       ],
       "calledBy": ["AIClusterApp"],
@@ -65,11 +65,11 @@
       "stack": "Python + FastAPI + pydantic-ai + psycopg3 + httpx + Azure Search",
       "role": "ICD/CPT/NBQ coding engine. Leaf service.",
       "calls": [
-        { "to": "Postgres-hami", "mechanism": "psycopg3", "citation": "Billing-Engine/src/common/config.py:42" },
+        { "to": "Postgres-app", "mechanism": "psycopg3", "citation": "Billing-Engine/src/common/config.py:42" },
         { "to": "AzureOpenAI", "mechanism": "chat + embeddings", "citation": "Billing-Engine/src/common/config.py:33-39" }
       ],
       "calledBy": ["AIClusterApp", "ClinicalAIServices", "PromptFlowApp"],
-      "notes": "No outbound HTTP to any HAMI service. Leaf. Exposes /icd/*,/cpt/*,/nbq/seed,/health."
+      "notes": "No outbound HTTP to any fleet service. Leaf. Exposes /icd/*,/cpt/*,/nbq/seed,/health."
     },
     {
       "name": "PromptFlowApp",
@@ -79,7 +79,7 @@
       "staleFlowsIgnore": ["assessment", "treatment-recommendation", "treatment-summary", "AVS"],
       "calls": [
         { "to": "Billing-Engine", "mechanism": "REST (requests, trigger_icd_coding -> /icd/suggest, background) — only for live flows", "citation": "PromptFlowApp/mit-assessment-recommendation-generator/trigger_icd_coding.py:33-67" },
-        { "to": "Postgres-hami", "mechanism": "psycopg3", "citation": "PromptFlowApp/db/connection.py:1-19" }
+        { "to": "Postgres-app", "mechanism": "psycopg3", "citation": "PromptFlowApp/db/connection.py:1-19" }
       ],
       "calledBy": ["AIClusterApp"],
       "notes": "When planning, account for PromptFlowApp ONLY if the feature touches intake-summary or after-visit-summary. For any other AI flow, route to ClinicalAIServices, NOT PromptFlowApp."
@@ -90,7 +90,7 @@
       "role": "Voice agents (intake, scribe). Dispatched by LiveKit cloud via agentName set by ServerApp.",
       "calls": [
         { "to": "LiveKit cloud", "mechanism": "livekit-agents WebSocket (NOT HTTP)", "citation": "LivekitAgents/packages/shared/pyproject.toml:6-18" },
-        { "to": "Postgres-hami", "mechanism": "psycopg3 (shares ServerApp drizzle schema)", "citation": "LivekitAgents/packages/shared/src/shared/database/llm_usage.py:7" }
+        { "to": "Postgres-app", "mechanism": "psycopg3 (shares ServerApp drizzle schema)", "citation": "LivekitAgents/packages/shared/src/shared/database/llm_usage.py:7" }
       ],
       "calledBy": ["LiveKit cloud (dispatch)"],
       "notes": "Not in HTTP request chain. Two agents: intake, scribe."
@@ -101,7 +101,7 @@
       "role": "Medical report/lab image parsing. Called by AIClusterApp /message.",
       "calls": [
         { "to": "vision-model", "mechanism": "REST (internal subproject)", "citation": "AIMedVision/medical-report-parser/shared/key_vault.py:29-32" },
-        { "to": "Postgres-hami", "mechanism": "psycopg3 (labs, medications - ServerApp drizzle schema)", "citation": "AIMedVision/medical-report-parser/db/repositories/lab_repo.py:11" }
+        { "to": "Postgres-app", "mechanism": "psycopg3 (labs, medications - ServerApp drizzle schema)", "citation": "AIMedVision/medical-report-parser/db/repositories/lab_repo.py:11" }
       ],
       "calledBy": ["AIClusterApp"],
       "notes": "Fans out to its own vision-model VLM subproject."
@@ -118,7 +118,7 @@
     }
   ],
   "sharedStores": {
-    "Postgres-hami": {
+    "Postgres-app": {
       "sharedBy": ["ServerApp", "AIClusterApp", "ClinicalAIServices", "Billing-Engine", "PromptFlowApp", "LivekitAgents", "AIMedVision"],
       "schemaSourceOfTruth": "ServerApp/src/database/drizzle/schema/ + migrations",
       "criticalNote": "DB schema change = WIDEST blast radius (7 services). Any schema delta MUST be flagged as touching all 7."
@@ -132,7 +132,7 @@
     "ClinicalAIServices flow change -> check AIClusterApp routing (as-pf-*-postgres-url secrets) -> check ServerApp BACKEND_*_ENDPOINT -> check ClientApp UI if user-facing.",
     "Billing-Engine endpoint change -> check all callers: AIClusterApp, ClinicalAIServices, PromptFlowApp(live flows).",
     "LivekitAgents change -> check ServerApp dispatch (agentName) + LiveKit token flow + ClientApp realtime UI.",
-    "DB schema change -> FLAG ALL 7 Postgres-hami services. ServerApp drizzle migration is source of truth. This is the highest-blast-radius change type.",
+    "DB schema change -> FLAG ALL 7 Postgres-app services. ServerApp drizzle migration is source of truth. This is the highest-blast-radius change type.",
     "Key Vault secret change -> check all Python services that resolve that secret. Never rename secrets.",
     "AIMedVision change -> check AIClusterApp /message (fileMessage) caller. Usually contained."
   ],

@@ -1,8 +1,8 @@
 """repos (the LIVE registry — repos-as-data) + repo_profiles.
 
-integration_branch sourced from fleet-config/hami-repos.json at seed (6 of 10
-integrate on pg-main — golden tracks origin/<integrationBranch>, NEVER origin/HEAD
-or the local current branch). hami-repos.json is the bootstrap SEED; the DB row is
+integration_branch sourced from fleet-config/repos.json at seed
+(golden tracks origin/<integrationBranch>, NEVER origin/HEAD
+or the local current branch). repos.json is the bootstrap SEED; the DB row is
 the live registry afterwards. Archived repos: fetcher stops, hidden from the scope
 picker, old sessions still replay, golden dir shredded.
 """

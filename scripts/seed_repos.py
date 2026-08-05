@@ -1,8 +1,8 @@
-"""Seed the repos registry from fleet-config/hami-repos.json (plan §9 Phase 0).
+"""Seed the repos registry from fleet-config/repos.json (plan §9 Phase 0).
 
 For each fleet-config repo: resolve integrationBranch AGAINST THE REMOTE (branch
 list fetched, never free-typed), then upsert the `repos` row. The DB row is the
-LIVE registry after this seed; hami-repos.json is the bootstrap seed only.
+LIVE registry after this seed; repos.json is the bootstrap seed only.
 
 Run (backend cwd, env: ZAGENT_DB_URL, FETCH_PAT, ZAGENT_ADO_ORG/PROJECT):
   python ../scripts/seed_repos.py

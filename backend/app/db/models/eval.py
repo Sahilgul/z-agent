@@ -1,4 +1,4 @@
-"""eval_cases + eval_runs — HAMI-bench (plan §9 Phase 5). F2P/P2P scoring;
+"""eval_cases + eval_runs — fleet-bench (plan §9 Phase 5). F2P/P2P scoring;
 the Sleep-Time Distiller's bench gate reads these before drafting knowledge diffs.
 """
 

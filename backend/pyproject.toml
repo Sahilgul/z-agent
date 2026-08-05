@@ -43,7 +43,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.report]
-# HAMI gate (mock-unit-testing-standard): >=90% coverage enforced.
+# Testing gate (mock-unit standard): >=90% coverage enforced.
 # pytest-cov picks this up from coverage's own config (cov_config.fail_under).
 fail_under = 90
 show_missing = true

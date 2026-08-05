@@ -1,4 +1,4 @@
-"""HAMI-bench tests (plan Phase 5): case validation, SWE-bench F2P/P2P scoring
+"""fleet-bench tests (plan Phase 5): case validation, SWE-bench F2P/P2P scoring
 semantics, mining shape, eval runner bookkeeping, report math, before/after.
 """
 
