@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { EventStream } from "../components/EventStream";
 import type { StepEvent } from "../types";
@@ -122,5 +122,37 @@ describe("EventStream", () => {
       <EventStream events={[]} deltas={[]} prompt="fix the flaky login" promptTs="2026-08-01T00:00:00Z" />,
     );
     expect(container.querySelector("[data-testid='msg-meta']")?.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
+  it("renders file_read payloads as VS Code-themed code, not raw text", async () => {
+    const { container } = render(
+      <EventStream
+        events={[ev(0, "file_read", "read src/app.py", { text: "def f():\n    return 1" })]}
+        deltas={[]}
+      />,
+    );
+    // PrismAsyncLight loads the grammar async — wait for tokenized spans.
+    await waitFor(() => expect(container.querySelector("code .token")).not.toBeNull());
+    expect(container.textContent).toContain("def f():");
+  });
+
+  it("highlights a unified-diff file_edit with insertion/deletion tokens", async () => {
+    const diff = ["--- a/x.ts", "+++ b/x.ts", "@@ -1 +1 @@", "-old", "+new"].join("\n");
+    const { container } = render(
+      <EventStream events={[ev(0, "file_edit", "edit x.ts", { text: diff })]} deltas={[]} />,
+    );
+    await waitFor(() => expect(container.querySelector("code .token")).not.toBeNull());
+    expect(container.textContent).toContain("+new");
+  });
+
+  it("renders markdown code fences with syntax highlighting", async () => {
+    const { container } = render(
+      <EventStream
+        events={[ev(0, "message", "a", { text: "try this:\n\n```ts\nconst x: number = 1;\n```" })]}
+        deltas={[]}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector("pre code .token")).not.toBeNull());
+    expect(container.textContent).toContain("const");
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
+import { CodeView, langFromPath } from "./CodeView";
 import {
   ApprovalCard,
   CompactionCard,
@@ -34,6 +35,19 @@ const KIND_RAIL: Record<string, string> = {
 
 const BODY =
   "mt-1 max-h-[220px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.5] text-ink-primary";
+
+/** Trace kinds whose payload is file content — rendered as VS Code-themed
+ *  code instead of raw text. Commands stay raw: the terminal look is right. */
+const CODE_KINDS = new Set(["file_read", "file_edit"]);
+
+/** Language for a code trace row: an edit carrying a unified diff highlights
+ *  as diff (green/red lines); everything else resolves from the file path —
+ *  detail.path when the worker sends it, else the title ("read src/app.py"). */
+function codeLang(item: StreamItem): string | undefined {
+  if (item.kind === "file_edit" && /^(--- |\+\+\+ |@@ )/m.test(item.text)) return "diff";
+  const ref = item.detail.path ?? item.detail.file_path ?? item.title;
+  return langFromPath(String(ref));
+}
 
 /** Reasoning is process, not answer: it stays open while the agent is mid-thought
  *  and folds away once the thought lands, still one click from being reread. */
@@ -134,7 +148,13 @@ function Item({ item }: { item: StreamItem }) {
           {item.kind === "recap" && <RecapCard detail={item.detail} />}
           {item.kind === "approval" && <ApprovalCard detail={item.detail} title={item.title} />}
           {!["todo_checklist", "compaction", "warning", "recap", "approval"].includes(item.kind) && body && (
-            <pre className={BODY}>{body}</pre>
+            CODE_KINDS.has(item.kind) ? (
+              <div className="mt-1 max-h-[220px] overflow-y-auto">
+                <CodeView code={body} lang={codeLang(item)} maxLines={400} />
+              </div>
+            ) : (
+              <pre className={BODY}>{body}</pre>
+            )
           )}
         </div>
       )}
