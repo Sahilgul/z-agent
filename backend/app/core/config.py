@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # URLs as seen FROM WORKER CONTAINERS (compose network / host.docker.internal)
     worker_redis_url: str = "redis://redis:6379/0"
     worker_gateway_url: str = "http://gateway:4000"
-    worker_image: str = "zagent-worker:0.2.0"
+    worker_image: str = "zagent-worker:0.1.0"
     # Engine cutover: custom LangGraph engine by default; "sdk"
     # keeps the legacy CAS fallback alive through the RE soak.
     engine_runtime: str = "custom"
