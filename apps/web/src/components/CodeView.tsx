@@ -1,3 +1,4 @@
+import type { CSSProperties, ReactNode } from "react";
 import { PrismAsyncLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
@@ -84,6 +85,48 @@ export function langFromPath(path: string): string | undefined {
   return undefined;
 }
 
+/** Fence info strings arrive raw ("```sh", "```shell", "```ts") — normalize
+ *  the common aliases onto the registered grammar names. */
+const LANG_ALIAS: Record<string, string> = {
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  "shell-session": "bash",
+  console: "bash",
+  js: "javascript",
+  ts: "typescript",
+  py: "python",
+  yml: "yaml",
+  md: "markdown",
+};
+
+const PRE_STYLE: CSSProperties = {
+  margin: 0,
+  padding: "10px 12px",
+  background: "#1e1e1e",
+  fontSize: "11.5px",
+  lineHeight: 1.5,
+  color: "#d4d4d4",
+  overflow: "auto",
+};
+
+/** Terminal chrome: shell blocks read as a little terminal window — traffic
+ *  lights + label on top, Prism bash colors below (commands yellow, strings
+ *  green) instead of flat white text. */
+function TerminalFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-md font-mono" data-testid="terminal-frame">
+      <div className="flex items-center gap-1.5 bg-[#3c3c3c] px-3 py-1.5">
+        <span className="h-2 w-2 rounded-full bg-[#ff5f57]" />
+        <span className="h-2 w-2 rounded-full bg-[#febc2e]" />
+        <span className="h-2 w-2 rounded-full bg-[#28c840]" />
+        <span className="ml-1.5 text-[10.5px] text-[#a8a8a8]">terminal</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /** Long file dumps get highlighted only up to a budget — Prism is fast on
  *  snippets but a 5k-line file dump would stall the stream. */
 export function CodeView({
@@ -104,27 +147,53 @@ export function CodeView({
       hidden = lines.length - maxLines;
     }
   }
+  const wanted = lang ? (LANG_ALIAS[lang] ?? lang) : undefined;
+  const resolved = wanted && wanted in LANGUAGES ? wanted : undefined;
+  const moreFooter = hidden > 0 && (
+    <div className="bg-[#1e1e1e] px-3 pb-2.5 text-[10.5px] text-ink-faint">
+      … {hidden} more lines not shown
+    </div>
+  );
+  // No language (bare fence) or no registered grammar: the highlighter must
+  // NEVER see an undefined/unregistered language — refractor throws
+  // "Expected `string` for `aliasOrLanguage`" and the error boundary eats the
+  // whole screen. Plain dark pre: same chrome, zero risk.
+  if (!resolved) {
+    return (
+      <div className="overflow-hidden rounded-md font-mono">
+        <pre data-testid="code-plain" style={PRE_STYLE}>{shown}</pre>
+        {moreFooter}
+      </div>
+    );
+  }
+  const body = (
+    <SyntaxHighlighter
+      language={resolved}
+      style={vscDarkPlus}
+      customStyle={{
+        margin: 0,
+        padding: hidden > 0 ? "10px 12px 4px" : "10px 12px",
+        background: "#1e1e1e",
+        fontSize: "11.5px",
+        lineHeight: 1.5,
+      }}
+      codeTagProps={{ style: { fontFamily: "inherit" } }}
+    >
+      {shown}
+    </SyntaxHighlighter>
+  );
+  if (resolved === "bash") {
+    return (
+      <TerminalFrame>
+        {body}
+        {moreFooter}
+      </TerminalFrame>
+    );
+  }
   return (
     <div className="overflow-hidden rounded-md font-mono">
-      <SyntaxHighlighter
-        language={lang}
-        style={vscDarkPlus}
-        customStyle={{
-          margin: 0,
-          padding: hidden > 0 ? "10px 12px 4px" : "10px 12px",
-          background: "#1e1e1e",
-          fontSize: "11.5px",
-          lineHeight: 1.5,
-        }}
-        codeTagProps={{ style: { fontFamily: "inherit" } }}
-      >
-        {shown}
-      </SyntaxHighlighter>
-      {hidden > 0 && (
-        <div className="bg-[#1e1e1e] px-3 pb-2.5 text-[10.5px] text-ink-faint">
-          … {hidden} more lines not shown
-        </div>
-      )}
+      {body}
+      {moreFooter}
     </div>
   );
 }

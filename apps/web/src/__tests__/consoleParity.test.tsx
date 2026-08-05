@@ -110,6 +110,16 @@ describe("EventStream — card parity from live StepEvents", () => {
     expect(cards[1].textContent).toContain("edited_allow");
     expect(cards[1].textContent).toContain("edited");
   });
+
+  it("approval card shows the clean command, not the raw JSON wire dump", () => {
+    render(<EventStream events={[APPROVAL_CARD]} deltas={[]} />);
+    const cmd = screen.getByTestId("approval-command");
+    expect(cmd.textContent).toContain("git push origin zagent/x");
+    // the compact {"command": ...} serialization is gone from the card
+    expect(screen.getByTestId("approval-card").textContent).not.toContain('{"command"');
+    // and a shell command gets the terminal chrome
+    expect(screen.getByTestId("terminal-frame")).toBeInTheDocument();
+  });
 });
 
 describe("Feed — card parity", () => {

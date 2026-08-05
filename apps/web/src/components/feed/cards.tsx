@@ -3,6 +3,8 @@
  *  by the live EventStream and the Feed so both render LIVE StepEvents
  *  identically. Locked tokens only (bg-warn, blue-bright, hairline…). */
 
+import { CodeView } from "../CodeView";
+
 export interface TaskArtifact {
   id: string;
   content: string;
@@ -81,6 +83,37 @@ export function RecapCard({ detail }: { detail: Record<string, unknown> }) {
   );
 }
 
+/** What the human is actually approving: a shell command gets the terminal
+ *  treatment, a file edit/write gets its verbatim preview, anything else gets
+ *  pretty-printed JSON — never the compact `{"command": …}` wire dump. */
+function ApprovalBody({ detail }: { detail: Record<string, unknown> }) {
+  const args = (detail.args ?? {}) as Record<string, unknown>;
+  const command = typeof args.command === "string" ? args.command : null;
+  const preview = typeof detail.preview === "string" ? detail.preview : null;
+  if (command) {
+    return (
+      <div className="mt-s1" data-testid="approval-command">
+        <CodeView code={command} lang="bash" />
+      </div>
+    );
+  }
+  if (preview) {
+    return (
+      <pre className="mt-s1 whitespace-pre-wrap break-words font-mono text-[11.5px] text-ink-secondary">
+        {preview}
+      </pre>
+    );
+  }
+  if (Object.keys(args).length > 0) {
+    return (
+      <div className="mt-s1">
+        <CodeView code={JSON.stringify(args, null, 2)} lang="json" />
+      </div>
+    );
+  }
+  return null;
+}
+
 /** approval card / decision: VERBATIM tool + args, action_id pairing, and a
  *  destructive badge — the gate's one-line justification is never paraphrased. */
 export function ApprovalCard({ detail, title }: { detail: Record<string, unknown>; title: string }) {
@@ -100,14 +133,13 @@ export function ApprovalCard({ detail, title }: { detail: Record<string, unknown
         ) : (
           <span className="text-warn">approval requested</span>
         )}
+        {!isDecision && typeof detail.tool === "string" && (
+          <span className="ml-s2 text-ink-faint">{detail.tool}</span>
+        )}
         {detail.destructive === true && <span className="ml-s2 text-danger-bright">destructive</span>}
         {detail.edited === true && <span className="ml-s2 text-ink-faint">edited</span>}
       </div>
-      {!isDecision && (
-        <pre className="mt-s1 whitespace-pre-wrap break-words font-mono text-[11.5px] text-ink-secondary">
-          {`${String(detail.tool ?? "")} ${JSON.stringify(detail.args ?? {})}`}
-        </pre>
-      )}
+      {!isDecision && <ApprovalBody detail={detail} />}
       {isDecision && detail.reason != null && (
         <div className="mt-s1 font-mono text-[11.5px] text-ink-faint">{String(detail.reason)}</div>
       )}

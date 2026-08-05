@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { hasSubscription, pushSupported, subscribeToPush } from "../lib/push";
 import { qk } from "../lib/queryKeys";
 import type { Approval } from "../types";
+import { CodeView } from "./CodeView";
 
 /** Push opt-in: the ask appears ONLY after the user's first AwaitingYou
  *  moment — never on landing. */
@@ -49,6 +50,38 @@ function expiryLabel(expiresAt: string | null | undefined): string | null {
   if (ms <= 0) return "expired — denied";
   const mins = Math.ceil(ms / 60_000);
   return `auto-denies in ${mins}m`;
+}
+
+/** The thing awaiting a decision, rendered clean: a shell command gets the
+ *  terminal treatment (no `{"command": …}` wire dump), a verbatim preview
+ *  shows as-is, anything else falls back to pretty JSON. Handles both the
+ *  engine payload ({tool, args, preview}) and legacy {cmd} cards. */
+function ApprovalPayload({ payload }: { payload: Record<string, unknown> }) {
+  const args = (payload.args ?? {}) as Record<string, unknown>;
+  const command =
+    typeof args.command === "string" ? args.command
+    : typeof payload.command === "string" ? payload.command
+    : typeof payload.cmd === "string" ? payload.cmd
+    : null;
+  if (command) {
+    return (
+      <div data-testid="approval-command">
+        <CodeView code={command} lang="bash" />
+      </div>
+    );
+  }
+  if (typeof payload.preview === "string" && payload.preview) {
+    return (
+      <pre className="max-h-[140px] overflow-auto rounded-md bg-jack p-s3 font-mono text-[11px] leading-[1.5] whitespace-pre-wrap break-words text-ink-primary">
+        {payload.preview}
+      </pre>
+    );
+  }
+  return (
+    <pre className="max-h-[140px] overflow-auto rounded-md bg-jack p-s3 font-mono text-[11px] leading-[1.5] text-ink-primary">
+      {JSON.stringify(payload, null, 2).slice(0, 600)}
+    </pre>
+  );
 }
 
 export function ApprovalQueue({ runId }: { runId: string }) {
@@ -97,15 +130,18 @@ export function ApprovalQueue({ runId }: { runId: string }) {
       {approvals.map((a) => (
         <article key={a.id} className="mb-s2 rounded-md border border-hairline bg-bg-panel p-s3">
           <div className="mb-s2 flex items-center justify-between">
-            <span className="font-mono text-[12.5px] font-semibold text-blue-bright">{a.kind}</span>
+            <span className="font-mono text-[12.5px] font-semibold text-blue-bright">
+              {a.kind}
+              {a.payload?.destructive === true && (
+                <span className="ml-s2 text-danger-bright">destructive</span>
+              )}
+            </span>
             <span className="font-mono text-[10.5px] text-ink-faint">
               {a.thread_id ? `thread ${a.thread_id.slice(0, 8)}` : "run"}
               {expiryLabel(a.expires_at) ? ` · ${expiryLabel(a.expires_at)}` : ""}
             </span>
           </div>
-          <pre className="max-h-[140px] overflow-auto rounded-md bg-jack p-s3 font-mono text-[11px] leading-[1.5] text-ink-primary">
-            {JSON.stringify(a.payload, null, 2).slice(0, 600)}
-          </pre>
+          <ApprovalPayload payload={a.payload ?? {}} />
           <div className="mt-s3 flex gap-s2">
             <Button size="sm" className="font-mono" onClick={() => decide.mutate({ id: a.id, decision: "allow_once" })}>
               allow once
