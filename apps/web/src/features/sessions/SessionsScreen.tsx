@@ -323,10 +323,10 @@ export function SessionsScreen() {
             onFire={(intent, confirmed) => void sendIntent(intent, { confirmed })}
           />
         )}
-        <div className="mx-auto w-full max-w-canvas px-s5 py-s4">
+        <div className="mx-auto w-full max-w-canvas px-s5 py-s2">
           <Textarea
             id="session-composer"
-            rows={3}
+            rows={1}
             placeholder={placeholder}
             value={task}
             onChange={(e) => setTask(e.target.value)}
@@ -336,7 +336,7 @@ export function SessionsScreen() {
                 submit();
               }
             }}
-            className="mb-s3 resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            className="mb-s2 max-h-36 min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-0 py-1.5 shadow-none focus-visible:ring-0"
           />
           <div className="flex flex-wrap items-center gap-s2">
             <FilterChips

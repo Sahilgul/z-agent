@@ -276,6 +276,13 @@ class RunManager:
         while leaking the capacity slot (C-16). Only ACTIVE threads are nudged;
         a missing thread stays a no-op (the control nudge goes nowhere)."""
         from app.orchestrator.semaphores import ACTIVE_STATUSES
+        # input_required is NOT terminal: the worker is alive in its idle
+        # nudge loop (blocked-escalation) or queued behind an approval wait —
+        # refusing the nudge stranded the run with a live container waiting on
+        # a control message that could never arrive. Kept OUT of
+        # ACTIVE_STATUSES itself so capacity accounting and the heartbeat
+        # terminal-stamp guard are untouched.
+        nudgeable = ACTIVE_STATUSES + ("input_required",)
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
@@ -286,7 +293,7 @@ class RunManager:
                 log.warning("nudge refused — thread not found",
                             run_id=run_id, thread_id=thread_id)
                 return
-            if thread.status not in ACTIVE_STATUSES:
+            if thread.status not in nudgeable:
                 log.warning("nudge refused — thread terminal",
                             run_id=run_id, thread_id=thread_id, status=thread.status)
                 return  # do NOT nudge or flip a dead thread back to "running"

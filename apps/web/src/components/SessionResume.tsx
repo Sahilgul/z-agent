@@ -42,7 +42,7 @@ export function SessionResume({
           </Button>
         ) : (
           <span className="font-mono text-[11px] text-ink-faint">
-            replay-only — the session volume has expired
+            replay only — this session can’t be resumed (its workspace expired), but the full transcript is kept
           </span>
         ))}
       <a

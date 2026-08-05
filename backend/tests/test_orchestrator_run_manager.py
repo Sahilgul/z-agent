@@ -282,6 +282,26 @@ async def test_nudge_thread_refuses_to_resurrect_terminal_thread(session, make_u
                for terminal in ("stopped", "completed", "replaced", "timed_out", "failed"))
 
 
+async def test_nudge_thread_resumes_input_required_thread(session, make_user):
+    """input_required is not terminal: the worker is parked in its idle nudge
+    loop (blocked-escalation) with a live container subscribed to the control
+    channel. Refusing the nudge stranded the run — the user's reply was
+    persisted but never delivered, and the thread polled forever."""
+    from app.orchestrator.semaphores import ACTIVE_STATUSES
+    assert "input_required" not in ACTIVE_STATUSES  # capacity accounting untouched
+    u = make_user("a")
+    rm, _, relay, control = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="input_required")
+    session.add_all([run, thread])
+    session.commit()
+    await rm.nudge_thread("r1", "l1", "use option B instead")
+    session.expire_all()
+    assert session.get(Thread, "l1").status == "running"
+    assert control.nudged == [("l1", "use option B instead")]
+    assert relay.threads[-1] == ("r1", "l1", "running")
+
+
 async def test_reconcile_on_boot_interrupts_active_runs(session, make_user):
     u = make_user("a")
     rm, _, _, _ = _make_manager()
