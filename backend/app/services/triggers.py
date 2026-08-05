@@ -30,7 +30,7 @@ from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.thread import Thread
 from app.db.models.run import Run
-from app.db.models.trigger import Trigger, TriggerEventLog
+from app.db.models.trigger import Trigger, TriggerEventLog, TriggerEventVerdict
 from app.services import identity
 from app.services.runs import TERMINAL_STAGES
 from zagent_contracts.triggers import TriggerEvent, TriggerSource
@@ -220,6 +220,26 @@ def _set_log(log_id: int, **fields) -> None:
         session.close()
 
 
+def _persist_verdicts(log_id: int, verdicts: list[dict]) -> None:
+    """M-39 (coord D): write one TriggerEventVerdict row per verdict so the
+    rate-limit check can be scoped by trigger_name at DB level. Idempotent:
+    a re-run for the same log replaces the verdict rows rather than
+    duplicating (so a retried process() doesn't double-count)."""
+    session = get_session()
+    try:
+        session.query(TriggerEventVerdict).filter_by(log_id=log_id).delete()
+        for v in verdicts:
+            session.add(TriggerEventVerdict(
+                log_id=log_id,
+                trigger_name=str(v.get("trigger")),
+                status=str(v.get("status", "ignored")),
+                run_id=v.get("run_id"),
+            ))
+        session.commit()
+    finally:
+        session.close()
+
+
 def _is_loop(event: TriggerEvent) -> bool:
     own = get_settings().service_account_descriptor
     return bool(own) and event.changed_by_descriptor == own
@@ -266,37 +286,26 @@ def _recent_active_run(trigger: Trigger, event: TriggerEvent) -> str | None:
 
 def _rate_limited(trigger) -> bool:
     """Guardrail 3: runs this trigger started in the last hour vs its row cap.
-    Counted in Python — dialect-neutral, no JSON-path SQL (per-hour volume is
-    small by definition: the cap itself bounds it)."""
+    M-39 (coord D): scoped at DB level by trigger_name (indexed child table)
+    instead of loading every matched log and counting in Python. A single
+    trigger_events row can carry verdicts for multiple triggers (H-25), so
+    the per-trigger count is correct under a multi-trigger blast — each
+    started verdict is its own row. The window is the event's received_at
+    (joined from the log row), matching the original semantic; the
+    server-side COUNT keeps the work off the Python loop."""
     since = datetime.now(timezone.utc) - timedelta(hours=1)
+    cap = trigger.rate_limit_per_hour
     session = get_session()
     try:
-        # Only STARTED runs count — a queued event must not hold its own slot,
-        # or it could never drain.
-        logs = (session.query(TriggerEventLog)
-                .filter(TriggerEventLog.status == "matched",
-                        TriggerEventLog.received_at >= since).all())
-        # H-25: a single event may match multiple triggers; the log row now
-        # stores ALL verdicts under payload["verdicts"] (each with its own
-        # trigger name). Count this trigger's STARTED verdicts across rows,
-        # falling back to the legacy top-level payload["trigger_name"] for
-        # rows written before the fix.
-        count = 0
-        cap = trigger.rate_limit_per_hour
-        for entry in logs:
-            payload = entry.payload or {}
-            verdicts = payload.get("verdicts")
-            if verdicts:
-                count += sum(1 for v in verdicts
-                            if v.get("trigger") == trigger.name
-                            and v.get("status") == "started")
-            elif payload.get("trigger_name") == trigger.name:
-                count += 1
-            # M-39: early exit — we only need to know if count >= cap, so stop
-            # scanning once we hit the cap. Bounds the Python iteration at
-            # O(cap) instead of O(all matched logs) under a blast.
-            if count >= cap:
-                return True
+        # Only STARTED verdicts count — a queued event must not hold its own
+        # slot, or it could never drain. Scope by the indexed trigger_name on
+        # the child table; join to the log for the received_at window.
+        count = (session.query(TriggerEventVerdict)
+                 .join(TriggerEventLog, TriggerEventLog.id == TriggerEventVerdict.log_id)
+                 .filter(TriggerEventVerdict.trigger_name == trigger.name,
+                         TriggerEventVerdict.status == "started",
+                         TriggerEventLog.received_at >= since)
+                 .count())
         return count >= cap
     finally:
         session.close()
@@ -407,6 +416,12 @@ async def process(event: TriggerEvent, run_manager) -> dict:
              run_id=started[0]["run_id"] if started else None,
              resolved_user_id=resolved_user_id,
              payload={"verdicts": verdicts, **event.payload})
+    # M-39 (coord D): persist one child row per verdict so _rate_limited can
+    # scope by trigger_name at DB level (indexed) instead of loading every
+    # matched log and counting in Python. A single log row can carry verdicts
+    # for multiple triggers (H-25), so the per-trigger association can't be
+    # a scalar on the log row.
+    _persist_verdicts(log_id, verdicts)
     return {"status": status, "verdicts": verdicts}
 
 

@@ -162,6 +162,40 @@ async def test_rate_limit_queues_overflow(session, bound_user):
     assert len(rm.created) == 1
 
 
+async def test_rate_limit_scoped_per_trigger_at_db_level(session, bound_user):
+    """M-39 (coord D): the rate-limit check is scoped by trigger_name at DB
+    level via the trigger_event_verdicts child table, not by loading every
+    matched log and counting in Python. One event matching two triggers
+    writes TWO verdict rows (one per trigger); each trigger's cap is checked
+    against its OWN started verdicts, so a blast on trigger B can't push
+    trigger A over its cap (per-trigger isolation), and the count is a
+    server-side COUNT on the indexed trigger_name, not a Python scan."""
+    from app.db.models.trigger import TriggerEventVerdict
+    _trigger(session, name="A", rate=1)
+    _trigger(session, name="B", rate=10)
+    rm = FakeRM()
+    out = await triggers.process(_event(revision=3), rm)
+    # One event matched two triggers -> two started verdicts, two runs.
+    started = [v for v in out["verdicts"] if v["status"] == "started"]
+    assert len(started) == 2
+    assert len(rm.created) == 2
+    # The child table fans the multi-verdict log row out into per-trigger
+    # rows (the core M-39 concern: a single log row carrying verdicts for
+    # multiple triggers is countable per-trigger at DB level).
+    rows = session.query(TriggerEventVerdict).all()
+    assert len(rows) == 2
+    assert {r.trigger_name for r in rows} == {"A", "B"}
+    assert all(r.status == "started" for r in rows)
+    # Per-trigger scoping: A (cap=1) is rate-limited by its own 1 started
+    # verdict; B (cap=10) is NOT — B's count is 1, well under 10. The same
+    # log row feeds both, but the child-table COUNT is per trigger_name, so
+    # B's started verdict does NOT count against A and vice versa.
+    a = session.query(Trigger).filter_by(name="A").one()
+    b = session.query(Trigger).filter_by(name="B").one()
+    assert triggers._rate_limited(a) is True
+    assert triggers._rate_limited(b) is False
+
+
 async def test_drain_queued_starts_when_capacity_returns(session, bound_user):
     _trigger(session, rate=1)
     rm = FakeRM()

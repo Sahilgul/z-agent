@@ -52,7 +52,7 @@ from app.db.models import (  # noqa: E402  (registers all models on Base.metadat
     Approval, Delivery, PrLink, EvalCase, EvalRun, Event, IdeaComment,
     IdeaThread, KnowledgeItem, Playbook, Thread, Mode, Notification, Proposal,
     Repo, RepoProfile, Plan, PlanStep, Run, TrajectorySummary, Trigger,
-    TriggerEventLog, SetupCode, User,
+    TriggerEventLog, TriggerEventVerdict, SetupCode, User,
 )
 
 

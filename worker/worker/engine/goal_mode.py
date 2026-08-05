@@ -82,12 +82,23 @@ class GoalArtifact(BaseModel):
 
 # --- ask_user tool (the only human-interaction surface in goal mode) ---
 
-_pending_questions: list[dict[str, Any]] | None = None
+# H-10 (coord point A): pending clarify questions are a transport from the
+# ask_user tool (run in an executor thread) to the graph's tools_node (run
+# in the coroutine). A process-global SCALAR here let two concurrent runs
+# in one process cross-read each other's questions — run A's ask_user and
+# run B's ask_user both wrote the same global, so tools_node could snapshot
+# run B's questions into run A's state (and clear run A's before it read
+# them). Key the store by thread_id so each run's clarify signal is
+# isolated. ask_user reads its thread_id from the per-run ContextVar the
+# runner sets (fanout._current_thread_id), which call_tool_direct
+# propagates into the executor via contextvars.copy_context(); tools_node
+# reads the same id from state["thread_id"]. The runner sets the ContextVar
+# to self.thread_id, so the two ids always agree.
+_pending_questions: dict[str, list[dict[str, Any]] | None] = {}
 
 
-def set_pending_questions(qs: list[dict[str, Any]] | None) -> None:
-    global _pending_questions
-    _pending_questions = qs
+def set_pending_questions(thread_id: str, qs: list[dict[str, Any]] | None) -> None:
+    _pending_questions[thread_id] = qs
 
 
 @tool
@@ -106,16 +117,25 @@ def ask_user(questions: list[dict[str, Any]]) -> str:
         opts = q.get("options", [])
         if len(opts) < 2:
             return f"error: question {q.get('id', '?')} needs >= 2 options"
-    set_pending_questions(questions)
+    # H-10: stage under THIS run's thread_id (ContextVar, set by the runner
+    # and propagated into the executor by call_tool_direct's copy_context),
+    # not a process-global shared across concurrent runs.
+    from worker.engine.fanout import _current_thread_id
+    set_pending_questions(_current_thread_id(), questions)
     return f"asked {len(questions)} questions; pipeline paused for clarification"
 
 
-def get_pending_questions() -> list[dict[str, Any]] | None:
-    return _pending_questions
+def get_pending_questions(thread_id: str) -> list[dict[str, Any]] | None:
+    return _pending_questions.get(thread_id)
 
 
-def clear_pending_questions() -> None:
-    set_pending_questions(None)
+def clear_pending_questions(thread_id: str) -> None:
+    _pending_questions.pop(thread_id, None)
+
+
+def _reset_pending_questions() -> None:
+    """Test-only: clear every thread's staged questions (cross-test isolation)."""
+    _pending_questions.clear()
 
 
 # --- Stage graph (the core, no critics) ---

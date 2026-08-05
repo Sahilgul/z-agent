@@ -4,9 +4,7 @@
 buffer + 16MiB ceiling force-kill; header/body/footer format on reads;
 head+tail truncation ("... N bytes omitted ..."); regex watch with >=5s
 debounce; completion notify (the graph surfaces it at turn end); exit 124 on
-timeout; killProcessTree on kill; one command per job; stdin closed;
-ghost-reconcile on manager restart (jobs die with the process — the
-reconcile marks them dead instead of pretending they're running).
+timeout; killProcessTree on kill; one command per job; stdin closed.
 """
 
 from __future__ import annotations

@@ -571,15 +571,18 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             })
             out["knowledge_drafts"] = drafts
 
-        # ask_user: snapshot the process-global pending questions into per-run
-        # state (H-10). The module global is only a transport from the
-        # ask_user tool (run in an executor thread) to here; snapshotting it
-        # into state makes the clarify signal per-run + checkpointed instead
-        # of a process-global shared across concurrent runs (coord point A).
-        # The global is cleared immediately so a later run can't read it.
+        # ask_user: snapshot the per-run pending questions into state. H-10:
+        # the store is keyed by thread_id (coord point A) so concurrent runs
+        # in one process can't cross-read each other's questions. ask_user
+        # (executor thread) staged them under _current_thread_id(); tools_node
+        # reads them under state["thread_id"] — the runner sets the ContextVar
+        # to self.thread_id, so the two ids agree. Clear this thread's entry
+        # so a later run reusing the id can't read a stale question set.
         if name == "ask_user" and result["ok"]:
-            out["pending_questions"] = get_pending_questions()
-            clear_pending_questions()
+            tid = state.get("thread_id")
+            if tid is not None:
+                out["pending_questions"] = get_pending_questions(tid)
+                clear_pending_questions(tid)
 
         detail: dict[str, Any] = {"tool": name, "input": args, "output": result["output"],
                                   "ok": result["ok"]}

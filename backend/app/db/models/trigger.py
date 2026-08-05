@@ -50,3 +50,20 @@ class TriggerEventLog(Base):
     status: Mapped[str] = mapped_column(sa.String(16), default="received")  # received|matched|ignored|failed
     payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)
     received_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class TriggerEventVerdict(Base):
+    """M-39 (coord point D): one row per (log, trigger) verdict, so the
+    rate-limit check can be scoped at DB level by trigger_name (indexed)
+    instead of loading every matched log and counting in Python. A single
+    TriggerEventLog can carry verdicts for multiple triggers (H-25), so the
+    trigger association can't live as a scalar on the log row — a child table
+    keeps the per-trigger count correct under a multi-trigger blast."""
+    __tablename__ = "trigger_event_verdicts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    log_id: Mapped[int] = mapped_column(sa.ForeignKey("trigger_events.id"), index=True)
+    trigger_name: Mapped[str] = mapped_column(sa.String(128), index=True)
+    status: Mapped[str] = mapped_column(sa.String(16))  # started|queued|ignored|failed
+    run_id: Mapped[str | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

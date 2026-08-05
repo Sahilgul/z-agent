@@ -32,7 +32,8 @@ from langgraph.types import Command
 
 from worker.engine.compaction import CompactionPolicy, Compactor
 from worker.engine.events import EventEmitter
-from worker.engine.goal_mode import GoalStage, clear_pending_questions
+from worker.engine.goal_mode import GoalStage, clear_pending_questions, _reset_pending_questions
+from worker.engine.fanout import set_current_thread_id
 from worker.engine.graph import _should_continue, build_graph
 from worker.engine.state import Budget, Mode, tag_message
 from worker.engine.checkpointer import open_checkpointer
@@ -481,7 +482,12 @@ async def test_critic_loop_blocks_after_bounded_iterations(monkeypatch: pytest.M
 async def test_ask_user_pauses_then_human_answer_advances(monkeypatch: pytest.MonkeyPatch):
     """Clarify stage: ask_user pauses the pipeline (INPUT_REQUIRED). When the
     human's answer arrives as a USER message, the router advances to explore."""
-    clear_pending_questions()
+    _reset_pending_questions()
+    # H-10: ask_user stages under the per-run ContextVar thread_id; the
+    # graph's tools_node reads under state["thread_id"] (="t-1" from _config).
+    # The runner sets the ContextVar in production; the test sets it to match
+    # the config so the two ids agree and the staged questions are found.
+    set_current_thread_id("t-1")
     collector = EventCollector()
     graph = build_graph(checkpointer=MemorySaver())
     config = _config(collector)
@@ -520,7 +526,7 @@ async def test_ask_user_pauses_then_human_answer_advances(monkeypatch: pytest.Mo
     assert GoalStage.PLAN.value in stages_seen
     assert stages_seen.index(GoalStage.EXPLORE.value) < stages_seen.index(GoalStage.PLAN.value)
     assert result["goal_artifact"]["stage"] in (GoalStage.PLAN.value, GoalStage.BLOCKED.value)
-    clear_pending_questions()
+    _reset_pending_questions()
 
 
 # ----------------------------------------------------------- 8. budget reminders

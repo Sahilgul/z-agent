@@ -109,6 +109,14 @@ def test_unpack_rejects_sibling_prefix_tar_slip(tmp_path):
         payload = b"owned"
         info.size = len(payload)
         tar.addfile(info, io.BytesIO(payload))
-    with pytest.raises((ValueError, Exception)):
+    # G-15: assert the C-12 path-containment guard raises (ValueError with
+    # "unsafe member path"), NOT tarfile's filter="data" backstop. The old
+    # `pytest.raises((ValueError, Exception))` was too loose — it would
+    # pass even if the C-12 guard were removed, because extractall's
+    # filter="data" raises a tarfile.TarError (an Exception, not a
+    # ValueError) for the `..` member. Matching on ValueError + the guard's
+    # message isolates the guard: drop the guard and this assertion fails
+    # (the TarError isn't a ValueError).
+    with pytest.raises(ValueError, match="unsafe member path"):
         session_store.unpack(buf.getvalue(), dest)
     assert not (tmp_path / "dest_evil").exists()
