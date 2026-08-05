@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -58,7 +59,7 @@ from worker.engine.goal_mode import (
     needs_clarification,
     stage_of,
 )
-from worker.engine.llm import estimate_cost, make_llm, with_gateway_retry
+from worker.engine.llm import estimate_cost, make_llm, with_gateway_retry, with_gateway_retry_aiter
 from worker.engine.metrics import get_registry
 from worker.engine.permissions import Effect
 from worker.engine.permissions import evaluate as perms_evaluate
@@ -67,6 +68,8 @@ from worker.engine.tools import call_tool_direct, needs_approval, tools_for_mode
 from worker.engine.watchdogs import CriticRubric
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
+log = logging.getLogger(__name__)
 
 # Stuck-loop watchdog thresholds.
 _STREAK_NUDGE = 3
@@ -227,9 +230,10 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     metrics = get_registry(config)
     llm_started = time.monotonic()
     try:
-        # Gateway retry wraps the stream start; once streaming, retries are
-        # not safe (partial deltas) — a mid-stream failure fails the turn.
-        async for chunk in with_gateway_retry(
+        # Gateway retry wraps the stream START (construction + first chunk);
+        # once the first chunk arrives, partial deltas may have been emitted,
+        # so mid-stream failures are NOT retried (the turn fails) (H-11).
+        async for chunk in with_gateway_retry_aiter(
             lambda: _aiter(llm, messages), max_retries=2,
         ):
             content = getattr(chunk, "content", None)
@@ -259,7 +263,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         metrics.increment("turns")
 
     events = emitter.from_assistant(ai_message, task_id)
-    _publish_events(config, events)
+    await _publish_events(config, events)
 
     # Budget accounting: usage -> cost -> budget.used; the gateway
     # remains the hard cap, this drives the 50%/80% reminders.
@@ -287,7 +291,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         out["budget"] = {"used": new_used, "cap": cap}
         reminder = _budget_reminder(emitter, task_id, used, new_used, cap)
         if reminder is not None:
-            _publish_events(config, [reminder])
+            await _publish_events(config, [reminder])
     tuning = config["configurable"].get("tuning")
     if tuning is not None:
         tuning.observe_healthy_turn()
@@ -385,16 +389,23 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
             return out
         if effect is Effect.ALLOW:
             approved[tc_id] = {"approved": True, "via": "ruleset_allow", "args": args}
+            # Any allow breaks the consecutive-denial run (H-02): the old code
+            # only reset on a HUMAN allow, so a ruleset-ALLOW between two denials
+            # left the streak intact and the 3-denial breaker misfired.
+            denial_streak = 0
             continue
         # knowledge_draft scope=user is auto-approved.
         if name == "knowledge_draft" and args.get("scope") == "user":
             approved[tc_id] = {"approved": True, "via": "scope_user_auto", "args": args}
+            denial_streak = 0  # H-02: auto-allow breaks the denial streak
             continue
         if not needs_approval(name, autonomy):
             approved[tc_id] = {"approved": True, "via": "not_required"}
+            denial_streak = 0  # H-02: auto-allow breaks the denial streak
             continue
         if broker is not None and await broker.is_always_allowed(name, args):
             approved[tc_id] = {"approved": True, "via": "always_allow"}
+            denial_streak = 0  # H-02: auto-allow breaks the denial streak
             continue
         payload = (
             broker.card_payload(name, args, tc_id) if broker is not None
@@ -545,6 +556,16 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             })
             out["knowledge_drafts"] = drafts
 
+        # ask_user: snapshot the process-global pending questions into per-run
+        # state (H-10). The module global is only a transport from the
+        # ask_user tool (run in an executor thread) to here; snapshotting it
+        # into state makes the clarify signal per-run + checkpointed instead
+        # of a process-global shared across concurrent runs (coord point A).
+        # The global is cleared immediately so a later run can't read it.
+        if name == "ask_user" and result["ok"]:
+            out["pending_questions"] = get_pending_questions()
+            clear_pending_questions()
+
         detail: dict[str, Any] = {"tool": name, "input": args, "output": result["output"],
                                   "ok": result["ok"]}
         if result.get("detail_tasks") is not None:
@@ -553,7 +574,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         event = emitter._next(
             _tool_kind(name), _tool_title(name, args), detail, task_id, None,
         )
-        _publish_events(config, [event])
+        await _publish_events(config, [event])
         new_messages.append(tag_message(ToolMessage(
             content=result["output"], tool_call_id=tc_id, name=name,
         ), "tool"))  # type: ignore[arg-type]
@@ -573,7 +594,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             if watchdog is not None:
                 nudge_text, warn_event, force_stop = watchdog
                 new_messages.append(tag_message(HumanMessage(content=nudge_text), "nudge"))  # type: ignore[arg-type]
-                _publish_events(config, [warn_event])
+                await _publish_events(config, [warn_event])
                 if force_stop:
                     out["done"] = True
                     out["blocked_reason"] = f"stuck loop: same failing call {count}x — force-stop"
@@ -676,7 +697,7 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
     messages = state.get("messages", [])
     force = state.get("force_compact", False)
 
-    new_messages, result = compactor.compact(messages, force=force)
+    new_messages, result = await compactor.compact(messages, force=force)
     out: dict[str, Any] = {
         "needs_compaction": False,
         "force_compact": False,
@@ -714,7 +735,7 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
                 },
                 task_id, None,
             )
-        _publish_events(config, [event])
+        await _publish_events(config, [event])
     return out
 
 
@@ -738,12 +759,12 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
             artifact["clarify_questions"] = build_clarify_card(story)
         else:
             artifact["stage"] = GoalStage.EXPLORE.value
-        _publish_events(config, [emitter._next(
+        await _publish_events(config, [emitter._next(
             StepKind.STATUS, f"goal intake → {artifact['stage']}",
             {"kind": "goal_stage", "stage": artifact["stage"], "goal_id": artifact["goal_id"]},
             task_id, None,
         )])
-        _publish_stage_event_recap(config, emitter, task_id, artifact)
+        await _publish_stage_event_recap(config, emitter, task_id, artifact)
         return {"goal_artifact": artifact, "stage_envelope": artifact["stage"]}
 
     stage = stage_of(goal)
@@ -754,7 +775,7 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
     if stage == GoalStage.PR:
         # The PR-summary turn just completed — the platform opens the PR from
         # the summary. Goal complete.
-        _publish_events(config, [emitter._next(
+        await _publish_events(config, [emitter._next(
             StepKind.STATUS, "goal complete — PR stage reached",
             {"kind": "goal_stage", "stage": GoalStage.DONE.value, "goal_id": goal.get("goal_id")},
             task_id, None,
@@ -765,10 +786,12 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
     # them as a USER message and starts a new turn).
     if stage == GoalStage.CLARIFY:
         if _clarify_answered(state):
-            clear_pending_questions()
             nxt = advance_artifact(goal, GoalStage.EXPLORE)
-            _publish_stage_event(config, emitter, task_id, nxt)
-            return {"goal_artifact": nxt, "stage_envelope": nxt["stage"]}
+            await _publish_stage_event(config, emitter, task_id, nxt)
+            # H-10: clear the per-run clarify signal in state (was the
+            # process-global clear_pending_questions()).
+            return {"goal_artifact": nxt, "stage_envelope": nxt["stage"],
+                    "pending_questions": None}
         # Not answered yet — end the turn (INPUT_REQUIRED). If the agent never
         # called ask_user, the clarify envelope pushes it to.
         return {"done": True}
@@ -778,15 +801,15 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
         nxt_stage = ADVANCE_ON_TURN_END[stage]
         if stage == GoalStage.EXPLORE:
             nxt = advance_artifact(goal, nxt_stage)
-            _publish_stage_event(config, emitter, task_id, nxt)
+            await _publish_stage_event(config, emitter, task_id, nxt)
             return {"goal_artifact": nxt, "stage_envelope": nxt["stage"], "critic_iterations": 0}
         if stage == GoalStage.IMPLEMENT:
             nxt = advance_artifact(goal, nxt_stage)
-            _publish_stage_event(config, emitter, task_id, nxt)
+            await _publish_stage_event(config, emitter, task_id, nxt)
             return {"goal_artifact": nxt, "stage_envelope": nxt["stage"]}
         if stage == GoalStage.REBASE_GATE:
             nxt = advance_artifact(goal, nxt_stage)
-            _publish_stage_event(config, emitter, task_id, nxt)
+            await _publish_stage_event(config, emitter, task_id, nxt)
             return {"goal_artifact": nxt, "stage_envelope": nxt["stage"]}
 
     # PLAN exit — critic pass: a plan with no tracked steps blocks (merged
@@ -796,9 +819,9 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
         if tracker:
             nxt = advance_artifact(goal, GoalStage.IMPLEMENT)
             nxt["task_tracker"] = tracker
-            _publish_stage_event(config, emitter, task_id, nxt)
+            await _publish_stage_event(config, emitter, task_id, nxt)
             return {"goal_artifact": nxt, "stage_envelope": nxt["stage"], "critic_iterations": 0}
-        return _critic_block(state, config, emitter, task_id, goal,
+        return await _critic_block(state, config, emitter, task_id, goal,
                              "plan produced no tracked steps — the plan must be a task list, not prose")
 
     # VERIFY exit — critic pass on the collected evidence (correctness
@@ -812,21 +835,21 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
         should_block, reason = rubric.should_block(findings)
         if not should_block:
             nxt = advance_artifact(goal, GoalStage.REBASE_GATE)
-            _publish_stage_event(config, emitter, task_id, nxt)
+            await _publish_stage_event(config, emitter, task_id, nxt)
             return {"goal_artifact": nxt, "stage_envelope": nxt["stage"], "critic_iterations": 0}
         # Back to implement with the findings (bounded by max_iterations).
-        return _critic_block(state, config, emitter, task_id, goal, reason,
+        return await _critic_block(state, config, emitter, task_id, goal, reason,
                              send_back_to=GoalStage.IMPLEMENT)
 
     return {}
 
 
-def _critic_block(state: EngineState, config: RunnableConfig, emitter: EventEmitter,
+async def _critic_block(state: EngineState, config: RunnableConfig, emitter: EventEmitter,
                   task_id: str | None, goal: dict[str, Any], reason: str,
                   send_back_to: GoalStage | None = None) -> dict[str, Any]:
     """A blocking critic finding: bounded revision loop, then blocked-escalation."""
     iterations = state.get("critic_iterations", 0) + 1
-    _publish_events(config, [emitter._next(
+    await _publish_events(config, [emitter._next(
         StepKind.STATUS, f"⚠ critic finding (round {iterations})",
         {"kind": "critic_finding", "severity": "block", "detail": reason, "iteration": iterations},
         task_id, None,
@@ -834,7 +857,7 @@ def _critic_block(state: EngineState, config: RunnableConfig, emitter: EventEmit
     if iterations >= _MAX_CRITIC_ITERATIONS:
         # Survivors past the iteration cap -> blocked-escalation (the human card).
         blocked = block_artifact(goal, f"critic: {reason}")
-        _publish_events(config, [emitter._next(
+        await _publish_events(config, [emitter._next(
             StepKind.STATUS, "blocked-escalation",
             {"kind": "blocked", "reason": blocked["blocked_reason"], "goal_id": goal.get("goal_id")},
             task_id, None,
@@ -855,13 +878,13 @@ def _critic_block(state: EngineState, config: RunnableConfig, emitter: EventEmit
     return out
 
 
-def _publish_stage_event_recap(config: RunnableConfig, emitter: EventEmitter,
+async def _publish_stage_event_recap(config: RunnableConfig, emitter: EventEmitter,
                                task_id: str | None, artifact: dict[str, Any]) -> None:
     """◆ recap block at every stage entry/advance — the progress-recap
     card kind (recap taxonomy)."""
     stage = artifact["stage"]
     goal_text = str(artifact.get("user_story") or artifact.get("goal", ""))[:120]
-    _publish_events(config, [emitter._next(
+    await _publish_events(config, [emitter._next(
         StepKind.STATUS, f"◆ recap: stage {stage}",
         {
             "kind": "recap",
@@ -875,15 +898,15 @@ def _publish_stage_event_recap(config: RunnableConfig, emitter: EventEmitter,
     )])
 
 
-def _publish_stage_event(config: RunnableConfig, emitter: EventEmitter,
+async def _publish_stage_event(config: RunnableConfig, emitter: EventEmitter,
                          task_id: str | None, artifact: dict[str, Any]) -> None:
     stage = artifact["stage"]
-    _publish_events(config, [emitter._next(
+    await _publish_events(config, [emitter._next(
         StepKind.STATUS, f"goal stage → {stage}",
         {"kind": "goal_stage", "stage": stage, "goal_id": artifact.get("goal_id")},
         task_id, None,
     )])
-    _publish_stage_event_recap(config, emitter, task_id, artifact)
+    await _publish_stage_event_recap(config, emitter, task_id, artifact)
 
 
 def _first_user_story(state: EngineState) -> str:
@@ -895,7 +918,9 @@ def _first_user_story(state: EngineState) -> str:
 
 def _clarify_answered(state: EngineState) -> bool:
     """The human's answers arrive as a USER-tagged message AFTER ask_user ran."""
-    if get_pending_questions() is None:
+    # H-10: read the per-run signal from state (snapshot by tools_node) instead
+    # of the process-global, which was shared across concurrent runs.
+    if state.get("pending_questions") is None:
         return False
     messages = state.get("messages", [])
     if not messages:
@@ -1002,11 +1027,19 @@ def build_graph(checkpointer: Any = None) -> Any:
     return g.compile(checkpointer=checkpointer)
 
 
-def _publish_events(config: RunnableConfig, events: list[StepEvent]) -> None:
+async def _publish_events(config: RunnableConfig, events: list[StepEvent]) -> None:
     sink = config["configurable"].get("event_sink")
-    if sink and events:
-        # sink is an async callable; schedule without blocking the graph
-        asyncio.create_task(sink(events))
+    if not sink or not events:
+        return
+    # Await inline (H-01): the old `asyncio.create_task(sink(events))` was
+    # fire-and-forget — events were lost on shutdown, could publish out of
+    # order vs turn_boundary, and sink exceptions vanished in an un-awaited
+    # task. Awaiting flushes before the node returns (durable order) and lets
+    # us surface sink errors to the log instead of swallowing them.
+    try:
+        await sink(events)
+    except Exception as exc:
+        log.warning("event sink failed: %s (count=%d)", exc, len(events))
 
 
 __all__ = ["agent_node", "approval_gate_node", "build_graph", "compaction_node",

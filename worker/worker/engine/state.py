@@ -119,6 +119,12 @@ class EngineState(TypedDict, total=False):
     critic_iterations: int
     blocked_reason: str | None
 
+    # Goal-mode clarify (ask_user) — the pending questions snapshot (H-10).
+    # ask_user runs in an executor thread and writes a process-global; tools_node
+    # snapshots it into per-run state so the clarify signal is checkpointed and
+    # not shared across concurrent runs.
+    pending_questions: list[dict[str, Any]] | None
+
     # Turn control
     done: bool
     error: str | None

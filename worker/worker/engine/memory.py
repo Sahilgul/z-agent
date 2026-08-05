@@ -72,10 +72,13 @@ class EpisodicMemory:
                  json.dumps(detail) if detail else None),
             )
             rowid = cur.lastrowid
-            self._db.execute(
-                "INSERT INTO episodes_fts (rowid, title, summary) VALUES (?, ?, ?)",
-                (rowid, title, summary),
-            )
+            try:
+                self._db.execute(
+                    "INSERT INTO episodes_fts (rowid, title, summary) VALUES (?, ?, ?)",
+                    (rowid, title, summary),
+                )
+            except sqlite3.OperationalError:
+                pass  # FTS5 unavailable — the search LIKE fallback covers retrieval (H-12)
             self._db.commit()
             return rowid
 
@@ -105,8 +108,13 @@ class EpisodicMemory:
             except sqlite3.OperationalError:
                 # FTS5 unavailable — fall back to LIKE
                 like = f"%{query}%"
+                # H-13: parenthesize the OR so the run_id/thread_id AND filters
+                # apply to the whole match group. The old unparenthesized form
+                # parsed as `title LIKE ? OR (summary LIKE ? AND run_id=? AND thread_id=?)`
+                # — a row from ANY thread matched on title alone, leaking memory
+                # across threads.
                 fallback = ("SELECT id, run_id, thread_id, task_id, turn, ts, kind, title, summary "
-                            "FROM episodes WHERE title LIKE ? OR summary LIKE ? ")
+                            "FROM episodes WHERE (title LIKE ? OR summary LIKE ?)")
                 params2: list[Any] = [like, like]
                 if run_id:
                     fallback += " AND run_id = ?"

@@ -296,6 +296,11 @@ class EngineRunner:
             "error": None,
             "task_id": self.task_id,
             "needs_compaction": False,
+            # H-03: a control-channel mode change updated self.mode but never
+            # the graph state, so the agent kept the old mode for every
+            # subsequent turn. Carry the live mode into the state delta so
+            # the next turn runs under the mode the user switched to.
+            "mode": self.mode,
         }, episodic)
 
     def _record_episode(self, episodic: EpisodicMemory, result: dict[str, Any]) -> None:

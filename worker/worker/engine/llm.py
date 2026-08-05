@@ -9,6 +9,7 @@ Build-on vs build-custom:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 import time
@@ -89,6 +90,45 @@ def with_gateway_retry(fn: Any, *, max_retries: int = 3, base_delay: float = 1.0
                 delay = max(delay, float(retry_after))
             time.sleep(delay)
     raise GatewayRetryError(f"gateway unreachable after {max_retries} retries") from last_exc
+
+
+async def with_gateway_retry_aiter(stream_factory: Any, *, max_retries: int = 2,
+                                  base_delay: float = 1.0) -> Any:
+    """Retry the stream START (construction + first chunk) on 429/503 (H-11).
+
+    `with_gateway_retry` only wraps stream CONSTRUCTION (`llm.astream(...)`
+    returns the iterator without raising), so a 429/503 raised on the FIRST
+    iteration (stream start) was never retried — the turn failed. Here we
+    retry construction AND the first chunk: once the first chunk arrives,
+    partial deltas may have been emitted, so mid-stream failures are NOT
+    retried (the turn fails, matching the existing design).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        stream = stream_factory()
+        try:
+            iterator = stream.__aiter__()
+            first = await iterator.__anext__()
+        except StopAsyncIteration:
+            return  # empty stream — nothing to retry
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable(exc) or attempt == max_retries:
+                raise
+            delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+            retry_after = _retry_after(exc)
+            if retry_after is not None:
+                delay = max(delay, float(retry_after))
+            await asyncio.sleep(delay)
+            continue
+        # First chunk obtained safely — yield it, then the rest (no retry).
+        yield first
+        async for chunk in iterator:
+            yield chunk
+        return
+    if last_exc is not None:
+        raise GatewayRetryError(
+            f"gateway unreachable after {max_retries} retries") from last_exc
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -184,4 +224,5 @@ __all__ = [
     "make_llm",
     "suffix_for",
     "with_gateway_retry",
+    "with_gateway_retry_aiter",
 ]

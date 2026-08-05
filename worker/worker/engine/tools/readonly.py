@@ -101,9 +101,20 @@ def file_glob(pattern: str) -> str:
     matches: list[str] = []
     for root, _dirs, files in os.walk(ws):
         for name in files:
-            if fnmatch.fnmatch(name, pattern.split("/")[-1] if "/" in pattern else pattern):
-                full = Path(root) / name
-                rel = full.relative_to(ws)
+            full = Path(root) / name
+            rel = full.relative_to(ws)
+            # H-06: a pattern WITH a slash (`src/*.py`, `**/*.py`) must match the
+            # relative PATH so the directory component is respected — the old
+            # code stripped to the last component and matched the filename
+            # only, so `src/*.py` matched `*.py` anywhere. A bare pattern
+            # (`*.py`, `foo.py`) keeps matching the filename so it still finds
+            # files of that name at any depth.
+            if "/" in pattern:
+                rel_str = str(rel).replace(os.sep, "/")
+                matched = fnmatch.fnmatch(rel_str, pattern)
+            else:
+                matched = fnmatch.fnmatch(name, pattern)
+            if matched:
                 matches.append(str(rel))
                 if len(matches) >= 500:
                     break

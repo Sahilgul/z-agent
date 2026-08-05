@@ -25,6 +25,7 @@ PromptOrigin drives keep-vs-drop with one switch per origin.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,7 +94,7 @@ class Compactor:
         # gate; the real count comes from the gateway usage on each turn.
         return sum(len(str(getattr(m, "content", ""))) for m in messages) // 4
 
-    def compact(self, messages: list[BaseMessage], *, force: bool = False) -> tuple[list[BaseMessage], CompactionResult]:
+    async def compact(self, messages: list[BaseMessage], *, force: bool = False) -> tuple[list[BaseMessage], CompactionResult]:
         """Run prune → summarize → splice. Returns (new messages, result).
 
         If the honesty validator fails, returns the ORIGINAL messages unchanged
@@ -140,6 +141,22 @@ class Compactor:
             kept_in_span.extend(items)
         kept_in_span.sort(key=lambda x: x[0])
 
+        # H-08: floor_messages is a floor on the OUTPUT, not just the
+        # trigger. The old code could collapse below the floor when most of
+        # the span was prunable (e.g. 30 TOOL messages, floor=20, recent=10
+        # -> output = 1 summary + 10 recent = 11 < floor). Restore the most
+        # recent pruned messages until the projected output meets the floor
+        # (or pruned is exhausted — the best-effort case keeps everything).
+        min_output = self.policy.floor_messages
+        projected = len(kept_in_span) + len(recent) + 1  # +1 for the summary
+        if projected < min_output and pruned:
+            deficit = min_output - projected
+            pruned.sort(key=lambda x: x[0])
+            restored = pruned[-deficit:] if deficit <= len(pruned) else pruned
+            kept_in_span.extend(restored)
+            pruned = pruned[:-deficit] if deficit <= len(pruned) else []
+            kept_in_span.sort(key=lambda x: x[0])
+
         result.pruned_count = len(pruned)
         result.kept_count = len(kept_in_span) + len(recent)
 
@@ -149,7 +166,16 @@ class Compactor:
             summary_text = f"{self.policy.marker} {result.pruned_count} messages pruned (no summarizer)."
         else:
             pruned_text = "\n\n".join(str(getattr(m, "content", ""))[:500] for _, m in pruned)
-            summary_text = self.summarizer(pruned_text) or ""
+            # H-07: the summarizer may be sync OR async. The old code called it
+            # synchronously, so an async summarizer returned a coroutine which
+            # was then str()'d into the conversation memory ("<coroutine object
+            # at 0x...>"). Await it when it returns a coroutine; use the value
+            # directly when it doesn't.
+            maybe = self.summarizer(pruned_text)
+            if asyncio.iscoroutine(maybe):
+                summary_text = await maybe
+            else:
+                summary_text = maybe or ""
             summary_text = f"{self.policy.marker} {summary_text}"
         result.summary = summary_text
 

@@ -24,7 +24,73 @@ from zagent_contracts import StepEvent, StepKind
 from worker.engine.checkpointer import DeltaChannel, make_checkpointer
 from worker.engine.compaction import CompactionPolicy, Compactor
 from worker.engine.hardening import SoakResult, evaluate_slo
-from worker.engine.state import PromptOrigin, tag_message
+from worker.engine.state import Budget, Mode, PromptOrigin, tag_message
+
+# --- scripted LLM (for the checkpointer resume drill) ---
+
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
+
+from worker.engine.events import EventEmitter
+from worker.engine.graph import build_graph
+
+
+class _ScriptedLLM:
+    """A fake ChatOpenAI: plays back a fixed script of AIMessages."""
+
+    def __init__(self, script: list[AIMessage]) -> None:
+        self._script = list(script)
+
+    def astream(self, messages: list, stream_mode: str = "messages") -> Any:
+        msg = self._script.pop(0) if self._script else AIMessage(content="(script exhausted)")
+
+        async def _gen() -> Any:
+            yield msg
+
+        return _gen()
+
+
+def _ai(text: str, tool_calls: list[dict[str, Any]] | None = None) -> AIMessage:
+    kwargs: dict[str, Any] = {"content": text}
+    if tool_calls:
+        kwargs["tool_calls"] = tool_calls
+    return AIMessage(**kwargs)
+
+
+def _tc(tc_id: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
+    return {"id": tc_id, "name": name, "args": args}
+
+
+def _resume_config(thread_id: str = "resume-t") -> dict[str, Any]:
+    async def _sink(events: list) -> None:
+        pass
+
+    return {
+        "configurable": {
+            "thread_id": thread_id,
+            "model": "kimi-foundry",
+            "emitter": EventEmitter("run-1", thread_id),
+            "approval_broker": None,
+            "compactor": Compactor(),
+            "workspace": "/ws",
+            "event_sink": _sink,
+        },
+        "recursion_limit": 80,
+    }
+
+
+def _resume_initial(prompt: str = "do the work") -> dict[str, Any]:
+    return {
+        "run_id": "run-1", "thread_id": "t-1", "context_id": "t-1",
+        "task_id": "task-1", "mode": Mode.DEVELOPMENT, "autonomy": "autonomous",
+        "budget": Budget(cap=5.0),
+        "messages": [tag_message(HumanMessage(content=f"Workspace root: /ws\n\n{prompt}"), "user")],
+        "done": False, "error": None,
+        "approved_calls": {}, "denial_streak": 0, "tool_streak": {},
+        "turn_count": 0, "compaction_count": 0, "compaction_retries": 0,
+    }
 
 # --- Redis stream durability ---
 
@@ -89,21 +155,54 @@ async def test_delta_channel_replay_recovers_task_boundaries(tmp_path: Path):
 # --- Checkpointer resume ---
 
 @pytest.mark.asyncio
-async def test_memory_saver_resume_preserves_conversation():
-    """A resumed thread continues from the last checkpoint, not from scratch."""
-    from langgraph.checkpoint.memory import MemorySaver
+async def test_memory_saver_resume_preserves_conversation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A resumed thread continues from the last checkpoint, not from scratch.
 
-    # The saver is opaque; the contract is that aput + aget round-trips. We
-    # validate the factory returns a usable saver without driving the full
-    # graph (which needs the gateway).
-    _saver = MemorySaver()
-    cp = make_checkpointer()
-    assert cp is not None
+    H-19: the old test created a MemorySaver and asserted `cp is not None` —
+    it never ran the graph or resumed from a checkpoint, so the resume
+    contract was untested. Here we run a real turn on the graph with a
+    MemorySaver, then re-invoke with a nudge delta (the resume path) and
+    assert the first turn's messages survive in the resumed state."""
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+    (tmp_path / "hello.txt").write_text("line one\nline two\n")
+    saver = MemorySaver()
+    graph = build_graph(checkpointer=saver)
+    config = _resume_config()
+
+    llm = _ScriptedLLM([
+        _ai("", [_tc("tc1", "file_read", {"file_path": "hello.txt"})]),  # turn 1
+        _ai("resumed turn two"),                                  # turn 2 (nudge)
+    ])
+    monkeypatch.setattr("worker.engine.graph.make_llm", lambda *a, **k: llm)
+
+    # Turn 1: runs the agent -> tools loop and checkpoints the conversation.
+    first = await graph.ainvoke(_resume_initial(), config)
+    assert first.get("error") is None
+    first_messages = list(first.get("messages", []))
+    # file_read returns line-numbered text ("     1|line one\n     2|line two\n...").
+    assert any("line one" in str(getattr(m, "content", "")) for m in first_messages), (
+        "turn 1 must have read hello.txt")
+
+    # Resume: a completed graph re-enters from START when invoked with a
+    # state delta (ainvoke(None) would be a no-op). The checkpoint must
+    # persist turn 1's messages — NOT start from scratch.
+    snap = await graph.aget_state(config)
+    messages = list(snap.values.get("messages", []))
+    messages.append(tag_message(HumanMessage(content="nudge: now turn two"), "nudge"))
+    resumed = await graph.ainvoke({"messages": messages, "done": False}, config)
+    resumed_messages = list(resumed.get("messages", []))
+    # The original user message + the tool result must survive the resume.
+    contents = [str(getattr(m, "content", "")) for m in resumed_messages]
+    assert "Workspace root: /ws\n\ndo the work" in contents, (
+        "resume must preserve turn 1's user message, not start from scratch")
+    assert any("line one" in c for c in contents), (
+        "resume must preserve turn 1's tool result")
 
 
 # --- Rollback drill ---
 
-def test_rollback_drill_compaction_preserves_protected():
+@pytest.mark.asyncio
+async def test_rollback_drill_compaction_preserves_protected():
     """The rollback drill: a compaction that would drop protected messages
     rolls back, leaving the conversation intact (no data loss)."""
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -114,7 +213,7 @@ def test_rollback_drill_compaction_preserves_protected():
         *[tag_message(AIMessage(content=f"a{i}" * 20), PromptOrigin.ASSISTANT) for i in range(20)],  # type: ignore[arg-type]
         tag_message(HumanMessage(content="recent"), PromptOrigin.USER),  # type: ignore[arg-type]
     ]
-    new, _result = compactor.compact(messages)
+    new, _result = await compactor.compact(messages)
     contents = [str(m.content) for m in new]
     assert "system" in contents
     assert "user-1" in contents

@@ -27,6 +27,9 @@ RING_BUFFER_LINES = 2000
 MAX_OUTPUT_CHARS = 32 * 1024
 WATCH_DEBOUNCE_S = 5.0
 JOB_TIMEOUT_S = 2 * 60 * 60  # 2h cap -> exit 124
+# Grace window after SIGTERM before SIGKILL escalation (H-04): a stubborn
+# process that traps/ignores SIGTERM must not hang the pump forever.
+_KILL_GRACE_S = 5.0
 
 
 def _jobs_dir() -> Path:
@@ -146,9 +149,23 @@ class TerminalManager:
                     job.killed_by = "ceiling"
                     self.kill(job, reason="ceiling")
                     break
-        rc = await job._proc.wait()
+        rc = await self._reap(job)
         job.exit_code = 124 if job.killed_by == "timeout" else rc
         job.ended = time.monotonic()
+
+    async def _reap(self, job: BackgroundJob) -> int:
+        """Wait for the process to exit, escalating SIGTERM -> SIGKILL after
+        a grace period (H-04). The old code did `await job._proc.wait()` with
+        no escalation, so a process that ignored the SIGTERM from kill() kept
+        the pump alive forever. SIGKILL is uncatchable, so this is the hard floor."""
+        try:
+            return await asyncio.wait_for(job._proc.wait(), timeout=_KILL_GRACE_S)
+        except TimeoutError:
+            try:
+                os.killpg(os.getpgid(job._proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            return await job._proc.wait()
 
     async def _wait(self, job: BackgroundJob) -> None:
         while job.running:
@@ -211,7 +228,16 @@ class TerminalManager:
             return "error: unknown job id"
         lines = list(job.ring)
         if len(lines) > tail:
-            body = "\n".join(lines[:50] + [f"... {len(lines) - 100} lines omitted ..."] + lines[-50:])
+            # H-05: the old code hardcoded `lines[:50]` + `lines[-50:]` (ignoring
+            # `tail`), so for tail < 100 the head/tail slices overlapped and
+            # `len(lines) - 100` went NEGATIVE ("... -10 lines omitted ...").
+            # Split tail into head/tail halves and omit exactly the middle.
+            head = tail // 2
+            keep_tail = tail - head
+            omitted = len(lines) - tail  # always >= 0: we only truncate when len > tail
+            body = "\n".join(
+                lines[:head] + [f"... {omitted} lines omitted ..."] + lines[-keep_tail:]
+            )
         else:
             body = "\n".join(lines)
         out = self._header(job) + body + self._footer(job)

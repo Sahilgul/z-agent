@@ -77,11 +77,28 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
     result = SoakResult()
     events: list[Any] = []
     deltas: list[Any] = []
+    started = time.monotonic()
+    first_delta_at: float | None = None  # H-14: timestamp of the FIRST delta
 
     async def event_sink(evts: list) -> None:
+        for e in evts:
+            # H-15: capture per-turn latency from turn_boundary events so the
+            # p95 SLO can pass. turn_latencies was never populated, so
+            # p95_turn_latency_s was always None -> the SLO evaluated 999 < 60
+            # and structurally failed.
+            d = getattr(e, "detail", None) or {}
+            if getattr(e, "title", "") == "turn complete" and d.get("duration_ms") is not None:
+                result.turn_latencies.append(float(d["duration_ms"]) / 1000.0)
         events.extend(evts)
 
     async def delta_sink(delta) -> None:
+        nonlocal first_delta_at
+        # H-14: capture when the FIRST delta arrives — the SLO measures
+        # time-to-first-delta, not full runtime (the old code recorded the
+        # full runtime after the graph finished, so the SLO was structurally
+        # unpassable).
+        if first_delta_at is None:
+            first_delta_at = time.monotonic()
         deltas.append(delta)
 
     emitter = EventEmitter(run_id, thread_id)
@@ -104,7 +121,6 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
         "recursion_limit": max_turns * 2,
     }
 
-    started = time.monotonic()
     try:
         outcome = await graph.ainvoke(state, config=config)
         result.is_error = bool(outcome.get("error"))
@@ -117,8 +133,12 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
     tool_events = [e for e in events if e.detail.get("tool")]
     result.tool_calls = len(tool_events)
     result.tool_calls_ok = sum(1 for e in tool_events if e.detail.get("ok"))
-    if deltas:
-        result.first_delta_latency_s = time.monotonic() - started
+    if deltas and first_delta_at is not None:
+        # H-14: time-to-FIRST-delta (captured in the delta_sink closure), not
+        # the full runtime — the old code used `time.monotonic() - started`
+        # here, which is the whole soak duration and made the SLO
+        # structurally unpassable.
+        result.first_delta_latency_s = first_delta_at - started
     # Drift: first-10 vs last-10 tool success rate
     if len(tool_events) >= 20:
         first10 = tool_events[:10]

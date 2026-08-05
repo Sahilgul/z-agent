@@ -83,11 +83,18 @@ class ApprovalGate:
         decision = json.loads(raw)
         dec = decision.get("decision")
         if dec == "always_allow":
-            # Persist the tool CLASS, not the specific target
+            # Persist the tool CLASS, not the specific target — but only for
+            # allowable, non-destructive tools. For a non-allowable (or
+            # destructive) tool the user STILL meant ALLOW; the old code
+            # fell through to the DENY return, silently inverting intent (H-09).
+            # Honor the allow for this call without persisting an unsafe
+            # always-allow.
             if tool_name in _ALWAYS_ALLOWABLE_CLASSES and not is_destructive:
                 self._always_allowed.add(tool_name)
                 await self._persist_always_allowed(tool_name)
-            return {"approved": True, "args": args, "verbatim": True, "via": "always_allow"}
+                return {"approved": True, "args": args, "verbatim": True, "via": "always_allow"}
+            return {"approved": True, "args": args, "verbatim": True,
+                    "via": "always_allow_unpersisted"}
         if dec in ("allow", "allow_once"):
             return {"approved": True, "args": args, "verbatim": True, "via": dec}
         return {"approved": False, "args": args, "reason": decision.get("reason", "denied by user")}

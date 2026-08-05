@@ -159,13 +159,27 @@ class ThreadRuntime:
                     # graceful interrupt + inject + resume (decided semantics)
                     if self.status == "running":
                         await client.interrupt()
+                    # H-16/H-17: re-arm the pump BEFORE starting the new turn.
+                    # The old code re-armed AFTER client.query, so the new turn's
+                    # early messages arrived with no pump running and were
+                    # dropped (H-16). It also overwrote self._pump_task without
+                    # retrieving the previous task's exception, swallowing
+                    # it and leaving the thread hanging "running" forever (H-17).
+                    # Surface the old pump's exception (if it already failed) and
+                    # cancel it if it's still draining the interrupted turn.
+                    old = self._pump_task
+                    if (old is not None and old.done()
+                            and (exc := old.exception())
+                            and not isinstance(exc, asyncio.CancelledError)):
+                        self.status = "failed"
+                        await self.forwarder.heartbeat(self.status)
+                        raise exc
+                    if old is not None and not old.done():
+                        old.cancel()
+                    self._pump_done.clear()
+                    self._pump_task = asyncio.create_task(self._pump(client), name="event-pump")
                     await client.query(msg.text)
                     self.status = "running"
-                    # The previous turn's pump drained and exited at the result
-                    # boundary; re-arm so this turn's messages are seen.
-                    if self._pump_done.is_set():
-                        self._pump_done.clear()
-                        self._pump_task = asyncio.create_task(self._pump(client), name="event-pump")
                 elif msg.type == "mode":
                     await client.set_permission_mode(msg.mode)
                 elif msg.type == "kill":

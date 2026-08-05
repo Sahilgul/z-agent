@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from worker.engine.compaction import (
@@ -27,7 +28,8 @@ def _msg(content: str, origin: PromptOrigin) -> object:
 
 # ----------------------------------------------------------- Compaction: prune
 
-def test_compaction_prunes_tool_outputs_first():
+@pytest.mark.asyncio
+async def test_compaction_prunes_tool_outputs_first():
     policy = CompactionPolicy(context_limit=100, recent_window=2, floor_messages=1)
     compactor = Compactor(policy=policy)
     messages = [
@@ -39,12 +41,13 @@ def test_compaction_prunes_tool_outputs_first():
         _msg("recent tool", PromptOrigin.TOOL),
         _msg("recent assistant", PromptOrigin.ASSISTANT),
     ]
-    _new, result = compactor.compact(messages)
+    _new, result = await compactor.compact(messages)
     assert result.pruned_count >= 2
     assert result.rolled_back is False
 
 
-def test_compaction_never_prunes_protected_origins():
+@pytest.mark.asyncio
+async def test_compaction_never_prunes_protected_origins():
     """System, user, nudge are verbatim-protected — the honesty validator
     rolls back if any are dropped."""
     policy = CompactionPolicy(context_limit=50, recent_window=1, floor_messages=1)
@@ -57,7 +60,7 @@ def test_compaction_never_prunes_protected_origins():
         _msg("assistant", PromptOrigin.ASSISTANT),
         _msg("recent", PromptOrigin.ASSISTANT),
     ]
-    new, result = compactor.compact(messages)
+    new, result = await compactor.compact(messages)
     # All protected messages must survive
     contents = [str(m.content) for m in new]
     assert "system" in contents
@@ -66,29 +69,52 @@ def test_compaction_never_prunes_protected_origins():
     assert result.rolled_back is False
 
 
-def test_compaction_honesty_validator_rolls_back_on_protected_loss():
-    """If the splice somehow dropped a protected message, roll back."""
+@pytest.mark.asyncio
+async def test_compaction_honesty_validator_rolls_back_on_protected_loss(monkeypatch: pytest.MonkeyPatch):
+    """If the splice somehow dropped a protected message, roll back.
+
+    H-20: the old test used a 3-way OR assertion (`new is messages or
+    rolled_back or len(new) >= 30`) that passed without rollback ever
+    firing — none of the three branches requires rollback. Here we FORCE
+    the splice to prune a protected USER message (by adding USER to the
+    prune order) and assert the honesty validator rolls back, returning the
+    ORIGINAL messages unchanged."""
+    import worker.engine.compaction as compaction_mod
     policy = CompactionPolicy(context_limit=10, recent_window=1, floor_messages=1)
     compactor = Compactor(policy=policy)
-    # Force a scenario: many protected messages that can't all fit
-    messages = [
-        _msg(f"user {i}", PromptOrigin.USER) for i in range(30)
-    ] + [_msg("recent", PromptOrigin.ASSISTANT)]
-    new, result = compactor.compact(messages)
-    # All user messages are protected; none should be dropped
-    assert new is messages or result.rolled_back is True or len(new) >= 30
+    # 30 protected USER messages + 1 recent ASSISTANT — enough to trigger
+    # compaction and give the validator a protected count to defend.
+    messages = [_msg(f"user {i} payload" * 5, PromptOrigin.USER) for i in range(30)]
+    messages += [_msg("recent", PromptOrigin.ASSISTANT)]
+    # Fault injection: make the splice prune USER (protected) messages so
+    # the protected count drops and the honesty validator must roll back.
+    monkeypatch.setattr(
+        compaction_mod, "_PRUNE_ORDER",
+        [PromptOrigin.TOOL, PromptOrigin.ENVELOPE, PromptOrigin.MEMORY,
+         PromptOrigin.ASSISTANT, PromptOrigin.USER],
+    )
+    new, result = await compactor.compact(messages)
+    assert result.rolled_back is True, (
+        "honesty validator must roll back when a protected message is dropped")
+    assert new is messages, (
+        "rollback must return the ORIGINAL messages unchanged (no data loss)")
+    assert result.rollback_reason, "rollback must record a reason"
+    assert result.after_tokens == result.before_tokens, (
+        "rollback must restore the pre-compaction token count")
 
 
-def test_compaction_no_op_when_under_limit():
+@pytest.mark.asyncio
+async def test_compaction_no_op_when_under_limit():
     policy = CompactionPolicy(context_limit=1_000_000, recent_window=5, floor_messages=1)
     compactor = Compactor(policy=policy)
     messages = [_msg("x", PromptOrigin.ASSISTANT) for _ in range(10)]
-    new, result = compactor.compact(messages)
+    new, result = await compactor.compact(messages)
     assert new is messages
     assert result.pruned_count == 0
 
 
-def test_compaction_summary_carries_marker():
+@pytest.mark.asyncio
+async def test_compaction_summary_carries_marker():
     policy = CompactionPolicy(context_limit=100, recent_window=2, floor_messages=1)
     summarizer = lambda text: "summary of pruned span"
     compactor = Compactor(policy=policy, summarizer=summarizer)
@@ -98,9 +124,33 @@ def test_compaction_summary_carries_marker():
         _msg("recent", PromptOrigin.ASSISTANT),
         _msg("recent2", PromptOrigin.ASSISTANT),
     ]
-    _new, result = compactor.compact(messages)
+    _new, result = await compactor.compact(messages)
     assert result.summary.startswith("[compacted]")
     assert "summary of pruned span" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_compaction_floor_enforced_on_output():
+    """H-08: floor_messages is a floor on the OUTPUT. The old code could
+    collapse below the floor when most of the span was prunable (e.g. many
+    TOOL messages, few protected). With floor=20, recent=10 and 31
+    messages (1 SYSTEM + 20 TOOL + 10 recent), the output was 1 summary +
+    10 recent = 11 < floor. The fix restores the most-recent pruned
+    messages until the output meets the floor."""
+    policy = CompactionPolicy(context_limit=100, recent_window=10, floor_messages=20)
+    compactor = Compactor(policy=policy)
+    messages = [
+        _msg("system", PromptOrigin.SYSTEM),
+        *[_msg(f"tool {i}" * 10, PromptOrigin.TOOL) for i in range(20)],
+        *[_msg(f"recent {i}", PromptOrigin.ASSISTANT) for i in range(10)],
+    ]
+    new, result = await compactor.compact(messages)
+    assert result.rolled_back is False
+    # The output must meet the floor (system + restored tool + summary + recent >= 20).
+    assert len(new) >= policy.floor_messages, (
+        f"compaction collapsed below floor: {len(new)} < {policy.floor_messages}")
+    # Protected system message must survive.
+    assert any(str(m.content) == "system" for m in new)
 
 
 # ----------------------------------------------------------- Self-tuning limit

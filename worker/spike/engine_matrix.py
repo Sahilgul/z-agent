@@ -202,10 +202,23 @@ async def run_engine_turn(prompt: str, mode: Mode, autonomy: Autonomy,
     config = _config(rec, workspace, model, emitter, thread_id)
     # Production contract: built tools resolve paths from WORKSPACE_DIR (the
     # sandbox manager exports it in containers; the harness sets it here).
+    # H-18: save/restore instead of mutating the process-global env and
+    # leaving it pointing at the last model's workspace. The old code set
+    # WORKSPACE_DIR globally per model and never restored it, so a later
+    # model (or a later test) inherited the previous model's workspace —
+    # cross-model workspace corruption. Restoring after the turn keeps the
+    # global env stable.
+    prev_ws = os.environ.get("WORKSPACE_DIR")
     os.environ["WORKSPACE_DIR"] = str(workspace)
-    graph = build_graph(checkpointer=saver)
-    result, interrupts = await _invoke_servicing_approvals(
-        graph, config, _initial_state(prompt, mode, autonomy, workspace))
+    try:
+        graph = build_graph(checkpointer=saver)
+        result, interrupts = await _invoke_servicing_approvals(
+            graph, config, _initial_state(prompt, mode, autonomy, workspace))
+    finally:
+        if prev_ws is None:
+            os.environ.pop("WORKSPACE_DIR", None)
+        else:
+            os.environ["WORKSPACE_DIR"] = prev_ws
     result["_interrupt_count"] = interrupts
     if not rec.usage and result.get("last_usage"):
         rec.usage = result["last_usage"]
