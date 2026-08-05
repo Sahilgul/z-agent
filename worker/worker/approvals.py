@@ -37,7 +37,12 @@ class ApprovalBridge:
             PermissionResultDeny,
             ToolPermissionContext,
         )
-        assert isinstance(context, ToolPermissionContext) or context is not None
+        # L-10: the old `isinstance(context, ToolPermissionContext) or
+        # context is not None` was tautological — `context is not None`
+        # short-circircuited to True for any non-None context, so the
+        # isinstance check was dead and None was the only thing that could
+        # fail it. Assert the type directly.
+        assert isinstance(context, ToolPermissionContext)
 
         if tool_name in AUTO_ALLOW_TOOLS or tool_name in self.always_allowed:
             return PermissionResultAllow(updated_input=tool_input)

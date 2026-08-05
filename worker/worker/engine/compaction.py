@@ -68,7 +68,11 @@ class CompactionPolicy:
     marker: str = "[compacted]"
 
     def should_compact(self, message_count: int, token_count: int) -> bool:
-        return token_count > self.context_limit and message_count > (self.floor_messages + self.recent_window)
+        # L-06: use >= so compaction triggers AT the context limit (before
+        # breaching it), matching the "compacts BEFORE breaching" intent.
+        # The old `>` only compacted once token_count strictly exceeded the
+        # limit, so the very next turn ran over budget before compaction.
+        return token_count >= self.context_limit and message_count > (self.floor_messages + self.recent_window)
 
 
 class Compactor:
@@ -92,7 +96,24 @@ class Compactor:
     def _estimate_tokens(self, messages: list[BaseMessage]) -> int:
         # Cheap estimate: 1 token ~ 4 chars. Good enough for the should_compact
         # gate; the real count comes from the gateway usage on each turn.
-        return sum(len(str(getattr(m, "content", ""))) for m in messages) // 4
+        # L-07: content can be a list of blocks (e.g. [{"type": "text",
+        # "text": "..."}]) — str(list) would count the repr's brackets,
+        # quotes, and "type"/"text" keys and over-count by ~30%. Extract
+        # the real text from block content instead.
+        total = 0
+        for m in messages:
+            content = getattr(m, "content", "")
+            if isinstance(content, str):
+                total += len(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        total += len(str(block.get("text", "") or block.get("content", "") or ""))
+                    else:
+                        total += len(str(block))
+            else:
+                total += len(str(content))
+        return total // 4
 
     async def compact(self, messages: list[BaseMessage], *, force: bool = False) -> tuple[list[BaseMessage], CompactionResult]:
         """Run prune → summarize → splice. Returns (new messages, result).

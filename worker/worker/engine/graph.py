@@ -162,7 +162,10 @@ def _build_turn_envelope(state: EngineState, config: RunnableConfig) -> HumanMes
         parts.append(roster)
 
     # Goal-stage envelope (the stage subgraph's per-turn fragment)
-    if mode == Mode.GOAL.value or mode == "goal":
+    # L-02: `Mode.GOAL.value` is already the string "goal" (Mode is a str
+    # enum), so the `or mode == "goal"` was redundant. Compare to the enum
+    # member directly — it matches whether mode is Mode.GOAL or "goal".
+    if mode == Mode.GOAL:
         stage_raw = state.get("stage_envelope")
         if stage_raw:
             try:
@@ -477,6 +480,12 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     new_messages = list(messages)
     out: dict[str, Any] = {}
     metrics = get_registry(config)
+    # L-01: track how many tool calls were denied at the gate so we only
+    # drain background-terminal notifications when at least one tool
+    # actually executed. On a denied-only turn the agent did nothing, so
+    # notifying about background terminals is noise and would consume
+    # notifications that should wait for a real turn.
+    denied_count = 0
 
     for tc in tool_calls:
         tc_id = tc.get("id", "")
@@ -491,6 +500,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         effective_args = (decision or {}).get("args", args)
         if decision is not None and not decision.get("approved", True):
             # Denied at the gate — the agent sees the reason, nothing executes.
+            denied_count += 1
             result = {"kind": "error", "ok": False,
                       "output": f"error: denied — {decision.get('reason', 'denied by user')}"}
         elif name == "update_tasks":
@@ -613,10 +623,15 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                     metrics.increment("stuck_loop_triggers")
 
     # Background terminal completion/watch notifies at turn end.
-    from worker.engine.tools.background import terminal_manager
-    for note in terminal_manager().completed_notifications():
-        new_messages.append(tag_message(HumanMessage(
-            content=f"[background terminal] {note}"), "nudge"))  # type: ignore[arg-type]
+    # L-01: only drain when at least one tool actually executed
+    # (denied_count < len(tool_calls)); a denied-only turn did nothing,
+    # so notifying about background terminals is noise and would consume
+    # notifications that should wait for a real turn.
+    if denied_count < len(tool_calls):
+        from worker.engine.tools.background import terminal_manager
+        for note in terminal_manager().completed_notifications():
+            new_messages.append(tag_message(HumanMessage(
+                content=f"[background terminal] {note}"), "nudge"))  # type: ignore[arg-type]
 
     out["messages"] = new_messages
     out["tool_streak"] = streaks

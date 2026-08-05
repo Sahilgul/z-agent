@@ -217,6 +217,11 @@ async def call_any_tool(name: str, args: dict[str, Any],
     """Dispatch any tool. Mutating calls go through the approval gate first
     (two-phase verbatim). The gate returns the verbatim args to execute
     with; we call the tool with THOSE args, not the agent's original."""
+    # L-04: resolve aliases (e.g. code_search -> file_search) up front so a
+    # call by its alias name dispatches to the real tool instead of falling
+    # through to "unknown tool". default_tool_names already does this; the
+    # direct dispatch path here didn't.
+    name = resolve_tool_name(name)
     if name in TOOL_BY_NAME:
         return await call_tool(name, args)
     if name in MUTATING_TOOL_BY_NAME:

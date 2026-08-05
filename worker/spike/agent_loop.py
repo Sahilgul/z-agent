@@ -187,10 +187,16 @@ async def run_agent_loop(
         ai_message: AIMessage | None = None
         try:
             async for chunk in bound.astream(messages, stream_mode="messages"):
-                if hasattr(chunk, "content") and chunk.content and first_delta_this_turn:
+                # L-11: under stream_mode="messages" the chunk can be a tuple
+                # (message, metadata); hasattr(tuple, "content") is False, so
+                # the old check skipped record_delta() for tuple chunks (the
+                # first delta was never recorded). Unwrap the tuple first,
+                # then check content on the message.
+                msg = chunk[0] if isinstance(chunk, tuple) else chunk
+                if hasattr(msg, "content") and msg.content and first_delta_this_turn:
                     recorder.record_delta()
                     first_delta_this_turn = False
-                ai_message = chunk if not isinstance(chunk, tuple) else chunk[0]
+                ai_message = msg
         except Exception as exc:  # noqa: BLE001
             recorder.record_turn(None, is_error=True)
             recorder.events.append({"kind": "error", "error": str(exc)})

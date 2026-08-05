@@ -10,6 +10,7 @@ stuck-loop triggers, swarm worker idle vs wall time.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections.abc import Iterator
@@ -50,7 +51,16 @@ class MetricsRegistry:
             histograms = {}
             for name, samples in self.histograms.items():
                 ordered = sorted(samples)
-                p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))] if ordered else None
+                # L-08: p95 used int(n*0.95) which FLOORS — for n=20 that's
+                # index 19 (the max), so p95 always returned the max for small
+                # samples. Use the nearest-rank method: the p95 value is the
+                # ceil(0.95*n)-th sample (1-indexed) → index ceil(0.95*n)-1.
+                # For n=20 that's index 18 (not the max). Clamp to [0, n-1].
+                if ordered:
+                    idx = max(0, math.ceil(len(ordered) * 0.95) - 1)
+                    p95 = ordered[min(idx, len(ordered) - 1)]
+                else:
+                    p95 = None
                 histograms[name] = {
                     "count": len(samples),
                     "min": ordered[0] if ordered else None,

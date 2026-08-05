@@ -26,6 +26,7 @@ from worker.engine.tools import (
 )
 from worker.engine.tools.discovery import (
     ROSTER_CHAR_BUDGET,
+    build_index,
     exact_names,
     roster_fragment,
     search,
@@ -104,6 +105,18 @@ class TestToolSearch:
         names = {e.name for e in matches}
         assert "code_search" in names or "file_search" in names
 
+    def test_alias_index_entry_inherits_real_modes(self):
+        # L-05: the code_search alias IndexEntry must carry the SAME modes
+        # as the real file_search entry (it reuses _modes_for("file_search")),
+        # not [] — a regression that computed _modes_for("code_search")
+        # would yield [] because MODE_ALLOWED lists "file_search", not the
+        # alias. Lock the correct behavior in.
+        index = build_index(include_mcp=False)
+        assert "code_search" in index and "file_search" in index
+        real_modes = index["file_search"].modes
+        assert real_modes, "file_search should be mode-allowed somewhere"
+        assert index["code_search"].modes == real_modes
+
 
 # ----------------------------------------------------------- 5. fail-closed
 
@@ -116,7 +129,10 @@ class TestFailClosedDiscovery:
         assert "file_write" not in frag and "spawn_agent" not in frag
 
     def test_mcp_gated_by_mode(self):
-        assert not mode_allowed("mcp__srv__tool", "plan") is False  # mcp__* in plan set
+        # L-12: was `assert not mode_allowed(...) is False` — a confusing
+        # double-negative (relying on `is` binding tighter than `not`).
+        # Say what we mean: mcp__* is allowed in plan.
+        assert mode_allowed("mcp__srv__tool", "plan")
         assert mode_allowed("mcp__srv__tool", "development")
 
 
@@ -125,7 +141,6 @@ class TestFailClosedDiscovery:
 
 class TestMCPFoldIn:
     def test_mcp_catalog_discoverable_per_server_isolated(self, monkeypatch):
-        import worker.engine.tools.discovery as disco
         from worker.engine.mcp import MCPManager
 
         mgr = MCPManager(servers=[{"name": "docs"}, {"name": "broken"}])
@@ -134,7 +149,12 @@ class TestMCPFoldIn:
         mgr.status["broken"].connected = False
         mgr.status["broken"].error = "connection refused"
 
-        monkeypatch.setattr(disco, "mcp_manager", lambda: mgr, raising=False)
+        # L-13: the old `monkeypatch.setattr(disco, "mcp_manager", ...)` was
+        # a no-op — build_index() does a LOCAL `from worker.engine.mcp
+        # import mcp_manager`, so it imports the name straight from the mcp
+        # module and never reads disco.mcp_manager. The patch that actually
+        # works is setting mcp_mod._MANAGER (mcp_manager() returns it), so
+        # drop the dead disco patch and keep the effective one.
         import worker.engine.mcp as mcp_mod
         monkeypatch.setattr(mcp_mod, "_MANAGER", mgr)
 

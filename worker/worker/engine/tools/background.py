@@ -195,18 +195,6 @@ class TerminalManager:
         job.killed_by = job.killed_by or reason
         return True
 
-    def ghost_reconcile(self) -> list[str]:
-        """On (re)start: jobs from a previous process are dead — mark them so
-        the agent doesn't wait on ghosts (ghost-reconcile)."""
-        reconciled = []
-        for job in self.jobs.values():
-            if job.running and (job._proc is None or job._proc.returncode is not None):
-                job.exit_code = job._proc.returncode if job._proc else -1
-                job.killed_by = "ghost-reconcile"
-                job.ended = time.monotonic()
-                reconciled.append(job.job_id)
-        return reconciled
-
     def completed_notifications(self) -> list[str]:
         """Turn-end completion notifies (consumed once per turn)."""
         notes = []
