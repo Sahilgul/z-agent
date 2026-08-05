@@ -50,6 +50,12 @@ describe("isStaleThread (watchdog)", () => {
   it("flags a running thread with no heartbeat at all", () => {
     expect(isStaleThread(base, Date.now())).toBe(true);
   });
+  // M-89: the queued-no-heartbeat branch was untested. A queued thread is
+  // waiting to start, so the absence of a heartbeat is NOT a watchdog
+  // failure (only a running thread with no heartbeat is stale).
+  it("does not flag a queued thread with no heartbeat", () => {
+    expect(isStaleThread({ ...base, status: "queued" }, Date.now())).toBe(false);
+  });
   it("flags a heartbeat older than the stale window", () => {
     const now = Date.now();
     const thread = { ...base, heartbeat_at: new Date(now - WATCHDOG_STALE_MS - 1000).toISOString() };
@@ -73,8 +79,16 @@ describe("criticalThreadIds", () => {
     expect([...ids]).toEqual(["b"]);
   });
   it("ignores terminal threads even when they have more steps", () => {
-    const ids = criticalThreadIds([thread("a", 3), thread("b", 99, "completed")]);
-    expect(ids.size).toBe(0); // only one active thread left → just "the thread"
+    // M-88: was vacuous — only one active thread, so active.length<2
+    // returned empty regardless of whether the terminal thread was
+    // filtered. Now two active + a terminal with the most steps: the
+    // terminal must be excluded and the busiest ACTIVE thread picked.
+    const ids = criticalThreadIds([
+      thread("a", 3),
+      thread("b", 5),
+      thread("c", 99, "completed"),
+    ]);
+    expect([...ids]).toEqual(["b"]); // c (terminal, 99 steps) is ignored
   });
   it("empty for a single thread", () => {
     expect(criticalThreadIds([thread("a", 5)]).size).toBe(0);

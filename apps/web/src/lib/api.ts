@@ -19,8 +19,13 @@ export function setUnauthorizedHandler(fn: UnauthorizedHandler) {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    // M-87: spread init BEFORE headers so a caller's init.headers doesn't
+    // clobber the merged Content-Type. The old order (...init last) let
+    // init.headers overwrite the whole headers object, dropping the JSON
+    // default. Now headers is set last and merges the caller's headers on
+    // top of the Content-Type default (caller can still override CT).
     ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (res.status === 401) {
     onUnauthorized?.();

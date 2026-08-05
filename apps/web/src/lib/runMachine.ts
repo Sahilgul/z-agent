@@ -88,7 +88,11 @@ export function staleThreads(
  *  are never on it. */
 export function criticalThreadIds(threads: Thread[]): Set<string> {
   const active = threads.filter(
-    (l) => l.status === "running" || l.status === "queued" || l.status === "idle",
+    // M-91: match isStaleThread's notion of active (running + queued only).
+    // `idle` is parked, not doing work — counting it as active for the
+    // critical path disagreed with the watchdog's active set and could
+    // pin the critical-path badge on an idle thread.
+    (l) => l.status === "running" || l.status === "queued",
   );
   if (active.length < 2) return new Set(); // a single thread is just "the thread"
   const head = [...active].sort(

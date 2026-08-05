@@ -43,7 +43,7 @@ export function TeamScreen() {
   const [error, setError] = useState("");
   const [denied, setDenied] = useState(false);
 
-  const { data } = useQuery({
+  const { data, error: queryError } = useQuery({
     queryKey: qk.team,
     queryFn: async () => {
       const [users, stats] = await Promise.all([
@@ -55,14 +55,18 @@ export function TeamScreen() {
     retry: false,
   });
 
+  // M-86: detect the admin-gate 403 from the query's OWN error. The old
+  // code did a redundant second fetch in a useEffect (double-hit
+  // /team/users on mount) and ignored the useQuery error entirely — so a
+  // 403 on /team/stats alone would never set `denied`. Now a 403 on either
+  // admin-gated endpoint renders the 403 as text, not a crash.
   useEffect(() => {
-    // The route is admin-gated; render the 403 as text, not a crash.
-    void api
-      .get<TeamUser[]>("/team/users")
-      .catch((e) => {
-        if (e instanceof Error && /403|forbidden|admin/i.test(e.message)) setDenied(true);
-      });
-  }, []);
+    if (queryError instanceof Error && /403|forbidden|admin/i.test(queryError.message)) {
+      setDenied(true);
+    } else {
+      setDenied(false);
+    }
+  }, [queryError]);
 
   const users = data?.users ?? [];
   const stats = data?.stats ?? null;
