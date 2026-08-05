@@ -50,7 +50,7 @@ async def hydrate_title(request: Request, work_item_id: int | None = None, task:
 @router.post("/prewarm")
 async def prewarm(body: PrewarmBody, request: Request, user: User = Depends(current_user)):
     """Record desired prewarms (stub, WU5). The live pool lands with the VM move —
-    semantics are defined in orchestrator/lane_manager.py (see /prewarm-status)."""
+    semantics are defined in orchestrator/thread_manager.py (see /prewarm-status)."""
     pool = getattr(request.app.state, "prewarm_pool", None) or hydration_service.PrewarmPool()
     return await pool.prewarm(body.repos)
 
@@ -59,5 +59,5 @@ async def prewarm(body: PrewarmBody, request: Request, user: User = Depends(curr
 def prewarm_status(_user: User = Depends(current_user)):
     """Pool truth (plan §2): enabled=false until the live pool lands. The UI must
     render warmth from THIS, never from the record-intent endpoint above."""
-    from app.orchestrator.lane_manager import prewarm_status as _status
+    from app.orchestrator.thread_manager import prewarm_status as _status
     return _status()

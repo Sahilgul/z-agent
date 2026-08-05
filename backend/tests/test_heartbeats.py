@@ -3,8 +3,8 @@
 The worker heartbeats every 15s with its live status, but the running->idle
 transition beat is unscheduled and lands right after a periodic beat — so it
 is the beat most likely to be dropped by the 10s write throttle. Dropping it
-strands the lane row at "running" forever, which is why the watchdog nags a
-finished lane. A status CHANGE must always be written.
+strands the thread row at "running" forever, which is why the watchdog nags a
+finished thread. A status CHANGE must always be written.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.services import heartbeats
 
@@ -49,8 +49,8 @@ async def _persist_with_clock(monkeypatch, ticks):
 async def test_status_change_bypasses_throttle(session, make_user, monkeypatch):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, thread])
     session.commit()
 
     h = await _persist_with_clock(monkeypatch, [0.0, 1.0])  # 1s apart, inside 10s window
@@ -58,38 +58,38 @@ async def test_status_change_bypasses_throttle(session, make_user, monkeypatch):
     # First beat: running. Throttle window starts now.
     h._persist("l1", "running")
     session.expire_all()
-    assert session.get(Lane, "l1").status == "running"
+    assert session.get(Thread, "l1").status == "running"
 
     # Second beat 1s later (inside the 10s window) but with a NEW status.
-    # Without the bypass this would be dropped and the lane would stay "running"
-    # forever — the watchdog-nags-finished-lane bug.
+    # Without the bypass this would be dropped and the thread would stay "running"
+    # forever — the watchdog-nags-finished-thread bug.
     h._persist("l1", "idle")
     session.expire_all()
-    assert session.get(Lane, "l1").status == "idle"
+    assert session.get(Thread, "l1").status == "idle"
 
 
 @pytest.mark.asyncio
 async def test_same_status_inside_window_is_throttled(session, make_user, monkeypatch):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(
+    thread = Thread(
         id="l1", run_id="r1", persona="researcher", status="running", next_seq=0,
         heartbeat_at=None,
     )
-    session.add_all([run, lane])
+    session.add_all([run, thread])
     session.commit()
 
     h = await _persist_with_clock(monkeypatch, [0.0, 1.0])
 
     h._persist("l1", "running")
     session.expire_all()
-    first_hb = session.get(Lane, "l1").heartbeat_at
+    first_hb = session.get(Thread, "l1").heartbeat_at
     assert first_hb is not None
 
     # Same status, 1s later — must be throttled to avoid a write per beat.
     h._persist("l1", "running")
     session.expire_all()
-    assert session.get(Lane, "l1").heartbeat_at == first_hb
+    assert session.get(Thread, "l1").heartbeat_at == first_hb
 
 
 @pytest.mark.asyncio
@@ -99,8 +99,8 @@ async def test_status_none_does_not_update_last_status(session, make_user, monke
     wrongly bypass the throttle."""
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, thread])
     session.commit()
 
     h = await _persist_with_clock(monkeypatch, [0.0, 1.0, 2.0])
@@ -115,5 +115,5 @@ async def test_status_none_does_not_update_last_status(session, make_user, monke
     h._persist("l1", "running")
     session.expire_all()
     # heartbeat_at should reflect only the first write, not the third call.
-    first_hb = session.get(Lane, "l1").heartbeat_at
-    assert session.get(Lane, "l1").heartbeat_at == first_hb
+    first_hb = session.get(Thread, "l1").heartbeat_at
+    assert session.get(Thread, "l1").heartbeat_at == first_hb

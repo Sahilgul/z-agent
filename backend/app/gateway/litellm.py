@@ -5,7 +5,7 @@ it as the worker's gateway credential at container start, and reads spend back a
 run end (eventually consistent — reconcile with a short poll + grace window).
 Per-key budgets give CORRECTLY PRICED enforcement at the gateway; SDK
 max_budget_usd is demoted to last-resort backstop. gateway-db loss = keys dead,
-lanes fail safe + resumable, keys re-minted on recovery (disposable by design).
+threads fail safe + resumable, keys re-minted on recovery (disposable by design).
 
 CLI (day-1 spike needs exactly one key):
   python -m app.gateway.litellm mint --alias spike --budget 5.00
@@ -63,7 +63,7 @@ class GatewayClient:
 
     async def read_spend_reconciled(self, key: str, grace_seconds: float = 5.0, polls: int = 3) -> float:
         """Gateway metering is eventually consistent — poll with a grace window
-        before declaring a lane's final cost (plan §4)."""
+        before declaring a thread's final cost (plan §4)."""
         await asyncio.sleep(grace_seconds)
         spend = 0.0
         for _ in range(polls):
@@ -82,7 +82,7 @@ class GatewayClient:
 
 async def retry_with_backoff(fn, attempts: int = 5, base_delay: float = 1.0):
     """Worker-side gateway failure story (plan §10): bounded backoff on
-    429/5xx/timeout, then the lane FAILS SAFE (stage=failed, resumable)."""
+    429/5xx/timeout, then the thread FAILS SAFE (stage=failed, resumable)."""
     for attempt in range(attempts):
         try:
             return await fn()

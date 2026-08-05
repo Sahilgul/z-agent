@@ -1,12 +1,12 @@
 """Width-swarm blueprint tests (plan §4/Phase 3): hydrate/decompose/fanout/
-collect/synthesize/complete — all lanes read-only, Lead decomposes, collect
+collect/synthesize/complete — all threads read-only, Lead decomposes, collect
 reads the event stream."""
 import json
 
 import pytest
 
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Run
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.asyncio
 
 
 class _FakeLaneMgr:
-    """Spawns DB-backed lanes at a terminal status so _await_lane returns
+    """Spawns DB-backed threads at a terminal status so _await_thread returns
     immediately; records spawn/spawn_many calls for assertions."""
 
     def __init__(self, session, decompose_reply: str | None = None,
@@ -31,47 +31,47 @@ class _FakeLaneMgr:
         self.spawn_many_calls: list[dict] = {}
         self.settled: list[str] = []
 
-    def _lane(self, run_id, persona, status="idle"):
-        lane = Lane(id=f"lane-{persona}-{len(self.spawned)}", run_id=run_id,
+    def _thread(self, run_id, persona, status="idle"):
+        thread = Thread(id=f"thread-{persona}-{len(self.spawned)}", run_id=run_id,
                     persona=persona, status=status)
-        self.session.add(lane)
+        self.session.add(thread)
         self.session.commit()
-        return lane
+        return thread
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_lane_id=None):
+                    resume_session=False, resume_from_thread_id=None):
         self.spawned.append({"persona": persona, "prompt": prompt,
                              "persona_prompt": persona_prompt})
-        lane = self._lane(run.id, persona)
+        thread = self._thread(run.id, persona)
         if len(self.spawned) == 1 and self.decompose_reply is not None:
             reply = self.decompose_reply
         else:
             reply = self.synthesis_reply
         if reply is not None:
-            self.session.add(Event(run_id=run.id, lane_id=lane.id, seq=0,
+            self.session.add(Event(run_id=run.id, thread_id=thread.id, seq=0,
                                    type="message", title="final",
                                    payload={"text": reply}))
             self.session.commit()
-        return lane
+        return thread
 
     async def spawn_many(self, run, specs, context_repos, queue_poll_seconds=5.0):
         self.spawn_many_calls["specs"] = specs
-        lanes = []
+        threads = []
         for i, spec in enumerate(specs):
-            lane = Lane(id=f"explorer-{i}", run_id=run.id, persona=spec["persona"],
+            thread = Thread(id=f"explorer-{i}", run_id=run.id, persona=spec["persona"],
                         status="idle")
-            self.session.add(lane)
+            self.session.add(thread)
             self.session.commit()
-            self.session.add(Event(run_id=run.id, lane_id=lane.id, seq=0,
+            self.session.add(Event(run_id=run.id, thread_id=thread.id, seq=0,
                                    type="notebook", title="nb",
                                    payload={"findings": [f"finding {i}"],
                                             "confidence": "high"}))
             self.session.commit()
-            lanes.append(lane)
-        return lanes
+            threads.append(thread)
+        return threads
 
-    async def settle_cost(self, lane_id):
-        self.settled.append(lane_id)
+    async def settle_cost(self, thread_id):
+        self.settled.append(thread_id)
         return 0.0
 
 
@@ -139,13 +139,13 @@ async def test_hydrate_parses_spawn_count_from_task(session, make_user):
 
 async def test_hydrate_clamps_to_global_cap_and_says_so(session, make_user, monkeypatch):
     from app.orchestrator.blueprints import swarm as swarm_mod
-    monkeypatch.setattr(swarm_mod.get_settings(), "global_lane_cap", 4)
+    monkeypatch.setattr(swarm_mod.get_settings(), "global_thread_cap", 4)
     run = _seed(session, make_user)
     relay_msgs = []
 
     class _Relay:
-        async def publish_lane_status(self, run_id, lane_id, status):
-            relay_msgs.append((lane_id, status))
+        async def publish_thread_status(self, run_id, thread_id, status):
+            relay_msgs.append((thread_id, status))
 
     ctx = _ctx(run, services={"relay": _Relay()},
                artifacts={"task": "t", "fanout": 10})
@@ -178,7 +178,7 @@ async def test_hydrate_fleet_wide_when_no_target(session, make_user):
 async def test_decompose_parses_lead_output(session, make_user):
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session, decompose_reply=f"```json\n{DECOMPOSE_JSON}\n```")
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"task": "map billing", "requested_fanout": 2,
                           "repo_row": session.query(Repo).one(),
                           "context_repos": [], "mode_persona": "lead"})
@@ -192,7 +192,7 @@ async def test_decompose_parses_lead_output(session, make_user):
 async def test_decompose_unparsable_degrades_to_single_slice(session, make_user):
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session, decompose_reply="I cannot decompose this, sorry.")
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"task": "the whole task", "requested_fanout": 3,
                           "repo_row": session.query(Repo).one(),
                           "context_repos": [], "mode_persona": "lead"})
@@ -204,12 +204,12 @@ async def test_decompose_unparsable_degrades_to_single_slice(session, make_user)
 
 
 # --------------------------------------------------------------- fanout + collect
-async def test_fanout_spawns_one_read_only_lane_per_slice(session, make_user):
+async def test_fanout_spawns_one_read_only_thread_per_slice(session, make_user):
     from zagent_contracts import Decomposition
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session)
     decomp = Decomposition.model_validate_json(DECOMPOSE_JSON)
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"decomposition": decomp, "context_repos": [],
                           "mode_persona": "lead"})
     await SwarmBlueprint()._fanout(ctx)
@@ -217,20 +217,20 @@ async def test_fanout_spawns_one_read_only_lane_per_slice(session, make_user):
     assert [s["persona"] for s in specs] == ["explorer", "explorer"]
     assert specs[0]["prompt"] == "trace the webhook ingress"
     assert "READ-ONLY" in specs[0]["persona_prompt"]
-    assert ctx.artifacts["explorer_lane_ids"] == ["explorer-0", "explorer-1"]
+    assert ctx.artifacts["explorer_thread_ids"] == ["explorer-0", "explorer-1"]
     assert ctx.artifacts["fanout_shortfall"] == 0
 
 
 async def test_collect_gathers_notebooks_from_events(session, make_user):
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session)
-    # two idle lanes with notebook events, as spawn_many would leave them
+    # two idle threads with notebook events, as spawn_many would leave them
     for i in range(2):
-        session.add(Lane(id=f"explorer-{i}", run_id=run.id, persona="explorer", status="idle"))
-        session.add(Event(run_id=run.id, lane_id=f"explorer-{i}", seq=0, type="notebook",
+        session.add(Thread(id=f"explorer-{i}", run_id=run.id, persona="explorer", status="idle"))
+        session.add(Event(run_id=run.id, thread_id=f"explorer-{i}", seq=0, type="notebook",
                           title="nb", payload={"findings": [f"f{i}"]}))
     session.commit()
-    ctx = _ctx(run, artifacts={"explorer_lane_ids": ["explorer-0", "explorer-1"]})
+    ctx = _ctx(run, artifacts={"explorer_thread_ids": ["explorer-0", "explorer-1"]})
     await SwarmBlueprint()._collect(ctx)
     notebooks = ctx.artifacts["notebooks"]
     assert notebooks[0]["notebook"]["findings"] == ["f0"]
@@ -244,8 +244,8 @@ async def test_synthesize_sets_auto_summary_with_counter_proposal(session, make_
     lm = _FakeLaneMgr(session, synthesis_reply="Billing flows through the engine nightly.")
     decomp = Decomposition(slices=[{"title": "a", "prompt": "p"}],
                            counter_proposal=1, rationale="two would duplicate")
-    ctx = _ctx(run, services={"lane_manager": lm},
-               artifacts={"task": "t", "notebooks": [{"lane_id": "x", "notebook": {"findings": ["f"]}}],
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"task": "t", "notebooks": [{"thread_id": "x", "notebook": {"findings": ["f"]}}],
                           "context_repos": [], "mode_persona": "lead",
                           "decomposition": decomp, "fanout_shortfall": 0})
     await SwarmBlueprint()._synthesize(ctx)
@@ -259,23 +259,23 @@ async def test_synthesize_empty_swarm_does_not_spawn(session, make_user):
     from zagent_contracts import Decomposition
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session)
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"task": "t", "notebooks": [], "context_repos": [],
                           "mode_persona": "lead",
                           "decomposition": Decomposition(slices=[]), "fanout_shortfall": 2})
     await SwarmBlueprint()._synthesize(ctx)
     assert lm.spawned == []
     session.expire_all()
-    assert "no lanes" in session.get(Run, "r1").auto_summary
+    assert "no threads" in session.get(Run, "r1").auto_summary
 
 
 # --------------------------------------------------------------- complete
 async def test_complete_all_failed_marks_run_failed(session, make_user):
     run = _seed(session, make_user)
-    session.add(Lane(id="e0", run_id=run.id, persona="explorer", status="failed"))
+    session.add(Thread(id="e0", run_id=run.id, persona="explorer", status="failed"))
     session.commit()
-    ctx = _ctx(run, services={"lane_manager": _FakeLaneMgr(session)},
-               artifacts={"explorer_lane_ids": ["e0"]})
+    ctx = _ctx(run, services={"thread_manager": _FakeLaneMgr(session)},
+               artifacts={"explorer_thread_ids": ["e0"]})
     await SwarmBlueprint()._complete(ctx)
     session.expire_all()
     assert session.get(Run, "r1").stage == "failed"
@@ -283,17 +283,17 @@ async def test_complete_all_failed_marks_run_failed(session, make_user):
 
 async def test_complete_writes_trajectories_and_settles(session, make_user):
     run = _seed(session, make_user)
-    session.add_all([Lane(id="e0", run_id=run.id, persona="explorer", status="idle"),
-                     Lane(id="e1", run_id=run.id, persona="explorer", status="failed")])
+    session.add_all([Thread(id="e0", run_id=run.id, persona="explorer", status="idle"),
+                     Thread(id="e1", run_id=run.id, persona="explorer", status="failed")])
     session.commit()
     lm = _FakeLaneMgr(session)
-    ctx = _ctx(run, services={"lane_manager": lm},
-               artifacts={"explorer_lane_ids": ["e0", "e1"]})
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"explorer_thread_ids": ["e0", "e1"]})
     await SwarmBlueprint()._complete(ctx)
     session.expire_all()
     assert session.query(TrajectorySummary).filter_by(run_id="r1").count() == 2
     assert sorted(lm.settled) == ["e0", "e1"]
-    assert "1 explorer lane(s) failed" in session.get(Run, "r1").auto_summary
+    assert "1 explorer thread(s) failed" in session.get(Run, "r1").auto_summary
 
 
 # --------------------------------------------------------------- full chain
@@ -302,11 +302,11 @@ async def test_execute_full_blueprint(session, make_user):
     lm = _FakeLaneMgr(session,
                       decompose_reply=f"```json\n{DECOMPOSE_JSON}\n```",
                       synthesis_reply="The billing flow has two legs.")
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"task": "map billing"})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"task": "map billing"})
     await SwarmBlueprint().execute(ctx)
     session.expire_all()
     done = session.get(Run, "r1")
     assert done.stage == "completed"
     assert "two legs" in done.auto_summary
-    # Lead decompose + Lead synthesize + 2 explorers = 4 lanes
-    assert session.query(Lane).filter_by(run_id="r1").count() == 4
+    # Lead decompose + Lead synthesize + 2 explorers = 4 threads
+    assert session.query(Thread).filter_by(run_id="r1").count() == 4

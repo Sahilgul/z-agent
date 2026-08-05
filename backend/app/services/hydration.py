@@ -7,7 +7,7 @@ Three concerns, all pure code (no LLM):
     planner knows which services a change touches before it drafts.
   * hydrate_title — resolve a run title from an ADO work item when the user taps
     a ticket (falls back to the typed task).
-  * PrewarmPool — a stub that records desired prewarms (pre-clone repos for lanes).
+  * PrewarmPool — a stub that records desired prewarms (pre-clone repos for threads).
     The real pool stamps clones on a warmed worker; the stub records intent so the
     API surface is testable without Docker.
 """

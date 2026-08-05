@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from zagent_contracts import RunStage
 
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Plan, Run
 from app.orchestrator import run_manager
@@ -21,11 +21,11 @@ class _FakeIngest:
 class _FakeRelay:
     def __init__(self):
         self.stages = []
-        self.lanes = []
+        self.threads = []
     async def publish_run_stage(self, run_id, stage, actions):
         self.stages.append((run_id, stage, actions))
-    async def publish_lane_status(self, run_id, lane_id, status):
-        self.lanes.append((run_id, lane_id, status))
+    async def publish_thread_status(self, run_id, thread_id, status):
+        self.threads.append((run_id, thread_id, status))
 
 
 class _FakeControl:
@@ -33,9 +33,9 @@ class _FakeControl:
         self.interrupted = []
         self.killed = []
         self.nudged = []
-    async def interrupt(self, lane_id): self.interrupted.append(lane_id)
-    async def kill(self, lane_id): self.killed.append(lane_id)
-    async def nudge(self, lane_id, text): self.nudged.append((lane_id, text))
+    async def interrupt(self, thread_id): self.interrupted.append(thread_id)
+    async def kill(self, thread_id): self.killed.append(thread_id)
+    async def nudge(self, thread_id, text): self.nudged.append((thread_id, text))
 
 
 class _FakeLaneManager:
@@ -105,8 +105,8 @@ async def test_stop_run_interrupts_and_cancels_task(session, make_user):
     _seed_mode(session)
     rm, ingest, relay, control = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread])
     session.commit()
     rm._tasks["r1"] = asyncio.create_task(asyncio.sleep(100))
     await rm.stop_run("r1")
@@ -114,7 +114,7 @@ async def test_stop_run_interrupts_and_cancels_task(session, make_user):
     session.expire_all()
     assert session.get(Run, "r1").stage == RunStage.INTERRUPTED.value
     assert "l1" in control.interrupted
-    assert relay.lanes[-1] == ("r1", "l1", "stopped")
+    assert relay.threads[-1] == ("r1", "l1", "stopped")
     assert relay.stages[-1][1] == RunStage.INTERRUPTED.value
     assert rm._tasks["r1"].cancelled() or rm._tasks["r1"].done()
 
@@ -123,8 +123,8 @@ async def test_abandon_run_kills_and_shreds(session, make_user, monkeypatch):
     u = make_user("a")
     rm, ingest, relay, control = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", container_id="c1")
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", container_id="c1")
+    session.add_all([run, thread])
     session.commit()
     stopped = []
     shredded = []
@@ -141,26 +141,26 @@ async def test_abandon_run_kills_and_shreds(session, make_user, monkeypatch):
     assert relay.stages[-1][1] == RunStage.ABANDONED.value
 
 
-async def test_nudge_lane_sets_running(session, make_user):
+async def test_nudge_thread_sets_running(session, make_user):
     u = make_user("a")
     rm, _, relay, control = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="idle")
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="idle")
+    session.add_all([run, thread])
     session.commit()
-    await rm.nudge_lane("r1", "l1", "hurry up")
+    await rm.nudge_thread("r1", "l1", "hurry up")
     session.expire_all()
-    assert session.get(Lane, "l1").status == "running"
+    assert session.get(Thread, "l1").status == "running"
     assert control.nudged == [("l1", "hurry up")]
-    assert relay.lanes[-1] == ("r1", "l1", "running")
+    assert relay.threads[-1] == ("r1", "l1", "running")
 
 
-async def test_nudge_lane_missing_lane_is_noop(session, make_user):
+async def test_nudge_thread_missing_thread_is_noop(session, make_user):
     u = make_user("a")
     rm, _, _, control = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
     session.add(run); session.commit()
-    await rm.nudge_lane("r1", "ghost", "x")
+    await rm.nudge_thread("r1", "ghost", "x")
     assert control.nudged == [("ghost", "x")]
 
 
@@ -344,44 +344,44 @@ async def test_merge_pr_handoff_keeps_run_pr_ready(session, make_user, monkeypat
     assert stayed.finished_at is None
 
 
-# --------------------------------------------------------------- lane controls (§4)
-async def test_stop_lane_interrupts_and_marks_stopped(session, make_user):
+# --------------------------------------------------------------- thread controls (§4)
+async def test_stop_thread_interrupts_and_marks_stopped(session, make_user):
     u = make_user("a")
     rm, _, relay, control = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="explorer", status="running")
-    session.add_all([run, lane]); session.commit()
-    await rm.stop_lane("r1", "l1")
+    thread = Thread(id="l1", run_id="r1", persona="explorer", status="running")
+    session.add_all([run, thread]); session.commit()
+    await rm.stop_thread("r1", "l1")
     session.expire_all()
-    stopped = session.get(Lane, "l1")
+    stopped = session.get(Thread, "l1")
     assert stopped.status == "stopped"
     assert stopped.finished_at is not None
     assert control.interrupted == ["l1"]
-    assert relay.lanes[-1] == ("r1", "l1", "stopped")
+    assert relay.threads[-1] == ("r1", "l1", "stopped")
 
 
 async def test_pin_finding_records_event(session, make_user):
     u = make_user("a")
     rm, _, relay, _ = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="explorer", status="idle", next_seq=3)
-    session.add_all([run, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="explorer", status="idle", next_seq=3)
+    session.add_all([run, thread]); session.commit()
     await rm.pin_finding("r1", "l1", "dedupe key is normalize()")
     session.expire_all()
     from app.db.models.event import Event
     ev = session.query(Event).filter_by(run_id="r1", type="pin").one()
-    assert ev.lane_id == "l1"
+    assert ev.thread_id == "l1"
     assert ev.payload["note"] == "dedupe key is normalize()"
-    assert relay.lanes[-1] == ("r1", "l1", "pinned")
+    assert relay.threads[-1] == ("r1", "l1", "pinned")
 
 
 async def test_pin_finding_wrong_run_raises(session, make_user):
     u = make_user("a")
     rm, _, _, _ = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="other-run", persona="explorer", status="idle")
-    session.add_all([run, lane]); session.commit()
-    with pytest.raises(ValueError, match="lane not found"):
+    thread = Thread(id="l1", run_id="other-run", persona="explorer", status="idle")
+    session.add_all([run, thread]); session.commit()
+    with pytest.raises(ValueError, match="thread not found"):
         await rm.pin_finding("r1", "l1")
 
 
@@ -389,67 +389,67 @@ async def test_kill_replace_respawns_with_original_context(session, make_user, m
     u = make_user("a")
     rm, _, relay, control = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="explorer", status="running",
+    thread = Thread(id="l1", run_id="r1", persona="explorer", status="running",
                 spawn_context={"prompt": "trace the webhook leg", "persona_prompt": "be an explorer"})
-    session.add_all([run, lane]); session.commit()
+    session.add_all([run, thread]); session.commit()
 
     captured = {}
 
     class _Replacement:
-        id = "lane-new"
+        id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_lane_id=None):
+                         resume_session=False, resume_from_thread_id=None):
         captured.update({"persona": persona, "prompt": prompt,
                          "persona_prompt": persona_prompt,
-                         "resume_from_lane_id": resume_from_lane_id})
+                         "resume_from_thread_id": resume_from_thread_id})
         return _Replacement()
-    rm.lane_manager.spawn = fake_spawn
+    rm.thread_manager.spawn = fake_spawn
 
-    replacement = await rm.kill_replace_lane("r1", "l1")
-    assert replacement.id == "lane-new"
+    replacement = await rm.kill_replace_thread("r1", "l1")
+    assert replacement.id == "thread-new"
     assert captured["prompt"] == "trace the webhook leg"
     assert captured["persona_prompt"] == "be an explorer"
     session.expire_all()
-    assert session.get(Lane, "l1").status == "replaced"
-    assert relay.lanes[-1] == ("r1", "lane-new", "running")
+    assert session.get(Thread, "l1").status == "replaced"
+    assert relay.threads[-1] == ("r1", "thread-new", "running")
 
 
-async def test_kill_replace_passes_resume_from_lane_id(session, make_user, monkeypatch):
-    """kill_replace must mount the old lane's session volume and inherit its
+async def test_kill_replace_passes_resume_from_thread_id(session, make_user, monkeypatch):
+    """kill_replace must mount the old thread's session volume and inherit its
     session_id so the replacement actually resumes — the docstring's claim
-    that was not true before resume_from_lane_id existed."""
+    that was not true before resume_from_thread_id existed."""
     u = make_user("a")
     rm, _, _, _ = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="r1", persona="explorer", status="running",
+    thread = Thread(id="l1", run_id="r1", persona="explorer", status="running",
                 session_id="sess-old-123",
                 spawn_context={"prompt": "trace the webhook leg", "persona_prompt": "be an explorer"})
-    session.add_all([run, lane]); session.commit()
+    session.add_all([run, thread]); session.commit()
 
     captured = {}
 
     class _Replacement:
-        id = "lane-new"
+        id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_lane_id=None):
-        captured["resume_from_lane_id"] = resume_from_lane_id
+                         resume_session=False, resume_from_thread_id=None):
+        captured["resume_from_thread_id"] = resume_from_thread_id
         return _Replacement()
-    rm.lane_manager.spawn = fake_spawn
+    rm.thread_manager.spawn = fake_spawn
 
-    await rm.kill_replace_lane("r1", "l1")
-    assert captured["resume_from_lane_id"] == "l1"
+    await rm.kill_replace_thread("r1", "l1")
+    assert captured["resume_from_thread_id"] == "l1"
 
 
 async def test_kill_replace_wrong_run_raises(session, make_user):
     u = make_user("a")
     rm, _, _, _ = _make_manager()
     run = Run(id="r1", created_by=u.id, mode="agent-rnd", stage=RunStage.INVESTIGATING.value)
-    lane = Lane(id="l1", run_id="other-run", persona="explorer", status="running")
-    session.add_all([run, lane]); session.commit()
-    with pytest.raises(ValueError, match="lane not found"):
-        await rm.kill_replace_lane("r1", "l1")
+    thread = Thread(id="l1", run_id="other-run", persona="explorer", status="running")
+    session.add_all([run, thread]); session.commit()
+    with pytest.raises(ValueError, match="thread not found"):
+        await rm.kill_replace_thread("r1", "l1")
 
 
 # --------------------------------------------------------------- start_plan (debug -> plan promotion)

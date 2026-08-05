@@ -37,8 +37,8 @@ class ActionKind(str, Enum):
     ALLOW_ONCE = "allow_once"
     ALWAYS_ALLOW = "always_allow"
     DENY_TOOL = "deny_tool"
-    # lane control
-    STOP_LANE = "stop_lane"
+    # thread control
+    STOP_THREAD = "stop_thread"
     NUDGE = "nudge"
     LET_IT_RUN = "let_it_run"
     PIN_FINDING = "pin_finding"
@@ -94,7 +94,7 @@ class UserIntent(BaseModel):
     run_id: str
     intent: ActionKind
     source: IntentSource = IntentSource.BUTTON
-    lane_id: str | None = None
+    thread_id: str | None = None
     text: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     confirmed: bool = False

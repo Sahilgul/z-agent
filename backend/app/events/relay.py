@@ -1,5 +1,5 @@
 """Redis -> WebSocket relay (plan §1b ordering rule): StepEvents carry monotonic
-per-lane seq; the relay delivers and the UI renders STRICTLY by seq. Transient
+per-thread seq; the relay delivers and the UI renders STRICTLY by seq. Transient
 deltas carry no seq and never enter history — forwarded on a separate WS message
 type so the UI can render the growing in-progress step then replace it.
 
@@ -41,8 +41,8 @@ class Relay:
     async def publish_step(self, run_id: str, event: StepEvent) -> None:
         await self._fanout(run_id, {"type": "step", "event": event.model_dump(mode="json")})
 
-    async def publish_lane_status(self, run_id: str, lane_id: str, status: str) -> None:
-        await self._fanout(run_id, {"type": "lane_status", "lane_id": lane_id, "status": status})
+    async def publish_thread_status(self, run_id: str, thread_id: str, status: str) -> None:
+        await self._fanout(run_id, {"type": "thread_status", "thread_id": thread_id, "status": status})
 
     async def publish_run_stage(self, run_id: str, stage: str, available_actions: list[str]) -> None:
         await self._fanout(run_id, {

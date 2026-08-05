@@ -50,7 +50,7 @@ class Run(Base):
 
     # Explicit ORM relationships REQUIRED for UoW insert ordering — table-level
     # FKs alone do not order batched parent+child inserts (verified empirically).
-    lanes: Mapped[list["Lane"]] = relationship(back_populates="run")
+    threads: Mapped[list["Thread"]] = relationship(back_populates="run")
     events: Mapped[list["Event"]] = relationship(back_populates="run")
 
 

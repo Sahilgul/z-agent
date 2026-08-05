@@ -4,7 +4,7 @@ import pytest
 from zagent_contracts import RunStage
 
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
@@ -13,18 +13,18 @@ from app.orchestrator.blueprints.development import DevelopmentBlueprint
 
 
 class _FakeLaneManager:
-    def __init__(self, lane, evaluator_lane=None):
-        self._lane = lane
-        self._evaluator_lane = evaluator_lane or lane
+    def __init__(self, thread, evaluator_thread=None):
+        self._thread = thread
+        self._evaluator_thread = evaluator_thread or thread
         self.spawned = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_lane_id=None):
+                    resume_session=False, resume_from_thread_id=None):
         self.spawned.append({
             "persona": persona, "prompt": prompt, "persona_prompt": persona_prompt,
             "writable": writable_repo.name if writable_repo else None,
         })
-        return self._evaluator_lane if persona == "evaluator" else self._lane
+        return self._evaluator_thread if persona == "evaluator" else self._thread
 
 
 def _ctx(run, services=None, artifacts=None):
@@ -125,19 +125,19 @@ async def test_hydrate_raises_when_plan_not_approved(session, make_user):
 
 
 # --------------------------------------------------------------- develop
-async def test_develop_spawns_writable_lane_and_marks_steps_done(session, make_user):
+async def test_develop_spawns_writable_thread_and_marks_steps_done(session, make_user):
     run, repo, plan, u = _seed_approved(session, make_user)
-    lane = Lane(id="l1", run_id="r1", persona="developer", status="completed")
-    session.add(lane); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="developer", status="completed")
+    session.add(thread); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "permissions": {"writable": True, "repos": ["ServerApp"]},
         "workspace": "/ws/r1/ServerApp", "branch": "agent/x",
     })
     await bp._develop(ctx)
-    assert ctx.artifacts["develop_lane_id"] == "l1"
+    assert ctx.artifacts["develop_thread_id"] == "l1"
     assert lm.spawned[0]["persona"] == "developer"
     assert lm.spawned[0]["writable"] == "ServerApp"
     session.expire_all()
@@ -147,11 +147,11 @@ async def test_develop_spawns_writable_lane_and_marks_steps_done(session, make_u
 async def test_develop_read_only_when_mode_denies_writable(session, make_user):
     run, repo, plan, u = _seed_approved(session, make_user,
                                          perms={"writable": False, "repos": []})
-    lane = Lane(id="l1", run_id="r1", persona="developer", status="completed")
-    session.add(lane); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="developer", status="completed")
+    session.add(thread); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "permissions": {"writable": False, "repos": []},
         "workspace": "/ws/r1/ServerApp", "branch": "agent/x",
@@ -163,11 +163,11 @@ async def test_develop_read_only_when_mode_denies_writable(session, make_user):
 async def test_develop_read_only_when_repo_not_in_allowed_list(session, make_user):
     run, repo, plan, u = _seed_approved(session, make_user, repo_name="ClientApp",
                                          perms={"writable": True, "repos": ["ServerApp"]})
-    lane = Lane(id="l1", run_id="r1", persona="developer", status="completed")
-    session.add(lane); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="developer", status="completed")
+    session.add(thread); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "permissions": {"writable": True, "repos": ["ServerApp"]},
         "workspace": "/ws", "branch": "agent/x",
@@ -177,22 +177,22 @@ async def test_develop_read_only_when_repo_not_in_allowed_list(session, make_use
 
 
 # --------------------------------------------------------------- evaluate
-async def test_evaluate_spawns_fresh_readonly_lane(session, make_user):
+async def test_evaluate_spawns_fresh_readonly_thread(session, make_user):
     run, repo, plan, u = _seed_approved(session, make_user)
-    dev_lane = Lane(id="l1", run_id="r1", persona="developer", status="completed")
-    eval_lane = Lane(id="l2", run_id="r1", persona="evaluator", status="completed")
-    session.add_all([dev_lane, eval_lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l2", seq=0, type="message", title="v",
+    dev_thread = Thread(id="l1", run_id="r1", persona="developer", status="completed")
+    eval_thread = Thread(id="l2", run_id="r1", persona="evaluator", status="completed")
+    session.add_all([dev_thread, eval_thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l2", seq=0, type="message", title="v",
                       payload={"text": '{"verdict":"pass","steps":[]}'}))
     session.commit()
-    lm = _FakeLaneManager(dev_lane, evaluator_lane=eval_lane)
+    lm = _FakeLaneManager(dev_thread, evaluator_thread=eval_thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "workspace": "/ws", "branch": "agent/x",
     })
     await bp._evaluate(ctx)
-    assert ctx.artifacts["evaluator_lane_id"] == "l2"
+    assert ctx.artifacts["evaluator_thread_id"] == "l2"
     assert ctx.artifacts["evaluator_notes"].startswith("{")
     assert lm.spawned[0]["persona"] == "evaluator"
     assert lm.spawned[0]["writable"] is None  # fresh + read-only
@@ -200,18 +200,18 @@ async def test_evaluate_spawns_fresh_readonly_lane(session, make_user):
 
 async def test_evaluate_failure_rolls_back_failed_steps(session, make_user):
     run, repo, plan, u = _seed_approved(session, make_user)
-    dev_lane = Lane(id="l1", run_id="r1", persona="developer", status="completed")
-    eval_lane = Lane(id="l2", run_id="r1", persona="evaluator", status="completed")
-    session.add_all([dev_lane, eval_lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l2", seq=0, type="message", title="v",
+    dev_thread = Thread(id="l1", run_id="r1", persona="developer", status="completed")
+    eval_thread = Thread(id="l2", run_id="r1", persona="evaluator", status="completed")
+    session.add_all([dev_thread, eval_thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l2", seq=0, type="message", title="v",
                       payload={"text": json.dumps({
                           "verdict": "fail",
                           "steps": [{"index": 0, "status": "fail", "note": "no"}],
                       })}))
     session.commit()
-    lm = _FakeLaneManager(dev_lane, evaluator_lane=eval_lane)
+    lm = _FakeLaneManager(dev_thread, evaluator_thread=eval_thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "workspace": "/ws", "branch": "agent/x",
     })
@@ -222,12 +222,12 @@ async def test_evaluate_failure_rolls_back_failed_steps(session, make_user):
 
 async def test_evaluate_no_message_records_blank_notes(session, make_user):
     run, repo, plan, u = _seed_approved(session, make_user)
-    dev_lane = Lane(id="l1", run_id="r1", persona="developer", status="completed")
-    eval_lane = Lane(id="l2", run_id="r1", persona="evaluator", status="completed")
-    session.add_all([dev_lane, eval_lane]); session.commit()
-    lm = _FakeLaneManager(dev_lane, evaluator_lane=eval_lane)
+    dev_thread = Thread(id="l1", run_id="r1", persona="developer", status="completed")
+    eval_thread = Thread(id="l2", run_id="r1", persona="evaluator", status="completed")
+    session.add_all([dev_thread, eval_thread]); session.commit()
+    lm = _FakeLaneManager(dev_thread, evaluator_thread=eval_thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "workspace": "/ws", "branch": "agent/x",
     })
@@ -240,8 +240,8 @@ async def test_stamp_runs_tests_persists_event_without_touching_steps(session, m
     """Stamp persists the tamper-proof signal but must NOT roll step statuses —
     the evaluator (which runs after stamp) is the authority on step failure."""
     run, repo, plan, u = _seed_approved(session, make_user)
-    lane = Lane(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
-    session.add(lane); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
+    session.add(thread); session.commit()
     from app.services import evidence as evidence_mod
     monkeypatch.setattr(evidence_mod, "run_test_commands",
                         lambda ws, repo, commands=None: _async({"passed": True, "returncode": 0,
@@ -251,13 +251,13 @@ async def test_stamp_runs_tests_persists_event_without_touching_steps(session, m
     bp = DevelopmentBlueprint()
     ctx = _ctx(run, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
-        "workspace": "/ws", "develop_lane_id": "l1",
+        "workspace": "/ws", "develop_thread_id": "l1",
     })
     await bp._stamp(ctx)
     session.expire_all()
     ev = session.query(Event).filter_by(run_id="r1", type="test_run").one()
     assert ev.payload["passed"] is True
-    assert session.get(Lane, "l1").next_seq == 1
+    assert session.get(Thread, "l1").next_seq == 1
     assert ctx.artifacts["test_signal"]["passed"] is True
     # Step stays pending — stamp never flips statuses.
     assert session.query(PlanStep).filter_by(plan_id=plan.id).one().status == "pending"
@@ -270,8 +270,8 @@ async def test_stamp_preserves_evaluator_failed_steps(session, make_user, monkey
         session, make_user,
         plan_steps=[{"index": 0, "title": "s0", "files": [], "success_criterion": "x",
                      "status": "failed"}])
-    lane = Lane(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
-    session.add(lane); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
+    session.add(thread); session.commit()
     from app.services import evidence as evidence_mod
     monkeypatch.setattr(evidence_mod, "run_test_commands",
                         lambda ws, repo, commands=None: _async({"passed": True, "returncode": 0,
@@ -281,7 +281,7 @@ async def test_stamp_preserves_evaluator_failed_steps(session, make_user, monkey
     bp = DevelopmentBlueprint()
     ctx = _ctx(run, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
-        "workspace": "/ws", "develop_lane_id": "l1",
+        "workspace": "/ws", "develop_thread_id": "l1",
     })
     await bp._stamp(ctx)
     session.expire_all()
@@ -294,8 +294,8 @@ async def test_stamp_persists_screenshot_event_for_ui_files(session, make_user, 
                                                        "files": ["ClientApp/src/page.tsx"],
                                                        "success_criterion": "renders", "status": "pending"}],
                                          perms={"writable": True, "repos": ["ClientApp"]})
-    lane = Lane(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
-    session.add(lane); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
+    session.add(thread); session.commit()
     from app.services import evidence as evidence_mod
     monkeypatch.setattr(evidence_mod, "run_test_commands",
                         lambda ws, repo, commands=None: _async({"passed": True, "returncode": 0,
@@ -305,12 +305,12 @@ async def test_stamp_persists_screenshot_event_for_ui_files(session, make_user, 
     bp = DevelopmentBlueprint()
     ctx = _ctx(run, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
-        "workspace": "/ws", "develop_lane_id": "l1",
+        "workspace": "/ws", "develop_thread_id": "l1",
     })
     await bp._stamp(ctx)
     session.expire_all()
     assert session.query(Event).filter_by(run_id="r1", type="screenshot").one().payload["routes"][0]["route"] == "/"
-    assert session.get(Lane, "l1").next_seq == 2
+    assert session.get(Thread, "l1").next_seq == 2
 
 
 # --------------------------------------------------------------- helpers
@@ -396,10 +396,10 @@ def test_evaluator_prompt_includes_stored_test_signal(session, make_user):
 # --------------------------------------------------------------- full execute
 async def test_execute_full_blueprint_chains_nodes(session, make_user, monkeypatch):
     run, repo, plan, u = _seed_approved(session, make_user)
-    dev_lane = Lane(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
-    eval_lane = Lane(id="l2", run_id="r1", persona="evaluator", status="completed", next_seq=0)
-    session.add_all([dev_lane, eval_lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l2", seq=0, type="message", title="v",
+    dev_thread = Thread(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
+    eval_thread = Thread(id="l2", run_id="r1", persona="evaluator", status="completed", next_seq=0)
+    session.add_all([dev_thread, eval_thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l2", seq=0, type="message", title="v",
                       payload={"text": '{"verdict":"pass","steps":[]}'}))
     session.commit()
     from app.services import evidence as evidence_mod
@@ -408,9 +408,9 @@ async def test_execute_full_blueprint_chains_nodes(session, make_user, monkeypat
                                                                  "stdout": "", "stderr": ""}))
     monkeypatch.setattr(evidence_mod, "stamp_screenshots",
                         lambda run_id, ws, routes: _async([]))
-    lm = _FakeLaneManager(dev_lane, evaluator_lane=eval_lane)
+    lm = _FakeLaneManager(dev_thread, evaluator_thread=eval_thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm})
+    ctx = _ctx(run, services={"thread_manager": lm})
     await bp.execute(ctx)
     session.expire_all()
     assert session.get(Run, "r1").stage == RunStage.VERIFYING.value
@@ -425,10 +425,10 @@ async def test_execute_evaluator_fail_verdict_survives_to_the_end(session, make_
     """Regression (A1): full chain with the evaluator failing step 0 — the final
     persisted step status must be "failed" (previously stamp erased it)."""
     run, repo, plan, u = _seed_approved(session, make_user)
-    dev_lane = Lane(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
-    eval_lane = Lane(id="l2", run_id="r1", persona="evaluator", status="completed", next_seq=0)
-    session.add_all([dev_lane, eval_lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l2", seq=0, type="message", title="v",
+    dev_thread = Thread(id="l1", run_id="r1", persona="developer", status="completed", next_seq=0)
+    eval_thread = Thread(id="l2", run_id="r1", persona="evaluator", status="completed", next_seq=0)
+    session.add_all([dev_thread, eval_thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l2", seq=0, type="message", title="v",
                       payload={"text": json.dumps({
                           "verdict": "fail",
                           "steps": [{"index": 0, "status": "fail", "note": "criterion unmet"}],
@@ -440,9 +440,9 @@ async def test_execute_evaluator_fail_verdict_survives_to_the_end(session, make_
                                                                  "stdout": "", "stderr": ""}))
     monkeypatch.setattr(evidence_mod, "stamp_screenshots",
                         lambda run_id, ws, routes: _async([]))
-    lm = _FakeLaneManager(dev_lane, evaluator_lane=eval_lane)
+    lm = _FakeLaneManager(dev_thread, evaluator_thread=eval_thread)
     bp = DevelopmentBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm})
+    ctx = _ctx(run, services={"thread_manager": lm})
     await bp.execute(ctx)
     session.expire_all()
     assert session.query(PlanStep).filter_by(plan_id=plan.id).one().status == "failed"

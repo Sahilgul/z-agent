@@ -3,6 +3,8 @@ sdk_message_uuid NULLABLE (the edit-and-resend bridge; null = non-message /
 pre-instrumentation — free to add now, migration headache later). Durable with a
 CONFIGURABLE TTL (default 12 months, legal-hold override per run); a maintenance
 job purges expired rows. ~30GB SQLite capacity guardrail pulls Postgres forward.
+
+Renamed thread_id → thread_id (Plan Phase 1 — thread→thread mechanical rename).
 """
 
 from __future__ import annotations
@@ -22,16 +24,16 @@ def utcnow() -> datetime:
 class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
-        sa.Index("ix_events_lane_seq", "lane_id", "seq"),
+        sa.Index("ix_events_thread_seq", "thread_id", "seq"),
         sa.Index("ix_events_run_ts", "run_id", "ts"),
-        # Replay + JSONL transcript fallback: WHERE run_id = ? [AND lane_id = ?]
-        # [AND seq > ?] ORDER BY lane_id, seq — filter and sort from one index.
-        sa.Index("ix_events_run_lane_seq", "run_id", "lane_id", "seq"),
+        # Replay + JSONL transcript fallback: WHERE run_id = ? [AND thread_id = ?]
+        # [AND seq > ?] ORDER BY thread_id, seq — filter and sort from one index.
+        sa.Index("ix_events_run_thread_seq", "run_id", "thread_id", "seq"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"))
-    lane_id: Mapped[str] = mapped_column()
+    thread_id: Mapped[str] = mapped_column()
     seq: Mapped[int] = mapped_column()
     ts: Mapped[datetime] = mapped_column(default=utcnow)
     type: Mapped[str] = mapped_column(sa.String(24))  # StepKind value

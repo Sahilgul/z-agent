@@ -42,7 +42,7 @@ def pending(run_id: str | None = None, user: User = Depends(current_user)):
         # stopped waiting on.
         now = datetime.now(timezone.utc)
         return [{
-            "id": a.id, "run_id": a.run_id, "lane_id": a.lane_id, "kind": a.kind,
+            "id": a.id, "run_id": a.run_id, "thread_id": a.thread_id, "kind": a.kind,
             "payload": a.payload, "created_at": a.created_at.isoformat(),
             "expires_at": a.expires_at.isoformat() if a.expires_at else None,
         } for a in rows if not _expired(a, now)]

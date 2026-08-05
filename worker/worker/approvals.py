@@ -1,6 +1,6 @@
 """can_use_tool -> approval service bridge (plan §4/§6).
 
-The SDK calls this and BLOCKS until the human (or lane policy) resolves. The
+The SDK calls this and BLOCKS until the human (or thread policy) resolves. The
 request is published to the backend on approvals:{run_id}; the decision comes back
 on approval:{approval_id}:decision via BLPOP.
 
@@ -12,7 +12,6 @@ Autonomous where nothing is bridged at all (bypassPermissions).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import uuid
@@ -24,16 +23,20 @@ DENY_ON_TIMEOUT = True  # Supervised/Gated; Autonomous never reaches this bridge
 
 
 class ApprovalBridge:
-    def __init__(self, redis_url: str, run_id: str, lane_id: str, timeout_seconds: int = 900) -> None:
+    def __init__(self, redis_url: str, run_id: str, thread_id: str, timeout_seconds: int = 900) -> None:
         self.redis = redis.from_url(redis_url, decode_responses=True)
         self.run_id = run_id
-        self.lane_id = lane_id
+        self.thread_id = thread_id
         self.timeout_seconds = timeout_seconds
         self.always_allowed: set[str] = set()  # "Always Allow" persists the tool class for the run
 
     async def ask(self, tool_name: str, tool_input: dict, context) -> dict:
         """Signature matches the SDK can_use_tool callback; returns a PermissionResult."""
-        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
+        from claude_agent_sdk import (
+            PermissionResultAllow,
+            PermissionResultDeny,
+            ToolPermissionContext,
+        )
         assert isinstance(context, ToolPermissionContext) or context is not None
 
         if tool_name in AUTO_ALLOW_TOOLS or tool_name in self.always_allowed:
@@ -42,7 +45,7 @@ class ApprovalBridge:
         approval_id = str(uuid.uuid4())
         await self.redis.xadd(f"approvals:{self.run_id}", {
             "approval_id": approval_id,
-            "lane_id": self.lane_id,
+            "thread_id": self.thread_id,
             "kind": "tool",
             "payload": json.dumps({"tool": tool_name, "input": tool_input}),
             "requested_at": str(time.time()),

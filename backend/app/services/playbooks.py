@@ -163,7 +163,7 @@ def playbooks_prompt_for_mode(mode_name: str) -> str:
                 when = doc.trigger or doc.description
                 header = f"--- Playbook: {doc.name}" + (f" (when: {when})" if when else "") + " ---"
                 chunks.append(f"{header}\n{doc.body}")
-            except Exception:  # a malformed row still reaches the lane verbatim
+            except Exception:  # a malformed row still reaches the thread verbatim
                 chunks.append(f"--- Playbook: {row.name} ---\n{row.skill_md}")
         return "\n\n".join(chunks)
     finally:

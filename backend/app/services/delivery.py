@@ -1,6 +1,6 @@
 """Delivery service (plan §9 Phase 2): branch -> push -> PR -> merge ceremony.
 
-Branch naming follows plan §9 (agent/<run8>-<slug>, lane suffix when a lane
+Branch naming follows plan §9 (agent/<run8>-<slug>, thread suffix when a thread
 stamps it) so ADO branch policies scoped to the agent/* namespace (§10) accept
 the push. The evidence package is built BEFORE the PR opens — a PR without a
 complete package never leaves the station. Merge ceremony identity: the
@@ -29,7 +29,7 @@ from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.delivery import PrLink
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, Run
 from app.db.models.trajectory import TrajectorySummary
@@ -43,11 +43,11 @@ class DeliveryError(RuntimeError):
     pass
 
 
-def branch_name_for(run: Run, lane: Lane | None = None) -> str:
+def branch_name_for(run: Run, thread: Thread | None = None) -> str:
     """Plan §9 format agent/<run8>-<slug> — the agent/* namespace is what the
     ADO branch policies (§10) grant write access to; any other prefix fails."""
     slug = BRANCH_RE.sub("-", run.title.lower())[:32].strip("-") or "change"
-    suffix = f"/{lane.id[:8]}" if lane else ""
+    suffix = f"/{thread.id[:8]}" if thread else ""
     return f"agent/{run.id[:8]}-{slug}{suffix}"
 
 
@@ -73,7 +73,7 @@ def build_evidence_package(run_id: str) -> dict:
             .order_by(Plan.created_at.desc(), Plan.id.desc())
             .first()
         )
-        lanes = session.query(Lane).filter_by(run_id=run_id).all()
+        threads = session.query(Thread).filter_by(run_id=run_id).all()
         test_events = (
             session.query(Event)
             .filter(Event.run_id == run_id, Event.type == "test_run")
@@ -96,10 +96,10 @@ def build_evidence_package(run_id: str) -> dict:
                 {"index": s.get("index"), "title": s.get("title"), "status": s.get("status")}
                 for s in steps
             ],
-            "lanes": [
+            "threads": [
                 {"persona": l.persona, "status": l.status, "steps": l.next_seq,
                  "cost_usd": l.cost_usd}
-                for l in lanes
+                for l in threads
             ],
             "test_signals": [
                 {"title": e.title, "ts": e.ts.isoformat(), "payload": e.payload}
@@ -121,8 +121,8 @@ def evidence_complete(package: dict) -> list[str]:
     unfinished = [s for s in package["plan_steps"] if s.get("status") not in ("done", "skipped")]
     if unfinished:
         gaps.append(f"{len(unfinished)} plan step(s) not done")
-    if not any(l["status"] == "completed" for l in package["lanes"]):
-        gaps.append("no lane completed successfully")
+    if not any(l["status"] == "completed" for l in package["threads"]):
+        gaps.append("no thread completed successfully")
     return gaps
 
 
@@ -161,7 +161,7 @@ async def sync_before_push(run_id: str, workspace: str, target_branch: str) -> N
 
 
 async def push_branch(run_id: str, repo: Repo, workspace: str, branch: str) -> None:
-    """Push the lane's stamped clone branch to ADO. FLEET_PAT rides env into the
+    """Push the thread's stamped clone branch to ADO. FLEET_PAT rides env into the
     credential helper — never interpolated into the command line."""
     settings = get_settings()
     await _git(["push", "-u", "origin", branch], cwd=workspace,
@@ -198,7 +198,7 @@ async def open_pr(run_id: str, repo_name: str, workspace: str,
         f"{package['plan_title']}\n\n"
         f"---\nEvidence package (Zagent run {run_id[:8]}):\n"
         f"- plan steps: {len(package['plan_steps'])} (all done/skipped)\n"
-        f"- lanes: {len(package['lanes'])} · cost ${package['total_cost_usd']:.2f}\n"
+        f"- threads: {len(package['threads'])} · cost ${package['total_cost_usd']:.2f}\n"
         f"- test signals: {len(package['test_signals'])}\n"
         f"- evidence sha256: {package['sha256']}\n"
         f"Full package: Zagent run record {run_id[:8]} (PrLink.evidence).\n"
@@ -266,10 +266,10 @@ async def merge_pr(run_id: str, user_id: int,
         handoff = pr_web_url(repo, pr_id)
         session = get_session()
         try:
-            # "control-plane" pseudo-lane: the human's tap is a control-plane
-            # act; no agent lane exists for it and events.lane_id is NOT NULL.
+            # "control-plane" pseudo-thread: the human's tap is a control-plane
+            # act; no agent thread exists for it and events.thread_id is NOT NULL.
             session.add(Event(
-                run_id=run_id, lane_id="control-plane", seq=0,
+                run_id=run_id, thread_id="control-plane", seq=0,
                 type="merge_handoff",
                 title=f"merge handed off to ADO native UI (PR {pr_id})",
                 payload={"pr_id": pr_id, "handoff_url": handoff,

@@ -4,7 +4,7 @@ import pytest
 from zagent_contracts import RunStage
 
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
@@ -13,14 +13,14 @@ from app.orchestrator.blueprints.plan import PlanBlueprint
 
 
 class _FakeLaneManager:
-    def __init__(self, lane):
-        self._lane = lane
+    def __init__(self, thread):
+        self._thread = thread
         self.spawned = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_lane_id=None):
+                    resume_session=False, resume_from_thread_id=None):
         self.spawned.append({"persona": persona, "prompt": prompt, "persona_prompt": persona_prompt})
-        return self._lane
+        return self._thread
 
 
 class _FakeAdo:
@@ -102,29 +102,29 @@ async def test_hydrate_work_item_failure_is_swallowed(session, make_user):
 
 
 # --------------------------------------------------------------- _draft
-async def test_draft_reads_plan_json_from_lane_message(session, make_user):
+async def test_draft_reads_plan_json_from_thread_message(session, make_user):
     u = make_user("alice")
     run = Run(id="r1", created_by=u.id, mode="plan", stage="planning", repo="ServerApp", title="fix dedupe")
     repo = Repo(name="ServerApp", integration_branch="main")
     mode = Mode(name="plan", persona_prompt="You are a planner.", permission_mode="default")
-    lane = Lane(id="l1", run_id="r1", persona="planner", status="completed")
-    session.add_all([run, repo, mode, lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="plan",
+    thread = Thread(id="l1", run_id="r1", persona="planner", status="completed")
+    session.add_all([run, repo, mode, thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="plan",
                       payload={"text": "```json\n" + json.dumps(VALID_PLAN) + "\n```"}))
     session.commit()
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = PlanBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": repo, "task": "fix dedupe", "work_item": None, "blast_radius": []})
     await bp._draft(ctx)
-    assert ctx.artifacts["draft_lane_id"] == "l1"
+    assert ctx.artifacts["draft_thread_id"] == "l1"
     assert "Fix dedupe drift" in ctx.artifacts["draft_text"]
     assert lm.spawned[0]["persona"] == "planner"
     assert "Structured output contract" in lm.spawned[0]["persona_prompt"]
 
 
 async def test_draft_persona_includes_mode_playbooks(session, make_user):
-    """WU6: the planner lane's persona prompt carries the mode's playbooks."""
+    """WU6: the planner thread's persona prompt carries the mode's playbooks."""
     from app.db.models.knowledge import Playbook
     u = make_user("alice")
     run = Run(id="r1", created_by=u.id, mode="plan", stage="planning", repo="ServerApp", title="t")
@@ -133,14 +133,14 @@ async def test_draft_persona_includes_mode_playbooks(session, make_user):
     pb = Playbook(name="plan/fleet-scoping", version=1, skill_md=(
         "---\nname: plan/fleet-scoping\nmode: plan\ndescription: scope it\n---\n\n"
         "# Fleet-scoping\nAlways scope from the blast radius.\n"))
-    lane = Lane(id="l1", run_id="r1", persona="planner", status="completed")
-    session.add_all([run, repo, mode, pb, lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="plan",
+    thread = Thread(id="l1", run_id="r1", persona="planner", status="completed")
+    session.add_all([run, repo, mode, pb, thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="plan",
                       payload={"text": json.dumps(VALID_PLAN)}))
     session.commit()
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = PlanBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": repo, "task": "t", "work_item": None, "blast_radius": []})
     await bp._draft(ctx)
     assert "Always scope from the blast radius." in lm.spawned[0]["persona_prompt"]
@@ -151,33 +151,33 @@ async def test_draft_with_no_message_yields_none(session, make_user):
     run = Run(id="r1", created_by=u.id, mode="plan", stage="planning", repo="ServerApp", title="t")
     repo = Repo(name="ServerApp", integration_branch="main")
     mode = Mode(name="plan", persona_prompt="p")
-    lane = Lane(id="l1", run_id="r1", persona="planner", status="completed")
-    session.add_all([run, repo, mode, lane]); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="planner", status="completed")
+    session.add_all([run, repo, mode, thread]); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = PlanBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": repo, "task": "t", "work_item": None, "blast_radius": []})
     await bp._draft(ctx)
     assert ctx.artifacts["draft_text"] is None
 
 
 # --------------------------------------------------------------- _critique
-async def test_critique_spawns_fresh_critic_lane(session, make_user):
+async def test_critique_spawns_fresh_critic_thread(session, make_user):
     u = make_user("alice")
     run = Run(id="r1", created_by=u.id, mode="plan", stage="planning", repo="ServerApp", title="t")
     repo = Repo(name="ServerApp", integration_branch="main")
     mode = Mode(name="plan", persona_prompt="p")
-    lane = Lane(id="l2", run_id="r1", persona="critic", status="completed")
-    session.add_all([run, repo, mode, lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l2", seq=0, type="message", title="critique",
+    thread = Thread(id="l2", run_id="r1", persona="critic", status="completed")
+    session.add_all([run, repo, mode, thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l2", seq=0, type="message", title="critique",
                       payload={"text": "drift on normalize.ts:5"}))
     session.commit()
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = PlanBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": repo, "draft_plan": VALID_PLAN, "draft_text": json.dumps(VALID_PLAN)})
     await bp._critique(ctx)
-    assert ctx.artifacts["critique_lane_id"] == "l2"
+    assert ctx.artifacts["critique_thread_id"] == "l2"
     assert "drift" in ctx.artifacts["critique_notes"]
     assert lm.spawned[0]["persona"] == "critic"
     assert "CRITIC" in lm.spawned[0]["persona_prompt"]
@@ -188,9 +188,9 @@ async def test_critique_no_parseable_draft_records_notes(session, make_user):
     run = Run(id="r1", created_by=u.id, mode="plan", stage="planning", repo="ServerApp", title="t")
     repo = Repo(name="ServerApp", integration_branch="main")
     session.add_all([run, repo]); session.commit()
-    lm = _FakeLaneManager(Lane(id="lx", run_id="r1", persona="critic", status="completed"))
+    lm = _FakeLaneManager(Thread(id="lx", run_id="r1", persona="critic", status="completed"))
     bp = PlanBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm},
+    ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": repo, "draft_text": "not json"})
     await bp._critique(ctx)
     assert "no parseable" in ctx.artifacts["critique_notes"]

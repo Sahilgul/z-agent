@@ -1,7 +1,7 @@
 from app.auth import seed_users
 from app.db.models.event import Event
 from app.db.models.idea import IdeaComment, IdeaThread
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Run
 from app.db.models.user import User
@@ -57,15 +57,15 @@ def test_seed_is_idempotent(session):
         title="Welcome to Zagent — what should the fleet learn first?").count() == 1
 
 
-def test_seed_creates_demo_run_with_events_and_lane(session):
+def test_seed_creates_demo_run_with_events_and_thread(session):
     seed_users.seed()
     run = session.query(Run).filter_by(title="DEMO: How does scribe dedupe questions?").one()
     assert run.stage == "completed"
     assert run.cost_usd == 0.0
     assert run.repo == "ServerApp"
-    lane = session.query(Lane).filter_by(run_id=run.id).one()
-    assert lane.status == "completed"
-    assert lane.next_seq == len(seed_users.DEMO_EVENTS)
+    thread = session.query(Thread).filter_by(run_id=run.id).one()
+    assert thread.status == "completed"
+    assert thread.next_seq == len(seed_users.DEMO_EVENTS)
     events = session.query(Event).filter_by(run_id=run.id).order_by(Event.seq).all()
     assert len(events) == len(seed_users.DEMO_EVENTS)
     assert events[0].type == seed_users.DEMO_EVENTS[0][0].value

@@ -16,9 +16,9 @@ async def test_mint_key_returns_virtual_key(monkeypatch):
     routes = {"/key/generate": FakeResponse({"key": "sk-new"})}
     fake = install_fake_httpx(monkeypatch, litellm, routes)
     client = GatewayClient(base_url="http://gw", master_key="mk")
-    vk = await client.mint_key("lane-1", 5.0)
+    vk = await client.mint_key("thread-1", 5.0)
     assert vk.key == "sk-new"
-    assert vk.alias == "lane-1"
+    assert vk.alias == "thread-1"
     assert vk.max_budget == 5.0
     assert fake.calls[0][0] == "POST"
 
@@ -28,7 +28,7 @@ async def test_mint_key_raises_on_http_error(monkeypatch):
     install_fake_httpx(monkeypatch, litellm, routes)
     client = GatewayClient(base_url="http://gw", master_key="mk")
     with pytest.raises(Exception):
-        await client.mint_key("lane-1", 5.0)
+        await client.mint_key("thread-1", 5.0)
 
 
 async def test_delete_key(monkeypatch):
@@ -151,9 +151,9 @@ def test_cli_mint(monkeypatch, capsys):
     import sys
     fake = _CliGateway()
     monkeypatch.setattr(litellm, "GatewayClient", lambda: fake)
-    monkeypatch.setattr(sys, "argv", ["litellm", "mint", "--alias", "lane-1", "--budget", "3.5"])
+    monkeypatch.setattr(sys, "argv", ["litellm", "mint", "--alias", "thread-1", "--budget", "3.5"])
     litellm._cli()
-    assert fake.minted == [("lane-1", 3.5)]
+    assert fake.minted == [("thread-1", 3.5)]
     assert capsys.readouterr().out.strip() == "sk-cli"
 
 
@@ -161,9 +161,9 @@ def test_cli_mint_default_budget(monkeypatch, capsys):
     import sys
     fake = _CliGateway()
     monkeypatch.setattr(litellm, "GatewayClient", lambda: fake)
-    monkeypatch.setattr(sys, "argv", ["litellm", "mint", "--alias", "lane-2"])
+    monkeypatch.setattr(sys, "argv", ["litellm", "mint", "--alias", "thread-2"])
     litellm._cli()
-    assert fake.minted == [("lane-2", 5.0)]
+    assert fake.minted == [("thread-2", 5.0)]
 
 
 def test_cli_spend(monkeypatch, capsys):

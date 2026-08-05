@@ -14,7 +14,7 @@ from app.events.bus import IngestConsumer
 from app.events.control import LaneControl
 from app.events.relay import Relay
 from app.gateway.litellm import GatewayClient
-from app.orchestrator.lane_manager import LaneManager
+from app.orchestrator.thread_manager import ThreadManager
 from app.orchestrator.run_manager import RunManager
 from app.sandbox.fetcher import start_fetch_loop
 from app.services.approvals import ApprovalService
@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
     ingest = IngestConsumer(relay)
     control = LaneControl()
     gateway = GatewayClient()
-    lane_manager = LaneManager(ingest, relay, gateway)
-    run_manager = RunManager(ingest, relay, lane_manager, control)
+    thread_manager = ThreadManager(ingest, relay, gateway)
+    run_manager = RunManager(ingest, relay, thread_manager, control)
     approval_service = ApprovalService(relay, control)
     heartbeat_persister = HeartbeatPersister()
 
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     app.state.ingest = ingest
     app.state.control = control
     app.state.gateway = gateway
-    app.state.lane_manager = lane_manager
+    app.state.thread_manager = thread_manager
     app.state.run_manager = run_manager
     app.state.approval_service = approval_service
     app.state.prewarm_pool = __import__("app.services.hydration", fromlist=["PrewarmPool"]).PrewarmPool()
@@ -67,10 +67,10 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Zagent", version="0.1.0", lifespan=lifespan)
 
-    from app.api import approvals, auth, bench, byo_pat, campaigns, hydration, ideas, knowledge, lanes, modes, proposals, push, repos, runs, sessions, team, webhooks
+    from app.api import approvals, auth, bench, byo_pat, campaigns, hydration, ideas, knowledge, threads, modes, proposals, push, repos, runs, sessions, team, webhooks
     from app.ws.events import router as ws_router
 
-    for r in (auth.router, team.router, runs.router, lanes.router,
+    for r in (auth.router, team.router, runs.router, threads.router,
               approvals.router, repos.router, modes.router, sessions.router,
               hydration.router, knowledge.router, ideas.router, byo_pat.router,
               proposals.router, push.router, bench.router, campaigns.router,

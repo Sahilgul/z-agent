@@ -4,7 +4,7 @@ ADO work items — the eval that decides whether the flywheel actually compounds
 F2P/P2P scoring (SWE-bench semantics): a case is RESOLVED when every
 fail_to_pass test passes (the fix works) AND every pass_to_pass test still
 passes (nothing broke). Scoring is a PURE function — the eval runner executes
-tests in a lane (env-gated), but the verdict is deterministic from stored
+tests in a thread (env-gated), but the verdict is deterministic from stored
 outcomes, never from agent self-report.
 
 Cases flagged held_out form the distiller's bench-gate pool: distiller

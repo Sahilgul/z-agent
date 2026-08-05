@@ -4,7 +4,7 @@ import pytest
 
 from app.db.models.delivery import PrLink
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, Run
 from app.db.models.trajectory import TrajectorySummary
@@ -12,15 +12,15 @@ from app.services import delivery
 
 
 # --------------------------------------------------------------- branch_name_for
-def test_branch_name_for_with_lane():
+def test_branch_name_for_with_thread():
     run = Run(id="r1234567-aaaa", title="Fix the Scribe Summary Bug!")
-    lane = Lane(id="lane1234-aaaa", run_id=run.id, persona="researcher", status="running")
-    name = delivery.branch_name_for(run, lane)
+    thread = Thread(id="thread12-aaaa", run_id=run.id, persona="researcher", status="running")
+    name = delivery.branch_name_for(run, thread)
     assert name.startswith("agent/r1234567-")
-    assert name.endswith("/lane1234")
+    assert name.endswith("/thread12")
 
 
-def test_branch_name_for_without_lane():
+def test_branch_name_for_without_thread():
     run = Run(id="r1234567-aaaa", title="Fix the Scribe Summary Bug!")
     name = delivery.branch_name_for(run)
     # plan §9: agent/<run_id>-<slug> — the agent/* namespace carries the ADO
@@ -68,7 +68,7 @@ def test_build_evidence_package_minimal(session, make_user):
     assert pkg["schema_version"] == 1
     assert pkg["run_id"] == "r1"
     assert pkg["plan_steps"] == []
-    assert pkg["lanes"] == []
+    assert pkg["threads"] == []
     assert pkg["test_signals"] == []
     assert pkg["trajectory"] == ""
     assert pkg["total_cost_usd"] == 1.25
@@ -78,47 +78,47 @@ def test_build_evidence_package_minimal(session, make_user):
 def test_build_evidence_package_full(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="completed", title="ship it")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed", next_seq=3, cost_usd=2.0)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed", next_seq=3, cost_usd=2.0)
     plan = Plan(run_id="r1", structured={"title": "Plan A", "steps": [
         {"index": 0, "title": "s0", "status": "done"},
         {"index": 1, "title": "s1", "status": "skipped"},
     ]}, status="approved")
-    ev = Event(run_id="r1", lane_id="l1", seq=0, type="test_run", title="pytest", payload={"pass": 1})
-    traj = TrajectorySummary(run_id="r1", lane_id="l1", user_id=u.id, summary="distilled")
-    session.add_all([run, lane, plan, ev, traj]); session.commit()
+    ev = Event(run_id="r1", thread_id="l1", seq=0, type="test_run", title="pytest", payload={"pass": 1})
+    traj = TrajectorySummary(run_id="r1", thread_id="l1", user_id=u.id, summary="distilled")
+    session.add_all([run, thread, plan, ev, traj]); session.commit()
     pkg = delivery.build_evidence_package("r1")
     assert pkg["plan_title"] == "Plan A"
     assert len(pkg["plan_steps"]) == 2
     assert pkg["plan_steps"][0]["status"] == "done"
-    assert len(pkg["lanes"]) == 1
-    assert pkg["lanes"][0]["persona"] == "researcher"
+    assert len(pkg["threads"]) == 1
+    assert pkg["threads"][0]["persona"] == "researcher"
     assert len(pkg["test_signals"]) == 1
     assert pkg["trajectory"] == "distilled"
 
 
 # --------------------------------------------------------------- evidence_complete
 def test_evidence_complete_empty():
-    pkg = {"plan_steps": [], "lanes": []}
+    pkg = {"plan_steps": [], "threads": []}
     gaps = delivery.evidence_complete(pkg)
     assert "no approved plan on record" in gaps
-    assert "no lane completed successfully" in gaps
+    assert "no thread completed successfully" in gaps
 
 
 def test_evidence_complete_unfinished_steps():
-    pkg = {"plan_steps": [{"status": "pending"}, {"status": "done"}], "lanes": [{"status": "completed"}]}
+    pkg = {"plan_steps": [{"status": "pending"}, {"status": "done"}], "threads": [{"status": "completed"}]}
     gaps = delivery.evidence_complete(pkg)
     assert any("not done" in g for g in gaps)
 
 
-def test_evidence_complete_no_completed_lane():
-    pkg = {"plan_steps": [{"status": "done"}], "lanes": [{"status": "running"}]}
+def test_evidence_complete_no_completed_thread():
+    pkg = {"plan_steps": [{"status": "done"}], "threads": [{"status": "running"}]}
     gaps = delivery.evidence_complete(pkg)
-    assert "no lane completed successfully" in gaps
+    assert "no thread completed successfully" in gaps
 
 
 def test_evidence_complete_cleared():
     pkg = {"plan_steps": [{"status": "done"}, {"status": "skipped"}],
-           "lanes": [{"status": "completed"}, {"status": "running"}]}
+           "threads": [{"status": "completed"}, {"status": "running"}]}
     assert delivery.evidence_complete(pkg) == []
 
 
@@ -215,11 +215,11 @@ class _FakeAdo:
 def _seed_complete_run(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="completed", title="ship it", repo="ServerApp")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed", next_seq=1, cost_usd=1.0)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed", next_seq=1, cost_usd=1.0)
     plan = Plan(run_id="r1", structured={"title": "Plan A", "steps": [{"index": 0, "title": "s0", "status": "done"}]},
                 status="approved")
     repo = Repo(name="ServerApp", integration_branch="main", ado_repo_id="ado-123")
-    session.add_all([run, lane, plan, repo]); session.commit()
+    session.add_all([run, thread, plan, repo]); session.commit()
     return run, repo
 
 
@@ -234,9 +234,9 @@ def test_open_pr_evidence_incomplete(session, make_user):
 def test_open_pr_run_or_repo_missing(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="completed", title="t")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
     plan = Plan(run_id="r1", structured={"title": "P", "steps": [{"status": "done"}]}, status="approved")
-    session.add_all([run, lane, plan]); session.commit()
+    session.add_all([run, thread, plan]); session.commit()
     with pytest.raises(delivery.DeliveryError, match="run or repo not found"):
         asyncio.run(delivery.open_pr("r1", "GhostRepo", "/ws"))
 

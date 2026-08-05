@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import get_session
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.db.models.trigger import Trigger, TriggerEventLog
 from app.services import identity
@@ -314,9 +314,9 @@ async def process(event: TriggerEvent, run_manager) -> dict:
 
         active = _recent_active_run(trigger, event)  # guardrail 2
         if active is not None:
-            lane_id = _lead_lane_id(active)
-            if lane_id:
-                await run_manager.nudge_lane(active, lane_id, _nudge_text(event))
+            thread_id = _lead_thread_id(active)
+            if thread_id:
+                await run_manager.nudge_thread(active, thread_id, _nudge_text(event))
             _set_log(log_id, status="matched", run_id=active,
                      resolved_user_id=owner_id, payload={**event.payload, "trigger_name": trigger.name})
             verdicts.append({"trigger": trigger.name, "status": "nudged", "run_id": active})
@@ -360,13 +360,13 @@ class _RowView:
         self.rate_limit_per_hour = d["rate_limit_per_hour"]
 
 
-def _lead_lane_id(run_id: str) -> str | None:
+def _lead_thread_id(run_id: str) -> str | None:
     session = get_session()
     try:
-        lane = (session.query(Lane).filter_by(run_id=run_id)
-                .filter(Lane.status.in_(["running", "queued"]))
-                .order_by(Lane.created_at).first())
-        return lane.id if lane else None
+        thread = (session.query(Thread).filter_by(run_id=run_id)
+                .filter(Thread.status.in_(["running", "queued"]))
+                .order_by(Thread.created_at).first())
+        return thread.id if thread else None
     finally:
         session.close()
 

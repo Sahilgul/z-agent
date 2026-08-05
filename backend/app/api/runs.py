@@ -10,7 +10,7 @@ from zagent_contracts import ActionKind, IntentSource, UserIntent
 
 from app.core.deps import current_user
 from app.db.base import get_session
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Plan, Run
 from app.db.models.user import User
 from app.services import autonomy as autonomy_dial
@@ -23,28 +23,28 @@ from app.services.sessions import replay_events
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
-def _persist_user_message(run_id: str, lane_id: str, text: str) -> dict | None:
+def _persist_user_message(run_id: str, thread_id: str, text: str) -> dict | None:
     """Store the user's own message as a message event so the transcript is a
     real conversation — otherwise only the agent's side renders and follow-ups
     look like they vanished. role="user" lets the stream style it as the
-    sender's bubble; seq rides the lane's counter like every other event.
+    sender's bubble; seq rides the thread's counter like every other event.
     Returns the serialized event so the caller can push it live over WS."""
     from app.db.models.event import Event
     session = get_session()
     try:
-        lane = session.get(Lane, lane_id)
-        if lane is None:
+        thread = session.get(Thread, thread_id)
+        if thread is None:
             return None
-        seq = lane.next_seq
-        lane.next_seq = seq + 1
+        seq = thread.next_seq
+        thread.next_seq = seq + 1
         session.add(Event(
-            run_id=run_id, lane_id=lane_id, seq=seq,
+            run_id=run_id, thread_id=thread_id, seq=seq,
             type="message", title=text[:120],
             payload={"text": text, "role": "user"}, sdk_message_uuid=None,
         ))
         session.commit()
         return {
-            "run_id": run_id, "lane_id": lane_id, "seq": seq,
+            "run_id": run_id, "thread_id": thread_id, "seq": seq,
             "kind": "message", "title": text[:120],
             "detail": {"text": text, "role": "user"}, "sdk_message_uuid": None,
         }
@@ -65,7 +65,7 @@ class IntentBody(BaseModel):
     intent: str | None = None       # button/chip intents arrive pre-typed
     text: str | None = None         # typed/voice intents arrive as text
     source: str = "button"
-    lane_id: str | None = None
+    thread_id: str | None = None
     confirmed: bool = False
     payload: dict = {}
 
@@ -125,19 +125,19 @@ def get_run(run_id: str, user: User = Depends(current_user)):
 
 
 @router.get("/{run_id}/events")
-def run_events(run_id: str, user: User = Depends(current_user), lane_id: str | None = None,
+def run_events(run_id: str, user: User = Depends(current_user), thread_id: str | None = None,
                after_seq: int | None = None):
-    return replay_events(run_id, user.id, lane_id=lane_id, after_seq=after_seq)
+    return replay_events(run_id, user.id, thread_id=thread_id, after_seq=after_seq)
 
 
-@router.get("/{run_id}/lanes")
-def run_lanes(run_id: str, user: User = Depends(current_user)):
+@router.get("/{run_id}/threads")
+def run_threads(run_id: str, user: User = Depends(current_user)):
     run = load_run_for_user(run_id, user.id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     session = get_session()
     try:
-        lanes = session.query(Lane).filter_by(run_id=run_id).all()
+        threads = session.query(Thread).filter_by(run_id=run_id).all()
         return [{
             "id": l.id, "persona": l.persona, "repo_scope": l.repo_scope,
             "status": l.status, "cost_usd": l.cost_usd, "budget_usd": l.budget_usd,
@@ -146,7 +146,7 @@ def run_lanes(run_id: str, user: User = Depends(current_user)):
             "has_container": l.container_id is not None,
             "created_at": l.created_at.isoformat() if l.created_at else None,
             "finished_at": l.finished_at.isoformat() if l.finished_at else None,
-        } for l in lanes]
+        } for l in threads]
     finally:
         session.close()
 
@@ -216,17 +216,17 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     if body.text and not body.intent:
         intent = classify_text(run, body.text)
         if intent is None:
-            # Plain conversation: a nudge to the Lead lane (typed Lead-nudges
+            # Plain conversation: a nudge to the Lead thread (typed Lead-nudges
             # stay enabled while the agent works — §1a carve-out).
             intent = UserIntent(run_id=run_id, intent=ActionKind.SEND_MESSAGE,
                                 source=IntentSource.TEXT, text=body.text,
-                                lane_id=body.lane_id)
+                                thread_id=body.thread_id)
     else:
         # The frontend always sends intent="send_message" with the text as a
         # SEPARATE field — this branch must carry body.text through or every
         # follow-up message reaches the agent empty (the "no content" loop).
         intent = UserIntent(run_id=run_id, intent=ActionKind(body.intent),
-                            source=IntentSource(body.source), lane_id=body.lane_id,
+                            source=IntentSource(body.source), thread_id=body.thread_id,
                             text=body.text,
                             confirmed=body.confirmed, payload=body.payload)
 
@@ -242,16 +242,16 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind == ActionKind.ABANDON_RUN:
         await run_manager.abandon_run(run_id)
     elif kind in (ActionKind.NUDGE, ActionKind.SEND_MESSAGE):
-        lane_id = intent.lane_id or _lead_lane_id(run_id)
-        if lane_id:
+        thread_id = intent.thread_id or _lead_thread_id(run_id)
+        if thread_id:
             # Mode switch takes effect here: if run.mode no longer matches the
-            # mode the current lane was spawned under, chain the new blueprint
-            # instead of nudging the old lane. The new lane resumes the prior
-            # session volume (resume_from_lane, wired in lane_manager.spawn).
+            # mode the current thread was spawned under, chain the new blueprint
+            # instead of nudging the old thread. The new thread resumes the prior
+            # session volume (resume_from_thread, wired in thread_manager.spawn).
             session = get_session()
             try:
-                lane = session.get(Lane, lane_id)
-                spawned_mode = (lane.spawn_context or {}).get("mode") if lane else None
+                thread = session.get(Thread, thread_id)
+                spawned_mode = (thread.spawn_context or {}).get("mode") if thread else None
                 run_mode = session.get(Run, run_id).mode if session.get(Run, run_id) else None
             finally:
                 session.close()
@@ -263,16 +263,16 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                 and spawned_mode != run_mode
             ):
                 # The user's message is the task for the new blueprint's
-                # first lane; persist it as a user event so the transcript
+                # first thread; persist it as a user event so the transcript
                 # shows the question before the new mode's answer.
                 if intent.text:
-                    _persist_user_message(run_id, lane_id, intent.text)
-                extra = {"resume_from_lane_id": lane_id}
+                    _persist_user_message(run_id, thread_id, intent.text)
+                extra = {"resume_from_thread_id": thread_id}
                 if intent.text:
                     extra["task"] = intent.text
                 await run_manager._run_blueprint(run_id, run_mode, extra_artifacts=extra)
             elif intent.text:
-                user_event = _persist_user_message(run_id, lane_id, intent.text)
+                user_event = _persist_user_message(run_id, thread_id, intent.text)
                 # The persisted row bypasses the worker's Redis stream, so it
                 # never reaches an open browser on its own — push it over the
                 # run socket or the user's bubble only appears after a reload.
@@ -280,16 +280,16 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                     try:
                         from zagent_contracts import StepEvent, StepKind
                         await request.app.state.relay.publish_step(run_id, StepEvent(
-                            run_id=user_event["run_id"], lane_id=user_event["lane_id"],
+                            run_id=user_event["run_id"], thread_id=user_event["thread_id"],
                             seq=user_event["seq"], kind=StepKind.MESSAGE,
                             title=user_event["title"], detail=user_event["detail"],
                             sdk_message_uuid=None,
                         ))
                     except Exception:  # WS fanout is best-effort; the row is durable
                         pass
-                await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
+                await run_manager.nudge_thread(run_id, thread_id, intent.text or "")
             else:
-                await run_manager.nudge_lane(run_id, lane_id, intent.text or "")
+                await run_manager.nudge_thread(run_id, thread_id, intent.text or "")
     elif kind == ActionKind.APPROVE_PLAN:
         try:
             plan = plan_service.approve_plan(run_id, user.id)
@@ -318,29 +318,29 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     elif kind == ActionKind.START_PLAN:
         await run_manager.start_plan(run_id)
         return {"status": "ok", "intent": kind.value}
-    elif kind == ActionKind.STOP_LANE:
-        if not intent.lane_id:
-            raise HTTPException(status_code=422, detail="stop_lane needs lane_id")
-        await run_manager.stop_lane(run_id, intent.lane_id)
-        return {"status": "ok", "intent": kind.value, "lane_id": intent.lane_id}
+    elif kind == ActionKind.STOP_THREAD:
+        if not intent.thread_id:
+            raise HTTPException(status_code=422, detail="stop_thread needs thread_id")
+        await run_manager.stop_thread(run_id, intent.thread_id)
+        return {"status": "ok", "intent": kind.value, "thread_id": intent.thread_id}
     elif kind == ActionKind.PIN_FINDING:
-        if not intent.lane_id:
-            raise HTTPException(status_code=422, detail="pin_finding needs lane_id")
+        if not intent.thread_id:
+            raise HTTPException(status_code=422, detail="pin_finding needs thread_id")
         try:
-            await run_manager.pin_finding(run_id, intent.lane_id,
+            await run_manager.pin_finding(run_id, intent.thread_id,
                                           intent.payload.get("note", ""))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"status": "ok", "intent": kind.value, "lane_id": intent.lane_id}
+        return {"status": "ok", "intent": kind.value, "thread_id": intent.thread_id}
     elif kind == ActionKind.KILL_REPLACE:
-        if not intent.lane_id:
-            raise HTTPException(status_code=422, detail="kill_replace needs lane_id")
+        if not intent.thread_id:
+            raise HTTPException(status_code=422, detail="kill_replace needs thread_id")
         try:
-            replacement = await run_manager.kill_replace_lane(run_id, intent.lane_id)
+            replacement = await run_manager.kill_replace_thread(run_id, intent.thread_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"status": "ok", "intent": kind.value, "lane_id": intent.lane_id,
-                "replacement_lane_id": replacement.id}
+        return {"status": "ok", "intent": kind.value, "thread_id": intent.thread_id,
+                "replacement_thread_id": replacement.id}
     elif kind == ActionKind.SWITCH_MODE:
         mode_name = intent.payload.get("mode")
         if not mode_name:
@@ -351,16 +351,16 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok", "intent": kind.value, "mode": mode_name}
     elif kind == ActionKind.LET_IT_RUN:
-        # Watchdog card dismissal (§4): no lane action — the card clears and the
-        # lane keeps working; recorded so the UI's dismissal is intentional.
+        # Watchdog card dismissal (§4): no thread action — the card clears and the
+        # thread keeps working; recorded so the UI's dismissal is intentional.
         return {"status": "ok", "intent": kind.value}
     return {"status": "ok", "intent": kind.value}
 
 
-def _lead_lane_id(run_id: str) -> str | None:
+def _lead_thread_id(run_id: str) -> str | None:
     session = get_session()
     try:
-        lane = session.query(Lane).filter_by(run_id=run_id).order_by(Lane.created_at).first()
-        return lane.id if lane else None
+        thread = session.query(Thread).filter_by(run_id=run_id).order_by(Thread.created_at).first()
+        return thread.id if thread else None
     finally:
         session.close()

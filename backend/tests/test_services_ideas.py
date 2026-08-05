@@ -8,7 +8,7 @@ from app.db.models.idea import IdeaComment, IdeaThread
 from app.services import ideas
 
 
-def _thread(session, make_user, title="Ship the fleet graph to lanes?"):
+def _thread(session, make_user, title="Ship the fleet graph to threads?"):
     u = make_user()
     return u, ideas.create_thread(title, "would it change how we scope plans?", u.id)
 
@@ -120,7 +120,7 @@ def test_plan_task_composes_synthesis_and_voices(session, make_user):
     finally:
         s.close()
     task = ideas.plan_task_for(t["id"])
-    assert "# Ship the fleet graph to lanes?" in task
+    assert "# Ship the fleet graph to threads?" in task
     assert "Consensus: do it" in task
     assert "voice one" in task
 

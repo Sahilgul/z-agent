@@ -49,7 +49,7 @@ async def test_publish_step_fans_out_to_subscribers(fake_redis):
     r = _relay(fake_redis)
     q = r.subscribe("run-1")
     from zagent_contracts import StepEvent, StepKind
-    ev = StepEvent(run_id="run-1", lane_id="l1", seq=1, kind=StepKind.MESSAGE, title="t")
+    ev = StepEvent(run_id="run-1", thread_id="l1", seq=1, kind=StepKind.MESSAGE, title="t")
     await r.publish_step("run-1", ev)
     msg = q.get_nowait()
     assert msg["type"] == "step"
@@ -57,12 +57,12 @@ async def test_publish_step_fans_out_to_subscribers(fake_redis):
     r.unsubscribe("run-1", q)
 
 
-async def test_publish_lane_status(fake_redis):
+async def test_publish_thread_status(fake_redis):
     r = _relay(fake_redis)
     q = r.subscribe("run-1")
-    await r.publish_lane_status("run-1", "l1", "running")
+    await r.publish_thread_status("run-1", "l1", "running")
     msg = q.get_nowait()
-    assert msg == {"type": "lane_status", "lane_id": "l1", "status": "running"}
+    assert msg == {"type": "thread_status", "thread_id": "l1", "status": "running"}
     r.unsubscribe("run-1", q)
 
 

@@ -15,7 +15,7 @@ from app.services import distiller, knowledge
 def _summary(session, run_id, user_id, lessons=("retry with smaller diff",),
              days_old=0.2):
     s = TrajectorySummary(
-        run_id=run_id, lane_id="lane-1", user_id=user_id,
+        run_id=run_id, thread_id="thread-1", user_id=user_id,
         summary="run fixed the billing rounding bug after two failed attempts",
         key_decisions=["chose half-up rounding"], lessons=list(lessons),
         created_at=datetime.now(timezone.utc) - timedelta(days=days_old))
@@ -28,7 +28,7 @@ async def _two_candidates(persona, corpus, model=None):
     import json as _json
     return _json.dumps([
         {"content": "retry with a smaller diff when the first patch fails lint",
-         "trigger_description": "when a development lane's patch fails lint"},
+         "trigger_description": "when a development thread's patch fails lint"},
         {"content": "billing tests need explicit rounding-mode fixtures",
          "trigger_description": "when touching billing totals"},
     ])

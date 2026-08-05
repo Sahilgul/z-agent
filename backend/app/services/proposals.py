@@ -1,7 +1,7 @@
 """Improvement Inbox (plan §6 Phase 4): ranked proposals from the Janitor
 (hygiene patrol) and Perfector (product research).
 
-Both patrol lanes are READ-ONLY and emit proposals — NEVER unsolicited PRs.
+Both patrol threads are READ-ONLY and emit proposals — NEVER unsolicited PRs.
 Ranking is impact × confidence (deterministic, no model in the sort). Accept
 turns a proposal into a normal gated Development run (weekly spend ceiling
 enforced HERE, in code); Dismiss feeds a preference signal into the flywheel
@@ -44,7 +44,7 @@ def _serialize(p: Proposal) -> dict:
 def emit(source: str, title: str, body: str, evidence: list[str] | None = None,
          impact: str = "medium", confidence: str = "medium",
          repo: str | None = None, created_by: str = "system") -> dict:
-    """What the patrol lanes call. Evidence is REQUIRED — a proposal without
+    """What the patrol threads call. Evidence is REQUIRED — a proposal without
     file:line citations is an opinion, and opinions don't rank."""
     if source not in SOURCES:
         raise ProposalError(f"source must be one of {sorted(SOURCES)}")

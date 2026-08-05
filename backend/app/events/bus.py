@@ -24,7 +24,7 @@ from app.core.logging import get_logger
 from app.core.redis_factory import in_memory, make_redis
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.services import transcript
 
@@ -49,7 +49,7 @@ class IngestConsumer:
         self._task: asyncio.Task | None = None
 
     def register_run(self, run_id: str) -> None:
-        # Callers pass the BARE run id (run_manager/lane_manager); workers xadd
+        # Callers pass the BARE run id (run_manager/thread_manager); workers xadd
         # to events:<run_id>. Normalize here so both conventions converge on the
         # real stream key — before this, bare ids made the consumer read an
         # empty "rm1" stream forever while events piled up unconsumed.
@@ -115,25 +115,25 @@ class IngestConsumer:
         session = get_session()
         try:
             session.add(Event(
-                run_id=event.run_id, lane_id=event.lane_id, seq=event.seq,
+                run_id=event.run_id, thread_id=event.thread_id, seq=event.seq,
                 ts=event.ts, type=event.kind.value, title=event.title[:512],
                 payload=event.detail, sdk_message_uuid=event.sdk_message_uuid,
             ))
-            lane = session.get(Lane, event.lane_id)
-            if lane and event.seq >= lane.next_seq:
-                lane.next_seq = event.seq + 1
+            thread = session.get(Thread, event.thread_id)
+            if thread and event.seq >= thread.next_seq:
+                thread.next_seq = event.seq + 1
             # The worker's "turn complete" status event carries the SDK
             # session_id (worker/worker/normalize.py). Nothing else writes it,
-            # so without this capture the lane is never resumable — the
+            # so without this capture the thread is never resumable — the
             # replay-only banner on every session and kill_replace's claimed
             # resume both depend on this single field.
             if (
-                lane is not None
+                thread is not None
                 and event.kind == StepKind.STATUS
                 and event.title == "turn complete"
                 and event.detail.get("session_id")
             ):
-                lane.session_id = str(event.detail["session_id"])
+                thread.session_id = str(event.detail["session_id"])
             run = session.get(Run, run_id)
             if run:
                 from datetime import datetime, timezone
@@ -146,7 +146,7 @@ class IngestConsumer:
         # transcript failure must not re-deliver or drop the event.
         try:
             transcript.append(run_id, {
-                "run_id": event.run_id, "lane_id": event.lane_id, "seq": event.seq,
+                "run_id": event.run_id, "thread_id": event.thread_id, "seq": event.seq,
                 "ts": event.ts.isoformat() if hasattr(event.ts, "isoformat") else event.ts,
                 "kind": event.kind.value, "title": event.title,
                 "detail": event.detail, "sdk_message_uuid": event.sdk_message_uuid,

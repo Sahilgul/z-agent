@@ -1,11 +1,11 @@
 import pytest
 
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.gateway.litellm import VirtualKey
-from app.orchestrator import lane_manager
-from app.orchestrator.lane_manager import LaneManager, LaneSpawnError
+from app.orchestrator import thread_manager
+from app.orchestrator.thread_manager import ThreadManager, ThreadSpawnError
 
 
 class _FakeIngest:
@@ -15,8 +15,8 @@ class _FakeIngest:
 
 class _FakeRelay:
     def __init__(self): self.published = []
-    async def publish_lane_status(self, run_id, lane_id, status):
-        self.published.append((run_id, lane_id, status))
+    async def publish_thread_status(self, run_id, thread_id, status):
+        self.published.append((run_id, thread_id, status))
 
 
 class _FakeGateway:
@@ -44,23 +44,23 @@ def _make_run(session, make_user, run_id="r1", autonomy="supervised"):
     return run
 
 
-async def test_spawn_creates_lane_and_starts_container(session, make_user, monkeypatch):
+async def test_spawn_creates_thread_and_starts_container(session, make_user, monkeypatch):
     run = _make_run(session, make_user)
     ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway()
-    lm = LaneManager(ingest, relay, gw)
+    lm = ThreadManager(ingest, relay, gw)
 
     async def fake_acquire(repo):
         return True, ""
-    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
-    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container",
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
                         lambda *a, **k: "container-xyz")
 
-    lane = await lm.spawn(run, "researcher", "task", "persona", None, [])
-    assert lane.id
+    thread = await lm.spawn(run, "researcher", "task", "persona", None, [])
+    assert thread.id
     assert run.id in ingest.registered
     assert relay.published[-1][0] == run.id
     session.expire_all()
-    row = session.get(Lane, lane.id)
+    row = session.get(Thread, thread.id)
     assert row.status == "running"
     assert row.container_id == "container-xyz"
     assert row.gateway_key == "vk-1"
@@ -68,99 +68,99 @@ async def test_spawn_creates_lane_and_starts_container(session, make_user, monke
 
 async def test_spawn_capacity_denied_raises(session, make_user, monkeypatch):
     run = _make_run(session, make_user)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
 
     async def fake_acquire(repo):
         return False, "cap reached"
-    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
-    with pytest.raises(LaneSpawnError, match="cap reached"):
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    with pytest.raises(ThreadSpawnError, match="cap reached"):
         await lm.spawn(run, "researcher", "task", "persona", None, [])
 
 
-async def test_spawn_gateway_failure_marks_lane_failed(session, make_user, monkeypatch):
+async def test_spawn_gateway_failure_marks_thread_failed(session, make_user, monkeypatch):
     run = _make_run(session, make_user)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway(fail=True))
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway(fail=True))
 
     async def fake_acquire(repo):
         return True, ""
-    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
-    with pytest.raises(LaneSpawnError, match="gateway key mint failed"):
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    with pytest.raises(ThreadSpawnError, match="gateway key mint failed"):
         await lm.spawn(run, "researcher", "task", "persona", None, [])
-    lanes = session.query(Lane).all()
-    assert lanes[0].status == "failed"
+    threads = session.query(Thread).all()
+    assert threads[0].status == "failed"
 
 
-async def test_spawn_container_failure_marks_lane_failed(session, make_user, monkeypatch):
+async def test_spawn_container_failure_marks_thread_failed(session, make_user, monkeypatch):
     run = _make_run(session, make_user)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
 
     async def fake_acquire(repo):
         return True, ""
-    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
 
     def boom(*a, **k):
         raise RuntimeError("docker exploded")
-    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container", boom)
-    with pytest.raises(LaneSpawnError, match="container start failed"):
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container", boom)
+    with pytest.raises(ThreadSpawnError, match="container start failed"):
         await lm.spawn(run, "researcher", "task", "persona", None, [])
-    assert session.query(Lane).first().status == "failed"
+    assert session.query(Thread).first().status == "failed"
 
 
-async def test_spawn_resume_from_lane_inherits_session_id(session, make_user, monkeypatch):
-    """A mode-switch respawn must inherit the prior lane's session_id so the
-    SDK picks up the conversation, and mount the prior lane's session volume."""
+async def test_spawn_resume_from_thread_inherits_session_id(session, make_user, monkeypatch):
+    """A mode-switch respawn must inherit the prior thread's session_id so the
+    SDK picks up the conversation, and mount the prior thread's session volume."""
     run = _make_run(session, make_user)
-    prior = Lane(id="l-old", run_id=run.id, persona="researcher", status="completed",
+    prior = Thread(id="l-old", run_id=run.id, persona="researcher", status="completed",
                  session_id="sess-prior-abc")
     session.add(prior); session.commit()
 
     ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway()
-    lm = LaneManager(ingest, relay, gw)
+    lm = ThreadManager(ingest, relay, gw)
 
     async def fake_acquire(repo):
         return True, ""
-    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
 
     captured = {}
-    def fake_run_container(run, lane, prompt, persona_prompt, permission_mode,
-                            writable_repo, context_repos, resume_from_lane_id=None):
-        captured["resume_from_lane_id"] = resume_from_lane_id
-        captured["session_id"] = lane.session_id
+    def fake_run_container(run, thread, prompt, persona_prompt, permission_mode,
+                            writable_repo, context_repos, resume_from_thread_id=None):
+        captured["resume_from_thread_id"] = resume_from_thread_id
+        captured["session_id"] = thread.session_id
         return "container-new"
-    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container", fake_run_container)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container", fake_run_container)
 
-    lane = await lm.spawn(run, "researcher", "task", "persona", None, [],
-                          resume_from_lane_id="l-old")
-    assert lane.session_id == "sess-prior-abc"
-    assert captured["resume_from_lane_id"] == "l-old"
+    thread = await lm.spawn(run, "researcher", "task", "persona", None, [],
+                          resume_from_thread_id="l-old")
+    assert thread.session_id == "sess-prior-abc"
+    assert captured["resume_from_thread_id"] == "l-old"
     assert captured["session_id"] == "sess-prior-abc"
 
 
-async def test_settle_cost_updates_lane_and_run(session, make_user):
+async def test_settle_cost_updates_thread_and_run(session, make_user):
     run = _make_run(session, make_user)
     ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway(spend=2.25)
-    lm = LaneManager(ingest, relay, gw)
-    lane = Lane(id="l1", run_id=run.id, persona="researcher", status="completed",
+    lm = ThreadManager(ingest, relay, gw)
+    thread = Thread(id="l1", run_id=run.id, persona="researcher", status="completed",
                 gateway_key="vk-1", budget_usd=5.0)
-    session.add(lane)
+    session.add(thread)
     session.commit()
     spend = await lm.settle_cost("l1")
     assert spend == 2.25
     session.expire_all()
-    assert session.get(Lane, "l1").cost_usd == 2.25
+    assert session.get(Thread, "l1").cost_usd == 2.25
     assert session.get(Run, run.id).cost_usd == 2.25
 
 
-async def test_settle_cost_no_lane_returns_zero(session):
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+async def test_settle_cost_no_thread_returns_zero(session):
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
     assert await lm.settle_cost("ghost") == 0.0
 
 
 async def test_settle_cost_no_gateway_key_returns_zero(session, make_user):
     run = _make_run(session, make_user)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
-    lane = Lane(id="l1", run_id=run.id, persona="researcher", status="completed")
-    session.add(lane)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+    thread = Thread(id="l1", run_id=run.id, persona="researcher", status="completed")
+    session.add(thread)
     session.commit()
     assert await lm.settle_cost("l1") == 0.0
 
@@ -168,9 +168,9 @@ async def test_settle_cost_no_gateway_key_returns_zero(session, make_user):
 async def test_release_key_calls_gateway_delete(session, make_user):
     run = _make_run(session, make_user)
     gw = _FakeGateway()
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), gw)
-    lane = Lane(id="l1", run_id=run.id, persona="researcher", status="completed", gateway_key="vk-9")
-    session.add(lane)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+    thread = Thread(id="l1", run_id=run.id, persona="researcher", status="completed", gateway_key="vk-9")
+    session.add(thread)
     session.commit()
     await lm.release_key("l1")
     assert "vk-9" in gw.deleted
@@ -179,66 +179,66 @@ async def test_release_key_calls_gateway_delete(session, make_user):
 async def test_release_key_swallows_gateway_error(session, make_user):
     run = _make_run(session, make_user)
     gw = _FakeGateway(fail=True)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), gw)
-    lane = Lane(id="l1", run_id=run.id, persona="researcher", status="completed", gateway_key="vk-9")
-    session.add(lane)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+    thread = Thread(id="l1", run_id=run.id, persona="researcher", status="completed", gateway_key="vk-9")
+    session.add(thread)
     session.commit()
     await lm.release_key("l1")  # should not raise
 
 
-async def test_release_key_missing_lane_is_noop(session):
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+async def test_release_key_missing_thread_is_noop(session):
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
     await lm.release_key("ghost")
 
 
-def test_lane_spawn_error_is_runtime_error():
-    assert issubclass(LaneSpawnError, RuntimeError)
+def test_thread_spawn_error_is_runtime_error():
+    assert issubclass(ThreadSpawnError, RuntimeError)
 
 
 # --------------------------------------------------------------- spawn_many (width swarm)
 def _specs(n):
     return [{"persona": "explorer", "prompt": f"slice {i}",
-             "persona_prompt": "p", "lane_hint": f"explorer-{i}"} for i in range(n)]
+             "persona_prompt": "p", "thread_hint": f"explorer-{i}"} for i in range(n)]
 
 
 async def test_spawn_many_spawns_all_specs(session, make_user, monkeypatch):
     run = _make_run(session, make_user)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
-    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container",
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
                         lambda *a, **k: "cid")
-    lanes = await lm.spawn_many(run, _specs(3), [], queue_poll_seconds=0.001)
-    assert len(lanes) == 3
+    threads = await lm.spawn_many(run, _specs(3), [], queue_poll_seconds=0.001)
+    assert len(threads) == 3
     session.expire_all()
-    assert session.query(Lane).filter_by(run_id=run.id, status="running").count() == 3
+    assert session.query(Thread).filter_by(run_id=run.id, status="running").count() == 3
 
 
 async def test_spawn_many_queues_past_cap_and_announces_once(session, make_user, monkeypatch):
     """§4: over-cap requests queue deterministically AND the UI says so (one
-    queued note per waiting lane, not a spam loop)."""
+    queued note per waiting thread, not a spam loop)."""
     run = _make_run(session, make_user)
     relay = _FakeRelay()
-    lm = LaneManager(_FakeIngest(), relay, _FakeGateway())
-    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container",
+    lm = ThreadManager(_FakeIngest(), relay, _FakeGateway())
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
                         lambda *a, **k: "cid")
-    attempts = iter([(False, "global lane cap (12) reached — queued"), (True, "")])
+    attempts = iter([(False, "global thread cap (12) reached — queued"), (True, "")])
 
     async def fake_acquire(repo):
         return next(attempts, (True, ""))
-    monkeypatch.setattr(lane_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
 
-    lanes = await lm.spawn_many(run, _specs(1), [], queue_poll_seconds=0.001)
-    assert len(lanes) == 1
+    threads = await lm.spawn_many(run, _specs(1), [], queue_poll_seconds=0.001)
+    assert len(threads) == 1
     queued = [p for p in relay.published if p[2] == "queued"]
     assert len(queued) == 1
 
 
-async def test_spawn_many_skips_lane_on_non_capacity_failure(session, make_user, monkeypatch):
-    """A gateway/container failure sinks ONE lane, never the swarm."""
+async def test_spawn_many_skips_thread_on_non_capacity_failure(session, make_user, monkeypatch):
+    """A gateway/container failure sinks ONE thread, never the swarm."""
     run = _make_run(session, make_user)
-    lm = LaneManager(_FakeIngest(), _FakeRelay(), _FakeGateway(fail=True))
-    monkeypatch.setattr(lane_manager.sandbox_manager, "run_lane_container",
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway(fail=True))
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
                         lambda *a, **k: "cid")
-    lanes = await lm.spawn_many(run, _specs(2), [], queue_poll_seconds=0.001)
-    assert lanes == []
+    threads = await lm.spawn_many(run, _specs(2), [], queue_poll_seconds=0.001)
+    assert threads == []
     session.expire_all()
-    assert session.query(Lane).filter_by(status="failed").count() == 2
+    assert session.query(Thread).filter_by(status="failed").count() == 2

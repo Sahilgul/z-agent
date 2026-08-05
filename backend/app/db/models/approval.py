@@ -26,7 +26,7 @@ class Approval(Base):
 
     id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)
-    lane_id: Mapped[str | None] = mapped_column(nullable=True)
+    thread_id: Mapped[str | None] = mapped_column(nullable=True)
     kind: Mapped[str] = mapped_column(sa.String(16))  # plan | tool | knowledge | pr
     payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)
     decision: Mapped[str | None] = mapped_column(sa.String(16), nullable=True)  # approved|denied|timeout

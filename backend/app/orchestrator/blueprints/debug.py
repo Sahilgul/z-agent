@@ -4,9 +4,9 @@ hydrate    (deterministic): resolve the repo (read-only), load the failing repro
              signal from the run title / ADO work item.
 reproduce  (deterministic): run the repro (the repo's test suite) to CONFIRM the
              failure — the control plane runs it, so the failure signal is tamper-proof.
-diagnose   (agentic debug lane, read-only): investigate the root cause from the
+diagnose   (agentic debug thread, read-only): investigate the root cause from the
              repro signal with live-grep ground truth.
-propose    (agentic fix-proposal lane): propose a structured fix (contracts.Plan JSON).
+propose    (agentic fix-proposal thread): propose a structured fix (contracts.Plan JSON).
 present    (deterministic): parse+validate the proposal, persist a draft Plan + steps,
              and stage the run at awaiting_user with available_actions = review_plan +
              start_plan (the debug-specific promotion path — start_plan chains into the
@@ -22,7 +22,7 @@ from zagent_contracts import RunStage
 
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
@@ -78,7 +78,7 @@ class DebugBlueprint(Blueprint):
         """Run the repo's tests deterministically to CONFIRM the failure. The
         control plane runs them — the agent never self-reports the repro. Debug
         stamps no writable clone, so the repro runs against the golden repo
-        (the same tree the read-only lanes mount); the result is persisted as a
+        (the same tree the read-only threads mount); the result is persisted as a
         test_run event so the evidence trail keeps the repro signal."""
         repo: Repo = ctx.artifacts["repo_row"]
         workspace = ctx.artifacts.get("workspace") or str(_golden_root() / repo.name)
@@ -88,10 +88,10 @@ class DebugBlueprint(Blueprint):
         ctx.artifacts["failure_confirmed"] = not signal["passed"]
         session = get_session()
         try:
-            # "control-plane" pseudo-lane: no agent lane exists at repro time and
-            # events.lane_id is NOT NULL — the control plane owns this event.
+            # "control-plane" pseudo-thread: no agent thread exists at repro time and
+            # events.thread_id is NOT NULL — the control plane owns this event.
             session.add(Event(
-                run_id=ctx.run.id, lane_id="control-plane", seq=0,
+                run_id=ctx.run.id, thread_id="control-plane", seq=0,
                 type="test_run",
                 title=f"repro: tests {'passed' if signal['passed'] else 'failed'}",
                 payload={"passed": signal["passed"], "repo": repo.name,
@@ -104,7 +104,7 @@ class DebugBlueprint(Blueprint):
 
     # --------------------------------------------------------------- diagnose
     async def _diagnose(self, ctx: BlueprintContext) -> None:
-        lane_manager = ctx.services["lane_manager"]
+        thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
         repro = ctx.artifacts.get("repro_signal", "")
         confirmed = ctx.artifacts.get("failure_confirmed")
@@ -113,14 +113,14 @@ class DebugBlueprint(Blueprint):
                   "Report findings with file:line evidence.")
         persona_prompt = self._persona(ctx, "You are the DEBUGGER. Reproduce-first: confirm "
                                           "the failure, then isolate the root cause.")
-        lane = await lane_manager.spawn(
+        thread = await thread_manager.spawn(
             ctx.run, persona="debugger", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=[repo],
-            resume_from_lane_id=ctx.artifacts.get("resume_from_lane_id"),
+            resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
-        ctx.artifacts["diagnose_lane_id"] = lane.id
-        await self._await_lane(lane.id)
-        ctx.artifacts["diagnosis"] = self._last_message_text(lane.id) or ""
+        ctx.artifacts["diagnose_thread_id"] = thread.id
+        await self._await_thread(thread.id)
+        ctx.artifacts["diagnosis"] = self._last_message_text(thread.id) or ""
         # Lint the diagnosis's file:line citations against the golden repo (same
         # drift check plan mode applies) — stale citations get flagged, never crash.
         from app.orchestrator.blueprints.plan import PlanBlueprint
@@ -132,20 +132,20 @@ class DebugBlueprint(Blueprint):
 
     # --------------------------------------------------------------- propose
     async def _propose(self, ctx: BlueprintContext) -> None:
-        lane_manager = ctx.services["lane_manager"]
+        thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
         diagnosis = ctx.artifacts.get("diagnosis", "")
         prompt = (f"Root-cause diagnosis:\n{diagnosis}\n\nPropose a fix as a structured "
                   "Plan (one or two steps) that the human can promote to a plan run.")
         persona_prompt = self._persona(ctx, "You are the FIX PROPOSER. Propose the minimal "
                                             "fix." + PROPOSAL_SCHEMA_HINT)
-        lane = await lane_manager.spawn(
+        thread = await thread_manager.spawn(
             ctx.run, persona="fixer", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=[repo],
         )
-        ctx.artifacts["propose_lane_id"] = lane.id
-        await self._await_lane(lane.id)
-        ctx.artifacts["proposal_text"] = self._last_message_text(lane.id) or ""
+        ctx.artifacts["propose_thread_id"] = thread.id
+        await self._await_thread(thread.id)
+        ctx.artifacts["proposal_text"] = self._last_message_text(thread.id) or ""
 
     # --------------------------------------------------------------- present
     async def _present(self, ctx: BlueprintContext) -> None:
@@ -204,12 +204,12 @@ class DebugBlueprint(Blueprint):
         parts = [p for p in (base, playbooks, fallback) if p]
         return "\n\n".join(parts).strip()
 
-    def _last_message_text(self, lane_id: str) -> str | None:
+    def _last_message_text(self, thread_id: str) -> str | None:
         session = get_session()
         try:
             row = (
                 session.query(Event)
-                .filter_by(lane_id=lane_id, type="message")
+                .filter_by(thread_id=thread_id, type="message")
                 .order_by(Event.seq.desc())
                 .first()
             )
@@ -234,13 +234,13 @@ class DebugBlueprint(Blueprint):
         except json.JSONDecodeError:
             return None
 
-    async def _await_lane(self, lane_id: str, poll_seconds: float = 2.0) -> None:
+    async def _await_thread(self, thread_id: str, poll_seconds: float = 2.0) -> None:
         import asyncio
         while True:
             session = get_session()
             try:
-                lane = session.get(Lane, lane_id)
-                status = lane.status if lane else "failed"
+                thread = session.get(Thread, thread_id)
+                status = thread.status if thread else "failed"
             finally:
                 session.close()
             if status in ("idle", "completed", "failed", "stopped"):

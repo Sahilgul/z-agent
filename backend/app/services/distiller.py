@@ -24,7 +24,7 @@ from app.services import bench, knowledge
 log = get_logger(service="distiller")
 
 DISTILL_PERSONA = (
-    "You are the Sleep-Time Distiller. You read per-lane trajectory summaries "
+    "You are the Sleep-Time Distiller. You read per-thread trajectory summaries "
     "from completed runs and extract REUSABLE knowledge — patterns that would "
     "have made the run shorter or safer. Reply with ONLY a JSON array of "
     "objects: {content, trigger_description}. Skip one-off facts, skip anything "

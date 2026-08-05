@@ -15,14 +15,14 @@ from zagent_contracts import StepEvent, TypingDelta
 
 
 class Forwarder:
-    def __init__(self, redis_url: str, run_id: str, lane_id: str) -> None:
+    def __init__(self, redis_url: str, run_id: str, thread_id: str) -> None:
         self.redis = redis.from_url(redis_url, decode_responses=True)
         self.run_id = run_id
-        self.lane_id = lane_id
+        self.thread_id = thread_id
         self.stream_key = f"events:{run_id}"
         self.delta_channel = f"deltas:{run_id}"
-        self.heartbeat_key = f"lane:{lane_id}:heartbeat"
-        self.heartbeat_channel = "lane:heartbeats"
+        self.heartbeat_key = f"thread:{thread_id}:heartbeat"
+        self.heartbeat_channel = "thread:heartbeats"
 
     async def publish_events(self, events: list[StepEvent]) -> None:
         if not events:
@@ -30,7 +30,7 @@ class Forwarder:
         pipe = self.redis.pipeline(transaction=False)
         for event in events:
             pipe.xadd(self.stream_key, {
-                "lane_id": self.lane_id,
+                "thread_id": self.thread_id,
                 "seq": event.seq,
                 "payload": json.dumps(event.model_dump(mode="json")),
             })
@@ -47,7 +47,7 @@ class Forwarder:
     async def heartbeat(self, status: str) -> None:
         await self.redis.set(self.heartbeat_key, status, ex=90)
         await self.redis.publish(self.heartbeat_channel, json.dumps({
-            "lane_id": self.lane_id, "run_id": self.run_id, "status": status,
+            "thread_id": self.thread_id, "run_id": self.run_id, "status": status,
         }))
 
     async def close(self) -> None:

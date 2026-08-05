@@ -1,4 +1,4 @@
-"""structlog config — run_id/lane_id bound per context (plan §8 core/)."""
+"""structlog config — run_id/thread_id bound per context (plan §8 core/)."""
 
 from __future__ import annotations
 

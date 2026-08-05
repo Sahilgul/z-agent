@@ -1,7 +1,7 @@
 """Cross-host session store (plan Phase 5): session volumes are host paths;
-when workers run on OTHER hosts (VM → AKS), a lane's durable session must
-follow it. The store mirrors `sessions/<run_id>/<lane_id>/` into object
-storage at lane end and materializes it back on resume — the bind-mount stays
+when workers run on OTHER hosts (VM → AKS), a thread's durable session must
+follow it. The store mirrors `sessions/<run_id>/<thread_id>/` into object
+storage at thread end and materializes it back on resume — the bind-mount stays
 the hot path, the store is the cross-host substrate.
 
 The client is injectable: production wires Azure Blob (env-gated); tests use a
@@ -42,12 +42,12 @@ class _BlobClient:
         self._container.delete_blob(key)
 
 
-def _key(run_id: str, lane_id: str) -> str:
-    return f"{run_id}/{lane_id}.tar.gz"
+def _key(run_id: str, thread_id: str) -> str:
+    return f"{run_id}/{thread_id}.tar.gz"
 
 
 def pack(volume: Path) -> bytes:
-    """Lane session dir → a single tarball. Deterministic member order."""
+    """Thread session dir → a single tarball. Deterministic member order."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for path in sorted(volume.rglob("*")):
@@ -66,23 +66,23 @@ def unpack(blob: bytes, dest: Path) -> None:
         tar.extractall(dest, filter="data")
 
 
-def upload(run_id: str, lane_id: str, volume: Path, client=None) -> bool:
-    """Mirror a finished lane's session volume. Never raises — the lane already
+def upload(run_id: str, thread_id: str, volume: Path, client=None) -> bool:
+    """Mirror a finished thread's session volume. Never raises — the thread already
     succeeded; a mirror hiccup is logged, not failed."""
     if not volume.exists():
         return False
     try:
-        (client or _BlobClient()).put(_key(run_id, lane_id), pack(volume))
+        (client or _BlobClient()).put(_key(run_id, thread_id), pack(volume))
         return True
-    except Exception as exc:  # noqa: BLE001 — mirror must not fail the lane
+    except Exception as exc:  # noqa: BLE001 — mirror must not fail the thread
         log.warning("session upload failed", run_id=run_id, error=str(exc))
         return False
 
 
-def materialize(run_id: str, lane_id: str, dest: Path, client=None) -> bool:
-    """Fetch + unpack a lane session onto THIS host (resume path)."""
+def materialize(run_id: str, thread_id: str, dest: Path, client=None) -> bool:
+    """Fetch + unpack a thread session onto THIS host (resume path)."""
     try:
-        blob = (client or _BlobClient()).get(_key(run_id, lane_id))
+        blob = (client or _BlobClient()).get(_key(run_id, thread_id))
         unpack(blob, dest)
         return True
     except Exception as exc:  # noqa: BLE001
@@ -90,10 +90,10 @@ def materialize(run_id: str, lane_id: str, dest: Path, client=None) -> bool:
         return False
 
 
-def purge(run_id: str, lane_id: str, client=None) -> bool:
+def purge(run_id: str, thread_id: str, client=None) -> bool:
     """Retention: the 30-day sweep removes the mirror too."""
     try:
-        (client or _BlobClient()).delete(_key(run_id, lane_id))
+        (client or _BlobClient()).delete(_key(run_id, thread_id))
         return True
     except Exception:  # noqa: BLE001 — absent blob counts as purged
         return True

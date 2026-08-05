@@ -1,6 +1,8 @@
-"""lanes — each an independent SDK session in its own worker container.
+"""threads — each an independent agent session in its own worker container.
 forked_from_session_id: edit-and-resend preserves the original attempt as a
 sibling branch (fork branches share run_id = one continuous timeline).
+
+Renamed from `threads` (Plan Phase 1 — thread→thread mechanical rename).
 """
 
 from __future__ import annotations
@@ -17,8 +19,8 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Lane(Base):
-    __tablename__ = "lanes"
+class Thread(Base):
+    __tablename__ = "threads"
 
     id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)
@@ -33,11 +35,11 @@ class Lane(Base):
     gateway_key: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)  # injected at container start
     next_seq: Mapped[int] = mapped_column(default=0)
     # Original prompt/persona_prompt — kill_replace respawns from this, never by
-    # re-asking the blueprint (plan §4 lane controls).
+    # re-asking the blueprint (plan §4 thread controls).
     spawn_context: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(nullable=True)
     container_id: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
-    run: Mapped["Run"] = relationship(back_populates="lanes")
+    run: Mapped["Run"] = relationship(back_populates="threads")

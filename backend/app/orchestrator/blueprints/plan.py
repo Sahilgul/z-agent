@@ -2,9 +2,9 @@
 
 hydrate  (deterministic): resolve repo scope; if run.work_item_id fetch the ADO
            work item into artifacts; compute blast_radius from the fleet graph.
-draft    (agentic planner lane): structured output target = contracts.Plan JSON
+draft    (agentic planner thread): structured output target = contracts.Plan JSON
            schema in the persona prompt.
-critique (agentic critic lane, FRESH lane/session): gets the draft Plan JSON +
+critique (agentic critic thread, FRESH thread/session): gets the draft Plan JSON +
            instructions to verify file/symbol claims via read-only grep on the
            mounted golden repos.
 present  (deterministic): parse+validate the Plan JSON with contracts.Plan, lint
@@ -56,7 +56,7 @@ CITATION_RE = re.compile(r"(\S+\.\w+:\d+(?:-\d+)?)")
 
 
 def _playbook_block(mode_name: str) -> str:
-    """WU6: the mode's playbooks ride the persona prompt into every lane."""
+    """WU6: the mode's playbooks ride the persona prompt into every thread."""
     from app.services.playbooks import playbooks_prompt_for_mode
     block = playbooks_prompt_for_mode(mode_name)
     return ("\n\n" + block) if block else ""
@@ -107,16 +107,16 @@ class PlanBlueprint(Blueprint):
     # --------------------------------------------------------------- draft
     async def _draft(self, ctx: BlueprintContext) -> None:
         # start_plan promotion (WU4): when a seed_plan is present (promoted from a
-        # debug run), skip the planner lane — the debug proposal IS the draft — and
+        # debug run), skip the planner thread — the debug proposal IS the draft — and
         # let the critic verify it fresh. The seed must still parse+validate as a
         # contracts.Plan, which _present enforces.
         seed = ctx.artifacts.get("seed_plan")
         if isinstance(seed, dict):
             ctx.artifacts["draft_plan"] = seed
             ctx.artifacts["draft_text"] = json.dumps(seed)
-            ctx.artifacts["draft_lane_id"] = None
+            ctx.artifacts["draft_thread_id"] = None
             return
-        lane_manager = ctx.services["lane_manager"]
+        thread_manager = ctx.services["thread_manager"]
         session = get_session()
         try:
             mode = session.query(Mode).filter_by(name="plan").one_or_none()
@@ -126,18 +126,18 @@ class PlanBlueprint(Blueprint):
         persona_prompt += _playbook_block("plan")
         repo: Repo = ctx.artifacts["repo_row"]
         prompt = self._compose_planner_prompt(ctx, repo)
-        lane = await lane_manager.spawn(
+        thread = await thread_manager.spawn(
             ctx.run, persona="planner", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=[repo],
-            resume_from_lane_id=ctx.artifacts.get("resume_from_lane_id"),
+            resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
-        ctx.artifacts["draft_lane_id"] = lane.id
-        await self._await_lane(lane.id)
-        ctx.artifacts["draft_text"] = self._last_message_text(lane.id)
+        ctx.artifacts["draft_thread_id"] = thread.id
+        await self._await_thread(thread.id)
+        ctx.artifacts["draft_text"] = self._last_message_text(thread.id)
 
     # --------------------------------------------------------------- critique
     async def _critique(self, ctx: BlueprintContext) -> None:
-        lane_manager = ctx.services["lane_manager"]
+        thread_manager = ctx.services["thread_manager"]
         draft_json = self._parse_json(ctx.artifacts.get("draft_text") or "")
         if draft_json is None:
             ctx.artifacts["critique_notes"] = "planner produced no parseable Plan JSON"
@@ -158,13 +158,13 @@ class PlanBlueprint(Blueprint):
             session.close()
         persona_prompt += _playbook_block("plan")
         repo: Repo = ctx.artifacts["repo_row"]
-        lane = await lane_manager.spawn(
+        thread = await thread_manager.spawn(
             ctx.run, persona="critic", prompt="Critique the plan above.",
             persona_prompt=persona_prompt, writable_repo=None, context_repos=[repo],
         )
-        ctx.artifacts["critique_lane_id"] = lane.id
-        await self._await_lane(lane.id)
-        ctx.artifacts["critique_notes"] = self._last_message_text(lane.id) or ""
+        ctx.artifacts["critique_thread_id"] = thread.id
+        await self._await_thread(thread.id)
+        ctx.artifacts["critique_notes"] = self._last_message_text(thread.id) or ""
 
     # --------------------------------------------------------------- present
     async def _present(self, ctx: BlueprintContext) -> None:
@@ -218,26 +218,26 @@ class PlanBlueprint(Blueprint):
         parts.append(f"\nTarget repo: {repo.name}")
         return "\n".join(parts)
 
-    async def _await_lane(self, lane_id: str, poll_seconds: float = 2.0) -> None:
+    async def _await_thread(self, thread_id: str, poll_seconds: float = 2.0) -> None:
         import asyncio
-        from app.db.models.lane import Lane
+        from app.db.models.thread import Thread
         while True:
             session = get_session()
             try:
-                lane = session.get(Lane, lane_id)
-                status = lane.status if lane else "failed"
+                thread = session.get(Thread, thread_id)
+                status = thread.status if thread else "failed"
             finally:
                 session.close()
             if status in ("idle", "completed", "failed", "stopped"):
                 return
             await asyncio.sleep(poll_seconds)
 
-    def _last_message_text(self, lane_id: str) -> str | None:
+    def _last_message_text(self, thread_id: str) -> str | None:
         session = get_session()
         try:
             row = (
                 session.query(Event)
-                .filter_by(lane_id=lane_id, type="message")
+                .filter_by(thread_id=thread_id, type="message")
                 .order_by(Event.seq.desc())
                 .first()
             )

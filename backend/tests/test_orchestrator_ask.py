@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from zagent_contracts import RunStage
 
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Run
@@ -13,18 +13,18 @@ from app.orchestrator.blueprints.base import BlueprintContext
 
 
 class _FakeLaneManager:
-    def __init__(self, lane):
-        self._lane = lane
+    def __init__(self, thread):
+        self._thread = thread
         self.spawned = []
         self.settled = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_lane_id=None):
+                    resume_session=False, resume_from_thread_id=None):
         self.spawned.append({"persona": persona, "prompt": prompt, "persona_prompt": persona_prompt})
-        return self._lane
+        return self._thread
 
-    async def settle_cost(self, lane_id):
-        self.settled.append(lane_id)
+    async def settle_cost(self, thread_id):
+        self.settled.append(thread_id)
 
 
 def _ctx(run, services=None, artifacts=None):
@@ -76,31 +76,31 @@ async def test_hydrate_missing_repo_raises(session, make_user):
         await bp._hydrate(ctx)
 
 
-# --------------------------------------------------------------- _await_lane
-async def test_await_lane_returns_when_completed(session, make_user, monkeypatch):
+# --------------------------------------------------------------- _await_thread
+async def test_await_thread_returns_when_completed(session, make_user, monkeypatch):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
     bp = AskBlueprint()
     # Should return immediately (status already terminal); no sleep invoked.
-    await bp._await_lane("l1", poll_seconds=0)
+    await bp._await_thread("l1", poll_seconds=0)
 
 
-async def test_await_lane_polls_until_terminal(session, make_user, monkeypatch):
+async def test_await_thread_polls_until_terminal(session, make_user, monkeypatch):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread]); session.commit()
 
     transitions = iter(["running", "running", "idle"])
 
     real_get = type(bp) if False else None
 
     async def fake_sleep(seconds):
-        # advance the lane status on each poll
+        # advance the thread status on each poll
         session.expire_all()
-        ln = session.get(Lane, "l1")
+        ln = session.get(Thread, "l1")
         try:
             ln.status = next(transitions)
             session.commit()
@@ -110,38 +110,38 @@ async def test_await_lane_polls_until_terminal(session, make_user, monkeypatch):
 
     monkeypatch.setattr("app.orchestrator.blueprints.ask.asyncio.sleep", fake_sleep)
     bp = AskBlueprint()
-    await bp._await_lane("l1", poll_seconds=0)
+    await bp._await_thread("l1", poll_seconds=0)
 
 
-async def test_await_lane_missing_lane_treated_as_failed(session, make_user):
+async def test_await_thread_missing_thread_treated_as_failed(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
     session.add(run); session.commit()
     bp = AskBlueprint()
-    # No lane row → status "failed" → terminal → returns immediately.
-    await bp._await_lane("ghost-lane", poll_seconds=0)
+    # No thread row → status "failed" → terminal → returns immediately.
+    await bp._await_thread("ghost-thread", poll_seconds=0)
 
 
 # --------------------------------------------------------------- _investigate
-async def test_investigate_spawns_lane_and_awaits(session, make_user, monkeypatch):
+async def test_investigate_spawns_thread_and_awaits(session, make_user, monkeypatch):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="explore")
     repo = Repo(name="ServerApp", integration_branch="main")
     mode = Mode(name="ask", autonomy_default="supervised", enabled=True, persona_prompt="You are a researcher.")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, repo, mode, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, repo, mode, thread]); session.commit()
 
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"repo_row": repo, "guidebook": "GB", "task": "explore"})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"repo_row": repo, "guidebook": "GB", "task": "explore"})
 
     # Short-circuit the await so we don't poll.
-    async def fake_await(self, lane_id, poll_seconds=2.0):
+    async def fake_await(self, thread_id, poll_seconds=2.0):
         return None
-    monkeypatch.setattr(AskBlueprint, "_await_lane", fake_await)
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
 
     await bp._investigate(ctx)
-    assert ctx.artifacts["lane_id"] == "l1"
+    assert ctx.artifacts["thread_id"] == "l1"
     assert lm.spawned[0]["persona"] == "researcher"
     assert "You are a researcher." in lm.spawned[0]["persona_prompt"]
     assert "GB" in lm.spawned[0]["persona_prompt"]
@@ -152,16 +152,16 @@ async def test_investigate_uses_run_title_when_no_task_artifact(session, make_us
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="my title")
     repo = Repo(name="ServerApp", integration_branch="main")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, repo, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, repo, thread]); session.commit()
 
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"repo_row": repo, "guidebook": ""})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"repo_row": repo, "guidebook": ""})
 
-    async def fake_await(self, lane_id, poll_seconds=2.0):
+    async def fake_await(self, thread_id, poll_seconds=2.0):
         return None
-    monkeypatch.setattr(AskBlueprint, "_await_lane", fake_await)
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
 
     await bp._investigate(ctx)
     assert lm.spawned[0]["prompt"] == "my title"
@@ -171,16 +171,16 @@ async def test_investigate_without_mode_row(session, make_user, monkeypatch):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
     repo = Repo(name="ServerApp", integration_branch="main")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, repo, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, repo, thread]); session.commit()
 
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"repo_row": repo, "guidebook": ""})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"repo_row": repo, "guidebook": ""})
 
-    async def fake_await(self, lane_id, poll_seconds=2.0):
+    async def fake_await(self, thread_id, poll_seconds=2.0):
         return None
-    monkeypatch.setattr(AskBlueprint, "_await_lane", fake_await)
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
 
     await bp._investigate(ctx)
     assert "Repo guidebook" in lm.spawned[0]["persona_prompt"]
@@ -190,11 +190,11 @@ async def test_investigate_without_mode_row(session, make_user, monkeypatch):
 async def test_complete_writes_trajectory_and_settles(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t", repo="ServerApp")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, lane]); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"lane_id": "l1"})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"thread_id": "l1"})
     await bp._complete(ctx)
     finished_at = ctx.run.finished_at
     session.expire_all()
@@ -207,24 +207,24 @@ async def test_complete_uses_auto_summary_when_present(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t",
               auto_summary="custom summary here")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, lane]); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"lane_id": "l1"})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"thread_id": "l1"})
     await bp._complete(ctx)
     session.expire_all()
     assert session.query(TrajectorySummary).one().summary == "custom summary here"
 
 
-async def test_complete_failed_lane_transitions_run_failed(session, make_user):
+async def test_complete_failed_thread_transitions_run_failed(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="failed")
-    session.add_all([run, lane]); session.commit()
-    lm = _FakeLaneManager(lane)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="failed")
+    session.add_all([run, thread]); session.commit()
+    lm = _FakeLaneManager(thread)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"lane_id": "l1"})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"thread_id": "l1"})
     await bp._complete(ctx)
     assert ctx.run.stage == RunStage.FAILED.value
     session.expire_all()
@@ -232,13 +232,13 @@ async def test_complete_failed_lane_transitions_run_failed(session, make_user):
     assert lm.settled == []
 
 
-async def test_complete_without_lane_id(session, make_user):
+async def test_complete_without_thread_id(session, make_user):
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
     session.add(run); session.commit()
     lm = _FakeLaneManager(None)
     bp = AskBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={})
     await bp._complete(ctx)
     assert ctx.run.finished_at is not None
     assert lm.settled == []

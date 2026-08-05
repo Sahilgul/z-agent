@@ -6,11 +6,11 @@ never enter the shared corpus before a human sees the diff). Approval is where
 a private episode becomes a shared fact: the approver picks the promoted scope
 (global | repo | user). Retrieval reads APPROVED items only.
 
-Retrieval (run start, per run not per lane): search space = approved global +
+Retrieval (run start, per run not per thread): search space = approved global +
 approved repo-scoped (run repo) + your own approved user-scoped items + your
 OWN trajectory_summaries (episodic recall, un-gated — your history is yours).
 A cheap model reranks candidates by trigger_description against the task text;
-top-k are pinned into every lane prompt of the run. Any gateway failure falls
+top-k are pinned into every thread prompt of the run. Any gateway failure falls
 back to deterministic lexical ranking — retrieval must never fail a run.
 ~200 rows: no embeddings (the RAG ban is for code, not curated rows).
 """
@@ -34,7 +34,7 @@ log = get_logger(service="knowledge")
 
 SCOPES = {"global", "repo", "user"}
 
-# Per-run prompt-block cache: the first lane of a run pays the rerank, the
+# Per-run prompt-block cache: the first thread of a run pays the rerank, the
 # rest reuse the block. Single-host local era; cross-host store lands Phase 5.
 _block_cache: dict[str, str] = {}
 
@@ -277,7 +277,7 @@ async def rerank(task_text: str, candidates: list[dict], ranker=None) -> list[di
 
 
 def render_block(pinned: list[dict]) -> str:
-    """Render pinned candidates as the lane-prompt knowledge block."""
+    """Render pinned candidates as the thread-prompt knowledge block."""
     if not pinned:
         return ""
     knowledge = [p for p in pinned if p["kind"] == "knowledge"]
@@ -296,7 +296,7 @@ def render_block(pinned: list[dict]) -> str:
 async def prompt_block_for_run(run_id: str, task_text: str, user_id: int,
                                repo: str | None, ranker=None) -> str:
     """The per-run pinned-knowledge block. Cached per run_id so only the first
-    lane of a run pays the rerank; swarm lanes share the block."""
+    thread of a run pays the rerank; swarm threads share the block."""
     if run_id in _block_cache:
         return _block_cache[run_id]
     pinned = await rerank(task_text, _search_space(user_id, repo), ranker=ranker)

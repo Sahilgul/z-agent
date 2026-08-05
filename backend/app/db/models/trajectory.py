@@ -1,4 +1,4 @@
-"""trajectory_summaries — per-lane distilled trajectory, written at run end FROM
+"""trajectory_summaries — per-thread distilled trajectory, written at run end FROM
 DAY ONE (plan §7) so the Phase 5 Sleep-Time Distiller has history to mine.
 Episodic recall: a user's OWN trajectory_summaries are in their retrieval search
 space (privacy-safe by construction — your own history is yours).
@@ -23,7 +23,7 @@ class TrajectorySummary(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[str] = mapped_column(sa.ForeignKey("runs.id"), index=True)
-    lane_id: Mapped[str | None] = mapped_column(nullable=True)
+    thread_id: Mapped[str | None] = mapped_column(nullable=True)
     user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id"))
     summary: Mapped[str] = mapped_column(sa.Text)
     key_decisions: Mapped[list] = mapped_column(sa.JSON, default=list)

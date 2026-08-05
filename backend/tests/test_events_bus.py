@@ -7,7 +7,7 @@ from zagent_contracts import StepEvent, StepKind
 
 import app.db.base as db_base
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.events import bus as bus_mod
 
@@ -23,16 +23,16 @@ def _consumer(fake_redis, relay=None):
     return c
 
 
-def _step(run_id="r1", lane_id="l1", seq=0, kind=StepKind.MESSAGE, uuid_=None):
-    return StepEvent(run_id=run_id, lane_id=lane_id, seq=seq, kind=kind,
+def _step(run_id="r1", thread_id="l1", seq=0, kind=StepKind.MESSAGE, uuid_=None):
+    return StepEvent(run_id=run_id, thread_id=thread_id, seq=seq, kind=kind,
                       title="t", detail={"x": 1}, sdk_message_uuid=uuid_)
 
 
 async def test_process_persists_event_and_acks(session, make_user, fake_redis):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, thread])
     session.commit()
     relay = _consumer(fake_redis).relay
     c = _consumer(fake_redis, relay)
@@ -44,8 +44,8 @@ async def test_process_persists_event_and_acks(session, make_user, fake_redis):
     assert row.sdk_message_uuid == "sdk-1"
     assert row.payload == {"x": 1}
     session.expire_all()
-    lane_row = session.get(Lane, "l1")
-    assert lane_row.next_seq == 6
+    thread_row = session.get(Thread, "l1")
+    assert thread_row.next_seq == 6
     run_row = session.get(Run, "r1")
     assert run_row.last_active_at is not None
     assert any(m[0] == "r1" and m[1].get("type") == "step" for m in relay.published)
@@ -54,51 +54,51 @@ async def test_process_persists_event_and_acks(session, make_user, fake_redis):
 async def test_process_advances_next_seq_only_when_higher(session, make_user, fake_redis):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=10)
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=10)
+    session.add_all([run, thread])
     session.commit()
     c = _consumer(fake_redis)
     ev = _step(seq=3)
     await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
     session.expire_all()
-    assert session.get(Lane, "l1").next_seq == 10  # 3 < 10, no advance
+    assert session.get(Thread, "l1").next_seq == 10  # 3 < 10, no advance
 
 
 async def test_process_captures_session_id_from_turn_complete(session, make_user, fake_redis):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, thread])
     session.commit()
     c = _consumer(fake_redis)
     ev = StepEvent(
-        run_id="r1", lane_id="l1", seq=0, kind=StepKind.STATUS, title="turn complete",
+        run_id="r1", thread_id="l1", seq=0, kind=StepKind.STATUS, title="turn complete",
         detail={"num_turns": 1, "duration_ms": 200, "is_error": False,
                 "session_id": "sess-abc-123", "usage": {}},
         sdk_message_uuid="sdk-1",
     )
     await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
     session.expire_all()
-    assert session.get(Lane, "l1").session_id == "sess-abc-123"
+    assert session.get(Thread, "l1").session_id == "sess-abc-123"
 
 
 async def test_process_ignores_session_id_on_non_turn_complete_events(session, make_user, fake_redis):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, thread])
     session.commit()
     c = _consumer(fake_redis)
     # A status event that isn't "turn complete" must not write session_id even
     # if it happens to carry one — only the SDK's ResultMessage marks a turn
     # boundary, and that is the only session_id worth persisting.
     ev = StepEvent(
-        run_id="r1", lane_id="l1", seq=0, kind=StepKind.STATUS, title="session init",
+        run_id="r1", thread_id="l1", seq=0, kind=StepKind.STATUS, title="session init",
         detail={"session_id": "should-not-stick"},
     )
     await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
     session.expire_all()
-    assert session.get(Lane, "l1").session_id is None
+    assert session.get(Thread, "l1").session_id is None
 
 
 async def test_process_deadletters_malformed_payload(session, make_user, fake_redis):
@@ -162,8 +162,8 @@ async def test_ensure_group_creates_then_busygroup(fake_redis):
 async def test_loop_processes_registered_stream(session, make_user, fake_redis):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread])
     session.commit()
     c = _consumer(fake_redis)
     c.register_run("events:r1")

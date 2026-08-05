@@ -8,16 +8,16 @@ faculty (plan §6) — an organ the next context READS.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
-def write_handoff(workspace: Path, run_id: str, lane_id: str, summary: str,
+def write_handoff(workspace: Path, run_id: str, thread_id: str, summary: str,
                   open_items: list[str], next_steps: list[str]) -> Path:
     handoff = workspace / "handoff.md"
     lines = [
-        f"# Handoff — run {run_id} / lane {lane_id}",
-        f"_written {datetime.now(timezone.utc).isoformat()}_",
+        f"# Handoff — run {run_id} / thread {thread_id}",
+        f"_written {datetime.now(UTC).isoformat()}_",
         "",
         "## State so far",
         summary,
@@ -34,18 +34,18 @@ def write_handoff(workspace: Path, run_id: str, lane_id: str, summary: str,
 
 
 def git_checkpoint(workspace: Path, message: str = "zagent checkpoint") -> str | None:
-    """Commit WIP inside the disposable stamp so a replacement lane re-stamps
+    """Commit WIP inside the disposable stamp so a replacement thread re-stamps
     with context — the stamp is disposable, but checkpoints ride pushed branches
     for survivors (plan §3)."""
-    add = subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True)
+    add = subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True, check=False)
     if add.returncode != 0:
         return None
     commit = subprocess.run(
         ["git", "-C", str(workspace), "commit", "-m", message, "--no-verify"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     if commit.returncode != 0:
         return None
     rev = subprocess.run(["git", "-C", str(workspace), "rev-parse", "HEAD"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     return rev.stdout.strip() if rev.returncode == 0 else None

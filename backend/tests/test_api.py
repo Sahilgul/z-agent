@@ -6,7 +6,7 @@ import pytest
 from app.db.models.approval import Approval
 from app.db.models.event import Event
 from app.db.models.knowledge import KnowledgeItem
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, Run
@@ -456,21 +456,21 @@ def test_get_run_other_users_hidden(auth_client, session, make_user):
 def test_run_events(auth_client, session, make_user):
     client, _, _, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="completed")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="t", payload={}))
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="t", payload={}))
     session.commit()
     r = client.get("/runs/r1/events")
     assert r.status_code == 200
     assert len(r.json()) == 1
 
 
-def test_run_lanes(auth_client, session, make_user):
+def test_run_threads(auth_client, session, make_user):
     client, _, _, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="completed")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, lane]); session.commit()
-    r = client.get("/runs/r1/lanes")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
+    r = client.get("/runs/r1/threads")
     assert r.status_code == 200
     assert r.json()[0]["persona"] == "researcher"
 
@@ -503,8 +503,8 @@ def test_post_intent_abandon_needs_confirm(auth_client, session, make_user):
 def test_post_intent_text_message(auth_client, session, make_user):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread]); session.commit()
     r = client.post("/runs/r1/intent", json={"text": "hurry up", "source": "text"})
     assert r.status_code == 200
     assert r.json()["intent"] == "send_message"
@@ -546,49 +546,49 @@ def test_runs_require_auth(app_client):
     assert client.get("/runs").status_code == 401
 
 
-# --------------------------------------------------------------- lanes
-def test_lane_nudge(auth_client, session, make_user):
+# --------------------------------------------------------------- threads
+def test_thread_nudge(auth_client, session, make_user):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane]); session.commit()
-    r = client.post("/lanes/l1/nudge", json={"run_id": "r1", "text": "go"})
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread]); session.commit()
+    r = client.post("/threads/l1/nudge", json={"run_id": "r1", "text": "go"})
     assert r.status_code == 200
     assert services["run_manager"].nudged[-1] == ("r1", "l1", "go")
 
 
-def test_lane_stop(auth_client, session, make_user):
+def test_thread_stop(auth_client, session, make_user):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane]); session.commit()
-    r = client.post("/lanes/l1/stop", json={"run_id": "r1"})
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread]); session.commit()
+    r = client.post("/threads/l1/stop", json={"run_id": "r1"})
     assert r.status_code == 200
     assert any(msg.get("type") == "interrupt" for _, msg in services["control"].calls)
 
 
-def test_lane_pin(auth_client, session, make_user):
+def test_thread_pin(auth_client, session, make_user):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    session.add_all([run, lane]); session.commit()
-    r = client.post("/lanes/l1/pin", json={"run_id": "r1"})
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    session.add_all([run, thread]); session.commit()
+    r = client.post("/threads/l1/pin", json={"run_id": "r1"})
     assert r.status_code == 200
     assert services["relay"].published
 
 
-def test_lane_action_run_not_found(auth_client, session, make_user):
+def test_thread_action_run_not_found(auth_client, session, make_user):
     client, _, _, user = auth_client
     other = make_user("other", role="member", status="active")
     session.add(Run(id="r1", created_by=other.id, mode="ask", stage="investigating"))
     session.commit()
-    r = client.post("/lanes/l1/nudge", json={"run_id": "r1", "text": "x"})
+    r = client.post("/threads/l1/nudge", json={"run_id": "r1", "text": "x"})
     assert r.status_code == 404
 
 
-def test_lanes_require_auth(app_client):
+def test_threads_require_auth(app_client):
     client, _, _ = app_client
-    assert client.post("/lanes/l1/nudge", json={"run_id": "r1", "text": "x"}).status_code == 401
+    assert client.post("/threads/l1/nudge", json={"run_id": "r1", "text": "x"}).status_code == 401
 
 
 # --------------------------------------------------------------- approvals
@@ -601,9 +601,9 @@ def test_pending_approvals_empty(auth_client):
 def test_pending_approvals(auth_client, session, make_user):
     client, _, _, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    ap = Approval(id="a1", run_id="r1", lane_id="l1", kind="bash", payload={})
-    session.add_all([run, lane, ap]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    ap = Approval(id="a1", run_id="r1", thread_id="l1", kind="bash", payload={})
+    session.add_all([run, thread, ap]); session.commit()
     r = client.get("/approvals")
     assert r.status_code == 200
     assert r.json()[0]["id"] == "a1"
@@ -616,8 +616,8 @@ def test_pending_approvals_filtered_by_run(auth_client, session, make_user):
     for rid, aid in (("r1", "a1"), ("r2", "a2")):
         session.add_all([
             Run(id=rid, created_by=user.id, mode="ask", stage="investigating"),
-            Lane(id=f"l-{rid}", run_id=rid, persona="researcher", status="running"),
-            Approval(id=aid, run_id=rid, lane_id=f"l-{rid}", kind="bash", payload={}),
+            Thread(id=f"l-{rid}", run_id=rid, persona="researcher", status="running"),
+            Approval(id=aid, run_id=rid, thread_id=f"l-{rid}", kind="bash", payload={}),
         ])
     session.commit()
     assert {a["id"] for a in client.get("/approvals").json()} == {"a1", "a2"}
@@ -633,9 +633,9 @@ def test_pending_approvals_hides_expired_cards(auth_client, session, make_user):
     session.add(Run(id="r1", created_by=user.id, mode="ask", stage="investigating"))
     now = datetime.now(timezone.utc)
     session.add_all([
-        Approval(id="a-dead", run_id="r1", lane_id="l1", kind="bash", payload={},
+        Approval(id="a-dead", run_id="r1", thread_id="l1", kind="bash", payload={},
                  expires_at=now - timedelta(minutes=1)),
-        Approval(id="a-live", run_id="r1", lane_id="l1", kind="bash", payload={},
+        Approval(id="a-live", run_id="r1", thread_id="l1", kind="bash", payload={},
                  expires_at=now + timedelta(minutes=10)),
     ])
     session.commit()
@@ -647,9 +647,9 @@ def test_pending_approvals_hides_expired_cards(auth_client, session, make_user):
 def test_decide_approval(auth_client, session, make_user):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    ap = Approval(id="a1", run_id="r1", lane_id="l1", kind="bash", payload={})
-    session.add_all([run, lane, ap]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    ap = Approval(id="a1", run_id="r1", thread_id="l1", kind="bash", payload={})
+    session.add_all([run, thread, ap]); session.commit()
     r = client.post("/approvals/a1/decide", json={"decision": "approved", "reason": "ok"})
     assert r.status_code == 200
     assert services["approval_service"].decisions[-1] == ("a1", "approved", user.id, "ok")
@@ -665,9 +665,9 @@ def test_decide_approval_other_user_hidden(auth_client, session, make_user):
     client, _, _, _ = auth_client
     other = make_user("other", role="member", status="active")
     run = Run(id="r1", created_by=other.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    ap = Approval(id="a1", run_id="r1", lane_id="l1", kind="bash", payload={})
-    session.add_all([run, lane, ap]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    ap = Approval(id="a1", run_id="r1", thread_id="l1", kind="bash", payload={})
+    session.add_all([run, thread, ap]); session.commit()
     r = client.post("/approvals/a1/decide", json={"decision": "denied"})
     assert r.status_code == 404
 
@@ -675,9 +675,9 @@ def test_decide_approval_other_user_hidden(auth_client, session, make_user):
 def test_decide_approval_value_error(auth_client, session, make_user, monkeypatch):
     client, _, services, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="running")
-    ap = Approval(id="a1", run_id="r1", lane_id="l1", kind="bash", payload={})
-    session.add_all([run, lane, ap]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
+    ap = Approval(id="a1", run_id="r1", thread_id="l1", kind="bash", payload={})
+    session.add_all([run, thread, ap]); session.commit()
 
     async def boom(*a, **k):
         raise ValueError("already decided")
@@ -695,9 +695,9 @@ def test_approvals_require_auth(app_client):
 def test_session_replay(auth_client, session, make_user):
     client, _, _, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="completed")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed")
-    session.add_all([run, lane]); session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="t", payload={}))
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="t", payload={}))
     session.commit()
     r = client.get("/sessions/r1/replay")
     assert r.status_code == 200
@@ -733,10 +733,10 @@ def test_session_transcript_falls_back_to_events(auth_client, session):
     client, _, _, user = auth_client
     session.add_all([
         Run(id="r1", created_by=user.id, mode="ask", stage="completed"),
-        Lane(id="l1", run_id="r1", persona="researcher", status="completed"),
+        Thread(id="l1", run_id="r1", persona="researcher", status="completed"),
     ])
     session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="from-db", payload={}))
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="from-db", payload={}))
     session.commit()
 
     r = client.get("/sessions/r1/transcript")
@@ -752,14 +752,14 @@ def test_session_transcript_not_found(auth_client):
 def test_session_resumable(auth_client, session, make_user, monkeypatch):
     client, _, _, user = auth_client
     run = Run(id="r1", created_by=user.id, mode="ask", stage="completed")
-    lane = Lane(id="l1", run_id="r1", persona="researcher", status="completed", session_id="s1")
-    session.add_all([run, lane]); session.commit()
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed", session_id="s1")
+    session.add_all([run, thread]); session.commit()
     import app.api.sessions as route
-    monkeypatch.setattr(route, "session_volume_exists", lambda run_id, lane_id: True)
+    monkeypatch.setattr(route, "session_volume_exists", lambda run_id, thread_id: True)
     r = client.get("/sessions/r1/resumable")
     assert r.status_code == 200
     body = r.json()
-    assert body["lanes"][0]["resumable"] is True
+    assert body["threads"][0]["resumable"] is True
 
 
 def test_session_resumable_not_found(auth_client):
@@ -866,22 +866,22 @@ def test_post_intent_merge_pr_confirmed(auth_client, session, make_user):
     assert services["run_manager"].prs_merged == [("r1", user.id)]
 
 
-# --------------------------------------------------------------- lane controls (§4)
-def test_post_intent_stop_lane(auth_client, session, make_user):
+# --------------------------------------------------------------- thread controls (§4)
+def test_post_intent_stop_thread(auth_client, session, make_user):
     client, _, services, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
     session.commit()
     r = client.post("/runs/r1/intent",
-                    json={"intent": "stop_lane", "source": "button", "lane_id": "l1"})
+                    json={"intent": "stop_thread", "source": "button", "thread_id": "l1"})
     assert r.status_code == 200
-    assert services["run_manager"].stopped_lanes == [("r1", "l1")]
+    assert services["run_manager"].stopped_threads == [("r1", "l1")]
 
 
-def test_post_intent_stop_lane_needs_lane_id(auth_client, session, make_user):
+def test_post_intent_stop_thread_needs_thread_id(auth_client, session, make_user):
     client, _, _, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
     session.commit()
-    r = client.post("/runs/r1/intent", json={"intent": "stop_lane", "source": "button"})
+    r = client.post("/runs/r1/intent", json={"intent": "stop_thread", "source": "button"})
     assert r.status_code == 422
 
 
@@ -890,7 +890,7 @@ def test_post_intent_pin_finding(auth_client, session, make_user):
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
     session.commit()
     r = client.post("/runs/r1/intent",
-                    json={"intent": "pin_finding", "source": "button", "lane_id": "l1",
+                    json={"intent": "pin_finding", "source": "button", "thread_id": "l1",
                           "payload": {"note": "dedupe key"}})
     assert r.status_code == 200
     assert services["run_manager"].pinned == [("r1", "l1", "dedupe key")]
@@ -903,7 +903,7 @@ def test_post_intent_kill_replace_needs_confirm(auth_client, session, make_user)
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
     session.commit()
     r = client.post("/runs/r1/intent",
-                    json={"intent": "kill_replace", "source": "button", "lane_id": "l1"})
+                    json={"intent": "kill_replace", "source": "button", "thread_id": "l1"})
     assert r.status_code == 200
     assert r.json()["status"] == "confirm"
 
@@ -913,25 +913,25 @@ def test_post_intent_kill_replace_returns_replacement(auth_client, session, make
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
     session.commit()
     r = client.post("/runs/r1/intent",
-                    json={"intent": "kill_replace", "source": "button", "lane_id": "l1",
+                    json={"intent": "kill_replace", "source": "button", "thread_id": "l1",
                           "confirmed": True})
     assert r.status_code == 200
-    assert r.json()["replacement_lane_id"] == "replacement-l1"
+    assert r.json()["replacement_thread_id"] == "replacement-l1"
 
 
-def test_lanes_serializer_includes_heartbeat_and_container(auth_client, session, make_user):
+def test_threads_serializer_includes_heartbeat_and_container(auth_client, session, make_user):
     from datetime import datetime, timezone
     client, _, _, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
-    session.add(Lane(id="l1", run_id="r1", persona="explorer", status="running",
+    session.add(Thread(id="l1", run_id="r1", persona="explorer", status="running",
                      heartbeat_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
                      container_id="cid-1"))
     session.commit()
-    r = client.get("/runs/r1/lanes")
+    r = client.get("/runs/r1/threads")
     assert r.status_code == 200
-    lane = r.json()[0]
-    assert lane["heartbeat_at"].startswith("2026-08-01")
-    assert lane["has_container"] is True
+    thread = r.json()[0]
+    assert thread["heartbeat_at"].startswith("2026-08-01")
+    assert thread["has_container"] is True
 
 
 # --------------------------------------------------------------- evidence serializer
@@ -946,7 +946,7 @@ def test_run_evidence_404_without_plan(auth_client, session, make_user):
 def test_run_evidence_returns_package_with_hash(auth_client, session, make_user):
     client, _, _, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="development", stage="pr_ready", title="t"))
-    session.add(Lane(id="l1", run_id="r1", persona="developer", status="completed"))
+    session.add(Thread(id="l1", run_id="r1", persona="developer", status="completed"))
     session.add(Plan(run_id="r1", status="approved",
                      structured={"title": "P", "steps": [{"index": 0, "title": "s0", "status": "done"}]}))
     session.commit()

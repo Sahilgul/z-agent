@@ -3,6 +3,7 @@ Frontend TS types in apps/web/src/types mirror these by hand.
 """
 
 from zagent_contracts.events import SCHEMA_VERSION, StepEvent, StepKind, TypingDelta
+from zagent_contracts.identifiers import IDENTIFIER_LAYERS
 from zagent_contracts.intents import (
     IRREVERSIBLE_INTENTS,
     ActionKind,
@@ -19,6 +20,7 @@ __all__ = [
     "StepEvent",
     "StepKind",
     "TypingDelta",
+    "IDENTIFIER_LAYERS",
     "ActionKind",
     "IntentSource",
     "RunStage",

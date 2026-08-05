@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.redis_factory import in_memory, make_redis
 from app.core.security import verify_pin
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Run
 
 
@@ -37,9 +37,9 @@ async def test_memory_clients_share_the_bus(monkeypatch):
         sub = make_redis()
         received = []
         async with sub.pubsub() as ps:
-            await ps.subscribe("lane:x:control")
+            await ps.subscribe("thread:x:control")
             await ps.get_message(timeout=1.0)  # consume subscribe ack first
-            await pub.publish("lane:x:control", "stop")
+            await pub.publish("thread:x:control", "stop")
             msg = await ps.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if msg:
                 received.append(msg["data"])
@@ -75,12 +75,12 @@ async def test_memory_ingest_loop_consumes_without_freezing(session, make_user, 
         u = make_user("m")
         session.add_all([
             Run(id="rm1", created_by=u.id, mode="ask", stage="investigating"),
-            Lane(id="lm1", run_id="rm1", persona="researcher", status="running", next_seq=0),
+            Thread(id="lm1", run_id="rm1", persona="researcher", status="running", next_seq=0),
         ])
         session.commit()
 
         consumer = IngestConsumer(FakeRelay())
-        ev = StepEvent(run_id="rm1", lane_id="lm1", seq=0, kind=StepKind.MESSAGE,
+        ev = StepEvent(run_id="rm1", thread_id="lm1", seq=0, kind=StepKind.MESSAGE,
                        title="hello", detail={})
         await consumer.redis.xadd(STREAM_PREFIX + "rm1", {"payload": ev.model_dump_json()})
         consumer.register_run("rm1")
@@ -113,7 +113,7 @@ async def test_memory_relay_delta_poll_delivers(monkeypatch):
         try:
             await asyncio.sleep(0.15)  # let the delta loop subscribe first
             await publisher.publish("deltas:rd1", json.dumps(
-                {"lane_id": "l", "kind": "typing", "text": "hi"}))
+                {"thread_id": "l", "kind": "typing", "text": "hi"}))
             msg = await asyncio.wait_for(queue.get(), timeout=2)
             assert msg["type"] == "delta"
             assert msg["delta"]["text"] == "hi"

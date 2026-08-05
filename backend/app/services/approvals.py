@@ -117,7 +117,7 @@ class ApprovalService:
         approval = Approval(
             id=fields.get("approval_id", str(uuid.uuid4())),
             run_id=run_id,
-            lane_id=fields.get("lane_id"),
+            thread_id=fields.get("thread_id"),
             kind=fields.get("kind", "tool"),
             payload=json.loads(fields.get("payload", "{}")),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl),
@@ -134,7 +134,7 @@ class ApprovalService:
                                            ["allow_once", "always_allow", "deny_tool"])
         await self.relay._fanout(run_id, {"type": "approval_card", "approval": {
             "id": approval.id, "kind": approval.kind, "payload": approval.payload,
-            "lane_id": approval.lane_id,
+            "thread_id": approval.thread_id,
         }})
         self._push_to_owner(run_id, approval)
 

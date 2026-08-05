@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.sandbox import manager as sb
@@ -68,14 +68,14 @@ def test_stamp_mcp_config_survives_detached_repo(tmp_path):
     assert sb.stamp_mcp_config(tmp_path / "ws", ExplodingRepo()) is False
 
 
-def _make_run_lane(session, make_user, lane_id="l1", session_id=None, budget=5.0):
+def _make_run_thread(session, make_user, thread_id="l1", session_id=None, budget=5.0):
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating")
-    lane = Lane(id=lane_id, run_id="r1", persona="researcher", status="running",
+    thread = Thread(id=thread_id, run_id="r1", persona="researcher", status="running",
                 budget_usd=budget, gateway_key="vk-1", session_id=session_id)
-    session.add_all([run, lane])
+    session.add_all([run, thread])
     session.commit()
-    return run, lane
+    return run, thread
 
 
 def test_docker_raises_sandbox_unavailable(monkeypatch):
@@ -128,50 +128,50 @@ def test_stamp_clone_propagates_failure(monkeypatch):
         sb.stamp_clone(repo, "r1", "l1")
 
 
-def test_lane_env_read_only(session, make_user):
-    run, lane = _make_run_lane(session, make_user)
+def test_thread_env_read_only(session, make_user):
+    run, thread = _make_run_thread(session, make_user)
     mgr = sb.SandboxManager()
-    env = mgr.lane_env(run, lane, "task", "persona", "default", writable=False)
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
     assert env["RUN_ID"] == "r1"
-    assert env["LANE_ID"] == "l1"
+    assert env["THREAD_ID"] == "l1"
     assert env["PERMISSION_MODE"] == "default"
     assert env["ANTHROPIC_AUTH_TOKEN"] == "vk-1"
     assert "FLEET_PAT" not in env
     assert "RESUME_SESSION_ID" not in env
 
 
-def test_lane_env_writable_includes_fleet_pat(session, make_user):
-    run, lane = _make_run_lane(session, make_user)
+def test_thread_env_writable_includes_fleet_pat(session, make_user):
+    run, thread = _make_run_thread(session, make_user)
     mgr = sb.SandboxManager()
-    env = mgr.lane_env(run, lane, "task", "persona", "acceptEdits", writable=True)
+    env = mgr.thread_env(run, thread, "task", "persona", "acceptEdits", writable=True)
     assert env["FLEET_PAT"] == sb.get_settings().fleet_pat
     assert env["ZAGENT_CREDENTIAL_SCOPE"] == "fleet"
     assert env["PERMISSION_MODE"] == "acceptEdits"
 
 
-def test_lane_env_resume_session(session, make_user):
-    run, lane = _make_run_lane(session, make_user, session_id="sess-9")
+def test_thread_env_resume_session(session, make_user):
+    run, thread = _make_run_thread(session, make_user, session_id="sess-9")
     mgr = sb.SandboxManager()
-    env = mgr.lane_env(run, lane, "task", "persona", "default", writable=False)
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
     assert env["RESUME_SESSION_ID"] == "sess-9"
 
 
-def test_lane_env_proxy_injection(session, make_user, monkeypatch):
-    run, lane = _make_run_lane(session, make_user)
+def test_thread_env_proxy_injection(session, make_user, monkeypatch):
+    run, thread = _make_run_thread(session, make_user)
     mgr = sb.SandboxManager()
     monkeypatch.setattr(mgr.settings, "package_proxy_url", "http://proxy:3128", raising=False)
-    env = mgr.lane_env(run, lane, "task", "persona", "default", writable=False)
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
     assert env["HTTP_PROXY"] == "http://proxy:3128"
     assert env["NO_PROXY"] == "redis,gateway,localhost"
 
 
-def test_run_lane_container_read_only(session, make_user, monkeypatch):
-    run, lane = _make_run_lane(session, make_user)
+def test_run_thread_container_read_only(session, make_user, monkeypatch):
+    run, thread = _make_run_thread(session, make_user)
     client = _FakeDockerClient()
     _patch_docker(monkeypatch, client)
     mgr = sb.SandboxManager()
     repo = Repo(name="ServerApp", integration_branch="main")
-    cid = mgr.run_lane_container(run, lane, "task", "persona", "default",
+    cid = mgr.run_thread_container(run, thread, "task", "persona", "default",
                                   writable_repo=None, context_repos=[repo])
     assert cid == client.containers._container.id
     _, kwargs = client.containers.run_calls[0]
@@ -182,15 +182,15 @@ def test_run_lane_container_read_only(session, make_user, monkeypatch):
     assert any(v.get("mode") == "ro" for v in mounts.values())
 
 
-def test_run_lane_container_writable_stamps(session, make_user, monkeypatch):
-    run, lane = _make_run_lane(session, make_user)
+def test_run_thread_container_writable_stamps(session, make_user, monkeypatch):
+    run, thread = _make_run_thread(session, make_user)
     client = _FakeDockerClient()
     _patch_docker(monkeypatch, client)
     stamped = []
-    monkeypatch.setattr(sb, "stamp_clone", lambda repo, run_id, lane_id: stamped.append((repo.name, run_id, lane_id)) or "/tmp/stamp")
+    monkeypatch.setattr(sb, "stamp_clone", lambda repo, run_id, thread_id: stamped.append((repo.name, run_id, thread_id)) or "/tmp/stamp")
     mgr = sb.SandboxManager()
     repo = Repo(name="ServerApp", integration_branch="main")
-    cid = mgr.run_lane_container(run, lane, "task", "persona", "acceptEdits",
+    cid = mgr.run_thread_container(run, thread, "task", "persona", "acceptEdits",
                                   writable_repo=repo, context_repos=[])
     assert cid == client.containers._container.id
     assert stamped == [("ServerApp", "r1", "l1")]

@@ -3,7 +3,7 @@
 redis_url scheme decides the client:
 - "redis://…"  -> real server (all deployments set ZAGENT_REDIS_URL explicitly)
 - "memory://…" -> in-process fakeredis over a SHARED FakeServer, so the relay,
-  ingest consumer, lane control, and approval service all see the same bus.
+  ingest consumer, thread control, and approval service all see the same bus.
   This is the no-Docker local-dev path; nothing else about the bus changes.
 """
 

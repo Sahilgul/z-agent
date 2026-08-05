@@ -1,6 +1,6 @@
-"""Ask mode blueprint (Phase 1 first milestone): single read-only lane.
+"""Ask mode blueprint (Phase 1 first milestone): single read-only thread.
 
-hydrate (deterministic) -> investigate (agentic: one lane, live-grep ground
+hydrate (deterministic) -> investigate (agentic: one thread, live-grep ground
 truth, hand-written ServerApp AGENTS.md seed until maps arrive in Phase 2) ->
 complete (deterministic: cost readback + trajectory summary).
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 from zagent_contracts import RunStage
 
 from app.db.base import get_session
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.trajectory import TrajectorySummary
@@ -36,7 +36,7 @@ class AskBlueprint(Blueprint):
 
     async def _hydrate(self, ctx: BlueprintContext) -> None:
         """Deterministic pre-run hydration (plan §8 ado/hydrate grows from here):
-        resolve target repo, load guidebook seed, compose the lane prompt."""
+        resolve target repo, load guidebook seed, compose the thread prompt."""
         session = get_session()
         try:
             target = ctx.artifacts.get("repo") or ctx.run.repo or "ServerApp"
@@ -50,7 +50,7 @@ class AskBlueprint(Blueprint):
         ctx.artifacts["guidebook"] = guidebook
 
     async def _investigate(self, ctx: BlueprintContext) -> None:
-        lane_manager = ctx.services["lane_manager"]
+        thread_manager = ctx.services["thread_manager"]
         session = get_session()
         try:
             mode = session.query(Mode).filter_by(name="ask").one_or_none()
@@ -64,21 +64,21 @@ class AskBlueprint(Blueprint):
         )
         repo: Repo = ctx.artifacts["repo_row"]
         task = ctx.artifacts.get("task") or ctx.run.title
-        lane = await lane_manager.spawn(
+        thread = await thread_manager.spawn(
             ctx.run, persona="researcher", prompt=task, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=[repo],
-            resume_from_lane_id=ctx.artifacts.get("resume_from_lane_id"),
+            resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
-        ctx.artifacts["lane_id"] = lane.id
-        # Phase 1: block until the lane's turn ends (idle/completed/failed).
-        await self._await_lane(lane.id)
+        ctx.artifacts["thread_id"] = thread.id
+        # Phase 1: block until the thread's turn ends (idle/completed/failed).
+        await self._await_thread(thread.id)
 
-    async def _await_lane(self, lane_id: str, poll_seconds: float = 2.0) -> None:
+    async def _await_thread(self, thread_id: str, poll_seconds: float = 2.0) -> None:
         while True:
             session = get_session()
             try:
-                lane = session.get(Lane, lane_id)
-                status = lane.status if lane else "failed"
+                thread = session.get(Thread, thread_id)
+                status = thread.status if thread else "failed"
             finally:
                 session.close()
             if status in ("idle", "completed", "failed", "stopped"):
@@ -86,25 +86,25 @@ class AskBlueprint(Blueprint):
             await asyncio.sleep(poll_seconds)
 
     async def _complete(self, ctx: BlueprintContext) -> None:
-        lane_manager = ctx.services["lane_manager"]
+        thread_manager = ctx.services["thread_manager"]
         session = get_session()
         try:
             run = ctx.run
-            lane_id = ctx.artifacts.get("lane_id")
-            if lane_id:
-                lane = session.get(Lane, lane_id)
-                if lane and lane.status == "failed":
+            thread_id = ctx.artifacts.get("thread_id")
+            if thread_id:
+                thread = session.get(Thread, thread_id)
+                if thread and thread.status == "failed":
                     transition(run, RunStage.FAILED)
                     session.commit()
                     return
                 # Trajectory summaries written FROM DAY ONE (distiller history).
                 session.add(TrajectorySummary(
-                    run_id=run.id, lane_id=lane_id, user_id=run.created_by,
+                    run_id=run.id, thread_id=thread_id, user_id=run.created_by,
                     summary=run.auto_summary or f"Ask run on {run.repo or 'repo'}: {run.title[:200]}",
                 ))
             run.finished_at = datetime.now(timezone.utc)
             session.commit()
         finally:
             session.close()
-        if ctx.artifacts.get("lane_id"):
-            await lane_manager.settle_cost(ctx.artifacts["lane_id"])
+        if ctx.artifacts.get("thread_id"):
+            await thread_manager.settle_cost(ctx.artifacts["thread_id"])

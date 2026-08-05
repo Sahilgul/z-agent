@@ -1,6 +1,6 @@
 """SDK messages -> canonical StepEvent, at the worker edge (plan §1b hard rule).
 
-One Normalizer instance per lane. A StepEvent is emitted ONCE, COMPLETE, at step
+One Normalizer instance per thread. A StepEvent is emitted ONCE, COMPLETE, at step
 end: tool_use blocks are held until their tool_result arrives, then one event
 carrying input+output is produced. Streaming fragments ride TypingDelta only.
 """
@@ -9,16 +9,25 @@ from __future__ import annotations
 
 from typing import Any
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ResultMessage,
-    SystemMessage,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
-    UserMessage,
-)
+# The CAS SDK is an OPTIONAL extra (worker[cas]). The new LangGraph engine does
+# not use this Normalizer (it has its own event emitter). Import the message
+# types lazily so this module imports cleanly without the cas extra installed.
+try:
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ResultMessage,
+        SystemMessage,
+        TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+except ImportError:  # pragma: no cover
+    AssistantMessage = ResultMessage = SystemMessage = None  # type: ignore[assignment,misc]
+    TextBlock = ThinkingBlock = ToolResultBlock = None  # type: ignore[assignment,misc]
+    ToolUseBlock = UserMessage = None  # type: ignore[assignment,misc]
+
 from zagent_contracts import StepEvent, StepKind, TypingDelta
 
 TOOL_KIND_MAP = {
@@ -54,18 +63,18 @@ def _tool_title(name: str, tool_input: dict[str, Any]) -> str:
 
 
 class Normalizer:
-    """Per-lane stateful normalizer: allocates seq, pairs tool_use with tool_result."""
+    """Per-thread stateful normalizer: allocates seq, pairs tool_use with tool_result."""
 
-    def __init__(self, run_id: str, lane_id: str) -> None:
+    def __init__(self, run_id: str, thread_id: str) -> None:
         self.run_id = run_id
-        self.lane_id = lane_id
+        self.thread_id = thread_id
         self._seq = 0
         self._pending_tools: dict[str, dict[str, Any]] = {}
 
     def _next(self, kind: StepKind, title: str, detail: dict[str, Any], uuid: str | None) -> StepEvent:
         event = StepEvent(
             run_id=self.run_id,
-            lane_id=self.lane_id,
+            thread_id=self.thread_id,
             seq=self._seq,
             kind=kind,
             title=title,
@@ -160,7 +169,7 @@ class Normalizer:
         )
 
     def _delta(self, kind: StepKind, text: str) -> TypingDelta:
-        return TypingDelta(run_id=self.run_id, lane_id=self.lane_id, kind=kind, text=text)
+        return TypingDelta(run_id=self.run_id, thread_id=self.thread_id, kind=kind, text=text)
 
 
 def _result_text(block: ToolResultBlock) -> str:

@@ -55,13 +55,13 @@ def gate_intent(run: Run, intent: UserIntent) -> None:
     if intent.source in (IntentSource.TEXT, IntentSource.VOICE):
         if intent.intent not in READ_ONLY_INTENTS and not intent.confirmed:
             raise IntentNeedsConfirmation(intent)
-    # Lane controls are always legal (§1a/§4: per-lane stop/nudge/pin/kill-replace
-    # stay available while the agent works — they target a lane, not the run stage).
+    # Thread controls are always legal (§1a/§4: per-thread stop/nudge/pin/kill-replace
+    # stay available while the agent works — they target a thread, not the run stage).
     # SWITCH_MODE is always legal too: it sets run.mode for the next send, never
     # touches in-flight work, so no stage gates it.
     legal = set(run.available_actions) | {ActionKind.NUDGE.value, ActionKind.SEND_MESSAGE.value,
                                           ActionKind.STOP_RUN.value, ActionKind.ABANDON_RUN.value,
-                                          ActionKind.STOP_LANE.value, ActionKind.PIN_FINDING.value,
+                                          ActionKind.STOP_THREAD.value, ActionKind.PIN_FINDING.value,
                                           ActionKind.KILL_REPLACE.value, ActionKind.LET_IT_RUN.value,
                                           ActionKind.SWITCH_MODE.value}
     if intent.intent.value not in legal:

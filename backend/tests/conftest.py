@@ -49,7 +49,7 @@ import app.db.base as db_base  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.db.models import (  # noqa: E402  (registers all models on Base.metadata)
     Approval, Delivery, PrLink, EvalCase, EvalRun, Event, IdeaComment,
-    IdeaThread, KnowledgeItem, Playbook, Lane, Mode, Notification, Proposal,
+    IdeaThread, KnowledgeItem, Playbook, Thread, Mode, Notification, Proposal,
     Repo, RepoProfile, Plan, PlanStep, Run, TrajectorySummary, Trigger,
     TriggerEventLog, SetupCode, User,
 )
@@ -155,7 +155,7 @@ def _fast_idle_polls(monkeypatch):
     monkeypatch.setattr(approvals_mod, "IDLE_POLL_SECONDS", 0.01)
 
 
-# Lane spawn injects the flywheel knowledge block via the gateway-backed rerank;
+# Thread spawn injects the flywheel knowledge block via the gateway-backed rerank;
 # in unit tests the block is empty by default (knowledge-service tests exercise
 # rerank/fallback directly with injected rankers — no real sockets anywhere).
 @pytest.fixture(autouse=True)
@@ -325,8 +325,8 @@ class FakeRelay:
     async def publish_step(self, run_id, event):
         self.published.append((run_id, {"type": "step", "event": event}))
 
-    async def publish_lane_status(self, run_id, lane_id, status):
-        self.published.append((run_id, {"type": "lane_status", "lane_id": lane_id, "status": status}))
+    async def publish_thread_status(self, run_id, thread_id, status):
+        self.published.append((run_id, {"type": "thread_status", "thread_id": thread_id, "status": status}))
 
     async def publish_run_stage(self, run_id, stage, available_actions):
         self.published.append((run_id, {"type": "run_stage", "stage": stage, "available_actions": available_actions}))
@@ -345,17 +345,17 @@ class FakeControl:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
 
-    async def interrupt(self, lane_id):
-        self.calls.append((f"lane:{lane_id}:control", {"type": "interrupt"}))
+    async def interrupt(self, thread_id):
+        self.calls.append((f"thread:{thread_id}:control", {"type": "interrupt"}))
 
-    async def nudge(self, lane_id, text):
-        self.calls.append((f"lane:{lane_id}:control", {"type": "nudge", "text": text}))
+    async def nudge(self, thread_id, text):
+        self.calls.append((f"thread:{thread_id}:control", {"type": "nudge", "text": text}))
 
-    async def set_mode(self, lane_id, permission_mode):
-        self.calls.append((f"lane:{lane_id}:control", {"type": "mode", "mode": permission_mode}))
+    async def set_mode(self, thread_id, permission_mode):
+        self.calls.append((f"thread:{thread_id}:control", {"type": "mode", "mode": permission_mode}))
 
-    async def kill(self, lane_id):
-        self.calls.append((f"lane:{lane_id}:control", {"type": "kill"}))
+    async def kill(self, thread_id):
+        self.calls.append((f"thread:{thread_id}:control", {"type": "kill"}))
 
     async def resolve_approval(self, approval_id, decision, reason=""):
         self.calls.append((f"approval:{approval_id}:decision", {"decision": decision, "reason": reason}))
@@ -364,7 +364,7 @@ class FakeControl:
         pass
 
 
-class FakeLaneManager:
+class FakeThreadManager:
     def __init__(self) -> None:
         self.spawned: list[dict] = []
         self.settled: list[str] = []
@@ -372,36 +372,36 @@ class FakeLaneManager:
         self._spawn_count = 0
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                   resume_session=False, resume_from_lane_id=None):
-        from app.db.models.lane import Lane
+                   resume_session=False, resume_from_thread_id=None):
+        from app.db.models.thread import Thread
         self._spawn_count += 1
-        lane = Lane(id=str(uuid.uuid4()), run_id=run.id, persona=persona,
+        thread = Thread(id=str(uuid.uuid4()), run_id=run.id, persona=persona,
                     repo_scope=writable_repo.name if writable_repo else None,
                     status="running")
         self.spawned.append({
             "run_id": run.id, "persona": persona, "prompt": prompt,
-            "resume_from_lane_id": resume_from_lane_id,
+            "resume_from_thread_id": resume_from_thread_id,
         })
-        return lane
+        return thread
 
-    async def settle_cost(self, lane_id):
-        self.settled.append(lane_id)
+    async def settle_cost(self, thread_id):
+        self.settled.append(thread_id)
         return 0.0
 
-    async def release_key(self, lane_id):
-        self.released.append(lane_id)
+    async def release_key(self, thread_id):
+        self.released.append(thread_id)
 
 
 class FakeRunManager:
-    def __init__(self, lane_manager=None, relay=None, control=None):
-        self.lane_manager = lane_manager or FakeLaneManager()
+    def __init__(self, thread_manager=None, relay=None, control=None):
+        self.thread_manager = thread_manager or FakeThreadManager()
         self.relay = relay or FakeRelay()
         self.control = control or FakeControl()
         self.created: list[dict] = []
         self.stopped: list[str] = []
         self.abandoned: list[str] = []
         self.nudged: list[tuple] = []
-        self.stopped_lanes: list[tuple] = []
+        self.stopped_threads: list[tuple] = []
         self.pinned: list[tuple] = []
         self.replaced: list[tuple] = []
         self.continued: list[str] = []
@@ -428,8 +428,8 @@ class FakeRunManager:
     async def abandon_run(self, run_id):
         self.abandoned.append(run_id)
 
-    async def nudge_lane(self, run_id, lane_id, text):
-        self.nudged.append((run_id, lane_id, text))
+    async def nudge_thread(self, run_id, thread_id, text):
+        self.nudged.append((run_id, thread_id, text))
 
     async def continue_to_development(self, run_id):
         self.continued.append(run_id)
@@ -449,16 +449,16 @@ class FakeRunManager:
     async def start_plan(self, run_id):
         self.started_plans.append(run_id)
 
-    async def stop_lane(self, run_id, lane_id):
-        self.stopped_lanes.append((run_id, lane_id))
+    async def stop_thread(self, run_id, thread_id):
+        self.stopped_threads.append((run_id, thread_id))
 
-    async def pin_finding(self, run_id, lane_id, note=""):
-        self.pinned.append((run_id, lane_id, note))
+    async def pin_finding(self, run_id, thread_id, note=""):
+        self.pinned.append((run_id, thread_id, note))
 
-    async def kill_replace_lane(self, run_id, lane_id):
-        from app.db.models.lane import Lane
-        self.replaced.append((run_id, lane_id))
-        return Lane(id=f"replacement-{lane_id}", run_id=run_id, persona="explorer",
+    async def kill_replace_thread(self, run_id, thread_id):
+        from app.db.models.thread import Thread
+        self.replaced.append((run_id, thread_id))
+        return Thread(id=f"replacement-{thread_id}", run_id=run_id, persona="explorer",
                     status="running")
 
     async def switch_mode(self, run_id, mode_name):
@@ -548,9 +548,9 @@ def app_client(monkeypatch, engine):
     fake_relay = FakeRelay()
     fake_control = FakeControl()
     fake_gateway = FakeGateway()
-    fake_lane_manager = FakeLaneManager()
+    fake_thread_manager = FakeThreadManager()
     fake_ingest = FakeIngest(relay=fake_relay)
-    fake_run_manager = FakeRunManager(lane_manager=fake_lane_manager, relay=fake_relay, control=fake_control)
+    fake_run_manager = FakeRunManager(thread_manager=fake_thread_manager, relay=fake_relay, control=fake_control)
     fake_approval = FakeApprovalService()
     from app.services.hydration import PrewarmPool
     fake_prewarm_pool = PrewarmPool()
@@ -561,7 +561,7 @@ def app_client(monkeypatch, engine):
     monkeypatch.setattr(main_mod, "IngestConsumer", lambda *a, **k: fake_ingest)
     monkeypatch.setattr(main_mod, "LaneControl", lambda *a, **k: fake_control)
     monkeypatch.setattr(main_mod, "GatewayClient", lambda *a, **k: fake_gateway)
-    monkeypatch.setattr(main_mod, "LaneManager", lambda *a, **k: fake_lane_manager)
+    monkeypatch.setattr(main_mod, "ThreadManager", lambda *a, **k: fake_thread_manager)
     monkeypatch.setattr(main_mod, "RunManager", lambda *a, **k: fake_run_manager)
     monkeypatch.setattr(main_mod, "ApprovalService", lambda *a, **k: fake_approval)
     monkeypatch.setattr(main_mod, "start_fetch_loop", lambda: None)
@@ -572,7 +572,7 @@ def app_client(monkeypatch, engine):
     app.state.ingest = fake_ingest
     app.state.control = fake_control
     app.state.gateway = fake_gateway
-    app.state.lane_manager = fake_lane_manager
+    app.state.thread_manager = fake_thread_manager
     app.state.run_manager = fake_run_manager
     app.state.approval_service = fake_approval
     app.state.prewarm_pool = fake_prewarm_pool
@@ -581,7 +581,7 @@ def app_client(monkeypatch, engine):
     client = TestClient(app, raise_server_exceptions=False)
     yield client, app, {
         "relay": fake_relay, "control": fake_control, "gateway": fake_gateway,
-        "lane_manager": fake_lane_manager, "ingest": fake_ingest,
+        "thread_manager": fake_thread_manager, "ingest": fake_ingest,
         "run_manager": fake_run_manager, "approval_service": fake_approval,
     }
 
@@ -620,10 +620,10 @@ def admin_client(app_client, admin_user):
 # silence unused-import warnings for re-exports used by test modules
 __all__ = [
     "Approval", "Delivery", "PrLink", "EvalCase", "EvalRun", "Event", "IdeaComment",
-    "IdeaThread", "KnowledgeItem", "Playbook", "Lane", "Mode", "Notification",
+    "IdeaThread", "KnowledgeItem", "Playbook", "Thread", "Mode", "Notification",
     "Proposal", "Repo", "RepoProfile", "Plan", "PlanStep", "Run",
     "TrajectorySummary", "Trigger", "TriggerEventLog", "SetupCode", "User",
-    "FakeRedis", "FakeRelay", "FakeControl", "FakeLaneManager", "FakeRunManager",
+    "FakeRedis", "FakeRelay", "FakeControl", "FakeThreadManager", "FakeRunManager",
     "FakeIngest", "FakeApprovalService", "FakeGateway", "FakeAdoClient", "make_token",
     "FakeResponse", "FakeAsyncClient", "install_fake_httpx",
 ]

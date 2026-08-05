@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.db.base import get_session
 from app.db.models.event import Event
 from app.db.models.idea import IdeaComment, IdeaThread
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Run
 from app.db.models.user import User
@@ -59,16 +59,16 @@ DEBUG_PERSONA = (
 
 AGENT_RND_PERSONA = (
     "You are the Lead of a HAMI research swarm. You decompose investigative tasks into "
-    "distinct, non-overlapping slices and author each Explorer lane's prompt; you never "
-    "investigate slices yourself in the decompose turn. When the requested lane count is "
+    "distinct, non-overlapping slices and author each Explorer thread's prompt; you never "
+    "investigate slices yourself in the decompose turn. When the requested thread count is "
     "wasteful for the task, say so and counter-propose with reasoning. At synthesis time "
     "you merge your Explorers' notebooks into one answer — consensus, disagreements, open "
     "questions — citing their file:line evidence. You are read-only: you never modify files."
 )
 
-# Permissions scope (plan §6 — modes as data): which repos a lane under this mode may
+# Permissions scope (plan §6 — modes as data): which repos a thread under this mode may
 # stamp a writable clone for. Empty = read-only. ``repos`` is an allowlist; ``writable``
-# gates whether the lane gets a writable mount at all.
+# gates whether the thread gets a writable mount at all.
 READ_ONLY_PERMS = {"writable": False, "repos": []}
 SERVERAPP_WRITABLE_PERMS = {"writable": True, "repos": ["ServerApp"]}
 ANY_REPO_WRITABLE_PERMS = {"writable": True, "repos": []}
@@ -176,7 +176,7 @@ def _seed_demo_run(session) -> None:
         return
     system = session.query(User).filter_by(username="system").one()
     run_id = str(uuid.uuid4())
-    lane_id = str(uuid.uuid4())
+    thread_id = str(uuid.uuid4())
     base = datetime.now(timezone.utc) - timedelta(hours=1)
     session.add(Run(
         id=run_id, created_by=system.id, source="cron", mode="ask", autonomy="supervised",
@@ -185,14 +185,14 @@ def _seed_demo_run(session) -> None:
         repo="ServerApp", cost_usd=0.0, tokens=19140, available_actions=[],
         started_at=base, finished_at=base + timedelta(seconds=47), last_active_at=base,
     ))
-    session.add(Lane(
-        id=lane_id, run_id=run_id, persona="researcher", repo_scope="ServerApp",
+    session.add(Thread(
+        id=thread_id, run_id=run_id, persona="researcher", repo_scope="ServerApp",
         status="completed", next_seq=len(DEMO_EVENTS), cost_usd=0.0,
         finished_at=base + timedelta(seconds=47),
     ))
     for seq, (kind, title, detail) in enumerate(DEMO_EVENTS):
         session.add(Event(
-            run_id=run_id, lane_id=lane_id, seq=seq,
+            run_id=run_id, thread_id=thread_id, seq=seq,
             ts=base + timedelta(seconds=seq * 6), type=kind.value, title=title,
             payload=detail, sdk_message_uuid=None,
         ))

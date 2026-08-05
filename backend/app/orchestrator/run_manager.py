@@ -20,14 +20,14 @@ from zagent_contracts import RunStage
 from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Run
 from app.events.bus import IngestConsumer
 from app.events.control import LaneControl
 from app.events.relay import Relay
 from app.orchestrator.blueprints.base import BlueprintContext
-from app.orchestrator.lane_manager import LaneManager
+from app.orchestrator.thread_manager import ThreadManager
 from app.orchestrator.mode_engine import blueprint_for
 from app.sandbox.manager import sandbox_manager
 from app.services.runs import transition
@@ -44,11 +44,11 @@ def _title_is_generic(task: str, work_item_id: int) -> bool:
 
 
 class RunManager:
-    def __init__(self, ingest: IngestConsumer, relay: Relay, lane_manager: LaneManager,
+    def __init__(self, ingest: IngestConsumer, relay: Relay, thread_manager: ThreadManager,
                  control: LaneControl) -> None:
         self.ingest = ingest
         self.relay = relay
-        self.lane_manager = lane_manager
+        self.thread_manager = thread_manager
         self.control = control
         self._tasks: dict[str, asyncio.Task] = {}
 
@@ -97,7 +97,7 @@ class RunManager:
         blueprint = blueprint_for(run.mode)
         ctx = BlueprintContext(
             run=run,
-            services={"lane_manager": self.lane_manager, "relay": self.relay,
+            services={"thread_manager": self.thread_manager, "relay": self.relay,
                       "control": self.control},
             artifacts={"task": task, "repo": repo,
                        **({"fanout": fanout} if fanout is not None else {})},
@@ -133,16 +133,16 @@ class RunManager:
         session = get_session()
         try:
             run = session.get(Run, run_id)
-            lanes = session.query(Lane).filter_by(run_id=run_id).all()
-            lane_ids = [l.id for l in lanes if l.status in ("running", "idle", "queued")]
+            threads = session.query(Thread).filter_by(run_id=run_id).all()
+            thread_ids = [l.id for l in threads if l.status in ("running", "idle", "queued")]
             transition(run, RunStage.INTERRUPTED)
             session.commit()
             available = run.available_actions
         finally:
             session.close()
-        for lane_id in lane_ids:
-            await self.control.interrupt(lane_id)
-            await self.relay.publish_lane_status(run_id, lane_id, "stopped")
+        for thread_id in thread_ids:
+            await self.control.interrupt(thread_id)
+            await self.relay.publish_thread_status(run_id, thread_id, "stopped")
         task = self._tasks.get(run_id)
         if task and not task.done():
             task.cancel()
@@ -153,17 +153,17 @@ class RunManager:
         confirmation — never confused with Stop."""
         session = get_session()
         try:
-            lanes = session.query(Lane).filter_by(run_id=run_id).all()
-            lane_ids = [l.id for l in lanes]
-            container_ids = [l.container_id for l in lanes if l.container_id]
+            threads = session.query(Thread).filter_by(run_id=run_id).all()
+            thread_ids = [l.id for l in threads]
+            container_ids = [l.container_id for l in threads if l.container_id]
             run = session.get(Run, run_id)
             transition(run, RunStage.ABANDONED)
             run.finished_at = datetime.now(timezone.utc)
             session.commit()
         finally:
             session.close()
-        for lane_id in lane_ids:
-            await self.control.kill(lane_id)
+        for thread_id in thread_ids:
+            await self.control.kill(thread_id)
         for container_id in container_ids:
             await asyncio.to_thread(sandbox_manager.stop_container, container_id)
         task = self._tasks.get(run_id)
@@ -173,77 +173,77 @@ class RunManager:
         self.ingest.unregister_run(run_id)
         await self.relay.publish_run_stage(run_id, RunStage.ABANDONED.value, [])
 
-    async def nudge_lane(self, run_id: str, lane_id: str, text: str) -> None:
+    async def nudge_thread(self, run_id: str, thread_id: str, text: str) -> None:
         """Typed Lead-nudge: stays enabled while the agent works (§1a carve-out).
         Worker semantics: graceful interrupt + inject + resume."""
-        await self.control.nudge(lane_id, text)
+        await self.control.nudge(thread_id, text)
         session = get_session()
         try:
-            lane = session.get(Lane, lane_id)
-            if lane:
-                lane.status = "running"
+            thread = session.get(Thread, thread_id)
+            if thread:
+                thread.status = "running"
                 session.commit()
         finally:
             session.close()
-        await self.relay.publish_lane_status(run_id, lane_id, "running")
+        await self.relay.publish_thread_status(run_id, thread_id, "running")
 
-    # ------------------------------------------------------------ lane controls (§4)
-    async def stop_lane(self, run_id: str, lane_id: str) -> None:
-        """Per-lane stop from the swarm view: immediate interrupt, trace kept,
+    # ------------------------------------------------------------ thread controls (§4)
+    async def stop_thread(self, run_id: str, thread_id: str) -> None:
+        """Per-thread stop from the swarm view: immediate interrupt, trace kept,
         the rest of the swarm runs on. Safe + reversible — no confirmation."""
-        await self.control.interrupt(lane_id)
+        await self.control.interrupt(thread_id)
         session = get_session()
         try:
-            lane = session.get(Lane, lane_id)
-            if lane and lane.run_id == run_id:
-                lane.status = "stopped"
-                lane.finished_at = datetime.now(timezone.utc)
+            thread = session.get(Thread, thread_id)
+            if thread and thread.run_id == run_id:
+                thread.status = "stopped"
+                thread.finished_at = datetime.now(timezone.utc)
                 session.commit()
         finally:
             session.close()
-        await self.relay.publish_lane_status(run_id, lane_id, "stopped")
+        await self.relay.publish_thread_status(run_id, thread_id, "stopped")
 
-    async def pin_finding(self, run_id: str, lane_id: str, note: str = "") -> None:
-        """Pin a finding from a lane overlay (§4): lands as a run event the
+    async def pin_finding(self, run_id: str, thread_id: str, note: str = "") -> None:
+        """Pin a finding from a thread overlay (§4): lands as a run event the
         knowledge flywheel's approval inbox (Phase 3) picks up as a candidate."""
         session = get_session()
         try:
-            lane = session.get(Lane, lane_id)
-            if lane is None or lane.run_id != run_id:
-                raise ValueError("lane not found in this run")
+            thread = session.get(Thread, thread_id)
+            if thread is None or thread.run_id != run_id:
+                raise ValueError("thread not found in this run")
             session.add(Event(
-                run_id=run_id, lane_id=lane_id, seq=lane.next_seq,
-                type="pin", title=note[:200] or f"pinned finding from {lane.persona}",
-                payload={"persona": lane.persona, "note": note},
+                run_id=run_id, thread_id=thread_id, seq=thread.next_seq,
+                type="pin", title=note[:200] or f"pinned finding from {thread.persona}",
+                payload={"persona": thread.persona, "note": note},
             ))
             session.commit()
         finally:
             session.close()
-        await self.relay.publish_lane_status(run_id, lane_id, "pinned")
+        await self.relay.publish_thread_status(run_id, thread_id, "pinned")
 
-    async def kill_replace_lane(self, run_id: str, lane_id: str) -> Lane:
-        """Kill-and-replace (§4): the old lane dies; a FRESH lane spawns with the
+    async def kill_replace_thread(self, run_id: str, thread_id: str) -> Thread:
+        """Kill-and-replace (§4): the old thread dies; a FRESH thread spawns with the
         SAME spawn context (stored at spawn — never re-derived from the
         blueprint). The session volume survives the container, so the
-        replacement resumes where the killed lane left off — now actually
-        true, because resume_from_lane_id mounts the old session volume and
+        replacement resumes where the killed thread left off — now actually
+        true, because resume_from_thread_id mounts the old session volume and
         inherits the old session_id."""
         session = get_session()
         try:
-            lane = session.get(Lane, lane_id)
-            if lane is None or lane.run_id != run_id:
-                raise ValueError("lane not found in this run")
-            context = dict(lane.spawn_context or {})
-            persona = lane.persona
-            repo_scope = lane.repo_scope
-            lane.status = "replaced"
-            lane.finished_at = datetime.now(timezone.utc)
+            thread = session.get(Thread, thread_id)
+            if thread is None or thread.run_id != run_id:
+                raise ValueError("thread not found in this run")
+            context = dict(thread.spawn_context or {})
+            persona = thread.persona
+            repo_scope = thread.repo_scope
+            thread.status = "replaced"
+            thread.finished_at = datetime.now(timezone.utc)
             run = session.get(Run, run_id)
             session.commit()
         finally:
             session.close()
-        await self.control.kill(lane_id)
-        await self.relay.publish_lane_status(run_id, lane_id, "replaced")
+        await self.control.kill(thread_id)
+        await self.relay.publish_thread_status(run_id, thread_id, "replaced")
 
         repo = None
         if repo_scope:
@@ -253,14 +253,14 @@ class RunManager:
                 repo = session.query(Repo).filter_by(name=repo_scope).one_or_none()
             finally:
                 session.close()
-        replacement = await self.lane_manager.spawn(
+        replacement = await self.thread_manager.spawn(
             run, persona=persona,
-            prompt=context.get("prompt", "Resume the lane's work."),
+            prompt=context.get("prompt", "Resume the thread's work."),
             persona_prompt=context.get("persona_prompt", ""),
             writable_repo=repo, context_repos=[repo] if repo else [],
-            resume_from_lane_id=lane_id,
+            resume_from_thread_id=thread_id,
         )
-        await self.relay.publish_lane_status(run_id, replacement.id, "running")
+        await self.relay.publish_thread_status(run_id, replacement.id, "running")
         return replacement
 
     # ------------------------------------------------------------ plan HITL chains
@@ -278,7 +278,7 @@ class RunManager:
     async def start_plan(self, run_id: str) -> None:
         """start_plan intent (WU4): promote a debug run's proposed fix into a plan.
         Loads the debug run's latest draft Plan and chains into the plan blueprint
-        with it as a ``seed_plan`` — the planner lane is skipped (the debug proposal
+        with it as a ``seed_plan`` — the planner thread is skipped (the debug proposal
         IS the draft) and the critic verifies it fresh. The run keeps its id; its
         mode stays ``debug`` but the plan blueprint runs to produce an approvable
         Plan row."""
@@ -310,7 +310,7 @@ class RunManager:
         blueprint = blueprint_for(blueprint_mode)
         ctx = BlueprintContext(
             run=run,
-            services={"lane_manager": self.lane_manager, "relay": self.relay,
+            services={"thread_manager": self.thread_manager, "relay": self.relay,
                       "control": self.control},
             artifacts={"task": task, "repo": repo, **(extra_artifacts or {})},
         )
@@ -320,8 +320,8 @@ class RunManager:
         """Mid-session mode switch (plan §6): validate the Mode row is
         enabled, set run.mode, and relay. Deliberately does NOT touch
         in-flight work — the switch takes effect on the next send_message,
-        which chains the new blueprint (respawning the lane on the prior
-        session volume) instead of nudging the old lane."""
+        which chains the new blueprint (respawning the thread on the prior
+        session volume) instead of nudging the old thread."""
         session = get_session()
         try:
             mode = session.query(Mode).filter_by(name=mode_name, enabled=True).one_or_none()
@@ -338,9 +338,9 @@ class RunManager:
     # ------------------------------------------------------------ delivery HITL
     async def create_pr(self, run_id: str) -> None:
         """create_pr intent (plan §9): open the evidence-gated PR, then stage the
-        run at pr_ready (available_actions = review_diff + merge_pr). The lane
-        workspace path is the develop lane's stamped clone, persisted on
-        Run.session_volume_path when the develop lane started (deterministic
+        run at pr_ready (available_actions = review_diff + merge_pr). The thread
+        workspace path is the develop thread's stamped clone, persisted on
+        Run.session_volume_path when the develop thread started (deterministic
         fallback: workspaces_dir/run_id/<repo>)."""
         from app.services import delivery
         from app.core.config import get_settings
@@ -387,7 +387,7 @@ class RunManager:
     # -------------------------------------------------------- reconciliation
 
     async def reconcile_on_boot(self) -> int:
-        """Boot-time sweep (plan §4): every run whose lanes are gone is marked
+        """Boot-time sweep (plan §4): every run whose threads are gone is marked
         interrupted with an Inbox card offering resume — no silent zombies."""
         session = get_session()
         try:

@@ -37,14 +37,14 @@ async def test_create_card_persists_and_fans_out(session, make_user, fake_redis)
     session.commit()
     svc = _svc(fake_redis)
     await svc._create_card("r-c", {
-        "approval_id": "ap-1", "lane_id": "l-1", "kind": "tool",
+        "approval_id": "ap-1", "thread_id": "l-1", "kind": "tool",
         "payload": '{"x": 1}',
     })
     row = session.query(Approval).one()
     assert row.id == "ap-1"
     assert row.kind == "tool"
     assert row.payload == {"x": 1}
-    assert row.lane_id == "l-1"
+    assert row.thread_id == "l-1"
     assert any(m[0] == "r-c" and m[1].get("type") == "run_stage" for m in svc.relay.published)
     assert any(m[1].get("type") == "approval_card" for m in svc.relay.published)
 
@@ -128,7 +128,7 @@ async def test_loop_processes_approval_card(session, make_user, fake_redis):
     svc = _svc(fake_redis)
     svc.register_run("r-lp")
     await fake_redis.xadd("approvals:r-lp", {
-        "approval_id": "ap-lp", "lane_id": "l-1", "kind": "tool",
+        "approval_id": "ap-lp", "thread_id": "l-1", "kind": "tool",
         "payload": '{"k": 1}',
     })
     task = asyncio.create_task(svc._loop())

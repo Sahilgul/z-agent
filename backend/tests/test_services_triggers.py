@@ -5,7 +5,7 @@ rate limit (queue + drain), gated-only trust. run_manager is a fake.
 
 import pytest
 
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.db.models.trigger import Trigger, TriggerEventLog
 from app.services import triggers
@@ -26,8 +26,8 @@ class FakeRM:
                              "work_item_id": work_item_id, "autonomy": autonomy})
         return run
 
-    async def nudge_lane(self, run_id, lane_id, text):
-        self.nudges.append({"run_id": run_id, "lane_id": lane_id, "text": text})
+    async def nudge_thread(self, run_id, thread_id, text):
+        self.nudges.append({"run_id": run_id, "thread_id": thread_id, "text": text})
 
 
 def _event(descriptor="desc-ali", revision=3, state="zagent-plan", title="fix billing"):
@@ -143,7 +143,7 @@ async def test_state_flapping_coalesces_into_nudge(session, bound_user):
     run_id = first["verdicts"][0]["run_id"]
     # an ACTIVE run exists for the same work item
     session.add(Run(id=run_id, created_by=bound_user.id, mode="plan", stage="planning"))
-    session.add(Lane(id="lane-1", run_id=run_id, persona="lead", status="running"))
+    session.add(Thread(id="thread-1", run_id=run_id, persona="lead", status="running"))
     session.commit()
     second = await triggers.process(_event(revision=4), rm)
     assert second["verdicts"][0]["status"] == "nudged"

@@ -13,26 +13,26 @@ def _control(fake_redis):
 
 async def test_interrupt_publishes_correct_channel(fake_redis):
     c = _control(fake_redis)
-    await c.interrupt("lane-1")
-    assert fake_redis.published[-1] == ("lane:lane-1:control", json.dumps({"type": "interrupt"}))
+    await c.interrupt("thread-1")
+    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "interrupt"}))
 
 
 async def test_nudge_publishes_text(fake_redis):
     c = _control(fake_redis)
-    await c.nudge("lane-1", "go faster")
-    assert fake_redis.published[-1] == ("lane:lane-1:control", json.dumps({"type": "nudge", "text": "go faster"}))
+    await c.nudge("thread-1", "go faster")
+    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "nudge", "text": "go faster"}))
 
 
 async def test_set_mode_publishes_mode(fake_redis):
     c = _control(fake_redis)
-    await c.set_mode("lane-1", "acceptEdits")
-    assert fake_redis.published[-1] == ("lane:lane-1:control", json.dumps({"type": "mode", "mode": "acceptEdits"}))
+    await c.set_mode("thread-1", "acceptEdits")
+    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "mode", "mode": "acceptEdits"}))
 
 
 async def test_kill_publishes_kill(fake_redis):
     c = _control(fake_redis)
-    await c.kill("lane-1")
-    assert fake_redis.published[-1] == ("lane:lane-1:control", json.dumps({"type": "kill"}))
+    await c.kill("thread-1")
+    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "kill"}))
 
 
 async def test_resolve_approval_rpushes_decision(fake_redis):
@@ -54,4 +54,4 @@ async def test_close(fake_redis):
 
 def test_channel_format():
     c = _control(None)
-    assert c._channel("l1") == "lane:l1:control"
+    assert c._channel("l1") == "thread:l1:control"

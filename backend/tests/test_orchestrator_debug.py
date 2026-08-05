@@ -4,7 +4,7 @@ import pytest
 from zagent_contracts import RunStage
 
 from app.db.models.event import Event
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
@@ -13,14 +13,14 @@ from app.orchestrator.blueprints.debug import DebugBlueprint
 
 
 class _FakeLaneManager:
-    def __init__(self, lane):
-        self._lane = lane
+    def __init__(self, thread):
+        self._thread = thread
         self.spawned = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_lane_id=None):
+                    resume_session=False, resume_from_thread_id=None):
         self.spawned.append({"persona": persona, "prompt": prompt, "writable": writable_repo})
-        return self._lane
+        return self._thread
 
 
 def _ctx(run, services=None, artifacts=None):
@@ -136,23 +136,23 @@ async def test_reproduce_persists_test_run_event(session, make_user, monkeypatch
     await bp._reproduce(ctx)
     session.expire_all()
     ev = session.query(Event).filter_by(run_id="r1", type="test_run").one()
-    assert ev.lane_id == "control-plane"
+    assert ev.thread_id == "control-plane"
     assert ev.payload["passed"] is False
 
 
 # --------------------------------------------------------------- diagnose
-async def test_diagnose_spawns_readonly_lane(session, make_user):
+async def test_diagnose_spawns_readonly_thread(session, make_user):
     run, repo, u = _seed(session, make_user)
-    lane = Lane(id="l1", run_id="r1", persona="debugger", status="completed")
-    session.add(lane); session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="d",
+    thread = Thread(id="l1", run_id="r1", persona="debugger", status="completed")
+    session.add(thread); session.commit()
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="d",
                       payload={"text": "root cause: normalize.ts:5"}))
     session.commit()
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = DebugBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={"repo_row": repo, "repro_signal": "bug"})
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"repo_row": repo, "repro_signal": "bug"})
     await bp._diagnose(ctx)
-    assert ctx.artifacts["diagnose_lane_id"] == "l1"
+    assert ctx.artifacts["diagnose_thread_id"] == "l1"
     assert "root cause" in ctx.artifacts["diagnosis"]
     assert lm.spawned[0]["persona"] == "debugger"
     assert lm.spawned[0]["writable"] is None
@@ -164,17 +164,17 @@ async def test_diagnose_spawns_readonly_lane(session, make_user):
 # --------------------------------------------------------------- propose
 async def test_propose_collects_proposal_text(session, make_user):
     run, repo, u = _seed(session, make_user)
-    lane = Lane(id="l2", run_id="r1", persona="fixer", status="completed")
-    session.add(lane); session.commit()
-    session.add(Event(run_id="r1", lane_id="l2", seq=0, type="message", title="p",
+    thread = Thread(id="l2", run_id="r1", persona="fixer", status="completed")
+    session.add(thread); session.commit()
+    session.add(Event(run_id="r1", thread_id="l2", seq=0, type="message", title="p",
                       payload={"text": "```json\n" + json.dumps(PROPOSAL) + "\n```"}))
     session.commit()
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = DebugBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm}, artifacts={
+    ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "diagnosis": "root cause found"})
     await bp._propose(ctx)
-    assert ctx.artifacts["propose_lane_id"] == "l2"
+    assert ctx.artifacts["propose_thread_id"] == "l2"
     assert "Fix dedupe" in ctx.artifacts["proposal_text"]
     assert lm.spawned[0]["persona"] == "fixer"
 
@@ -210,20 +210,20 @@ async def test_present_raises_when_no_proposal(session, make_user):
 # --------------------------------------------------------------- full execute
 async def test_execute_full_blueprint(session, make_user, monkeypatch):
     run, repo, u = _seed(session, make_user)
-    lane = Lane(id="l1", run_id="r1", persona="debugger", status="completed", next_seq=0)
-    session.add(lane); session.commit()
-    session.add(Event(run_id="r1", lane_id="l1", seq=0, type="message", title="d",
+    thread = Thread(id="l1", run_id="r1", persona="debugger", status="completed", next_seq=0)
+    session.add(thread); session.commit()
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message", title="d",
                       payload={"text": "rc"}))
-    session.add(Event(run_id="r1", lane_id="l1", seq=1, type="message", title="p",
+    session.add(Event(run_id="r1", thread_id="l1", seq=1, type="message", title="p",
                       payload={"text": json.dumps(PROPOSAL)}))
     session.commit()
     from app.services import evidence as evidence_mod
     monkeypatch.setattr(evidence_mod, "run_test_commands",
                         lambda ws, repo, commands=None: _async({"passed": False, "returncode": 1,
                                                                  "stdout": "", "stderr": ""}))
-    lm = _FakeLaneManager(lane)
+    lm = _FakeLaneManager(thread)
     bp = DebugBlueprint()
-    ctx = _ctx(run, services={"lane_manager": lm})
+    ctx = _ctx(run, services={"thread_manager": lm})
     await bp.execute(ctx)
     session.expire_all()
     assert session.get(Run, "r1").stage == RunStage.AWAITING_USER.value

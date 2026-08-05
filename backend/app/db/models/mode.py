@@ -26,7 +26,7 @@ class Mode(Base):
     topology: Mapped[str] = mapped_column(sa.String(24), default="single")
     model_tier: Mapped[str] = mapped_column(sa.String(16), default="strong")
     # Writable/read repo scope for the mode (plan §6 — modes as data): which repos
-    # a lane spawned under this mode may stamp a writable clone for. Empty dict =
+    # a thread spawned under this mode may stamp a writable clone for. Empty dict =
     # read-only. Topology stays code (selects the blueprint); this is data.
     permissions: Mapped[dict] = mapped_column(sa.JSON, default=dict)
     playbook_ids: Mapped[list] = mapped_column(sa.JSON, default=list)

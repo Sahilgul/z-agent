@@ -1,12 +1,12 @@
 """Guardian + Responder tests (plan Phase 4): normalizers, circuit breaker
 (max attempts + repeated-signature halt), comment routing (unknown PR, nudge
-active lane, resume finished lane from session volume). run_manager is a fake.
+active thread, resume finished thread from session volume). run_manager is a fake.
 """
 
 import pytest
 
 from app.db.models.delivery import PrLink
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.db.models.trigger import Trigger, TriggerEventLog
@@ -14,7 +14,7 @@ from app.services import guardian, responder, triggers
 from zagent_contracts.triggers import TriggerEvent, TriggerSource
 
 
-class FakeLaneMgr:
+class FakeThreadMgr:
     def __init__(self):
         self.spawns = []
 
@@ -23,14 +23,14 @@ class FakeLaneMgr:
         self.spawns.append({"persona": persona, "prompt": prompt,
                             "resume_session": resume_session,
                             "writable_repo": writable_repo})
-        return type("L", (), {"id": "lane-new"})()
+        return type("L", (), {"id": "thread-new"})()
 
 
 class FakeRM:
     def __init__(self):
         self.created = []
         self.nudges = []
-        self.lane_manager = FakeLaneMgr()
+        self.thread_manager = FakeThreadMgr()
 
     async def create_run(self, source, initiated_by, mode_name, task, autonomy=None, **kw):
         import uuid
@@ -39,8 +39,8 @@ class FakeRM:
                              "autonomy": autonomy, "by": initiated_by})
         return run
 
-    async def nudge_lane(self, run_id, lane_id, text):
-        self.nudges.append({"run_id": run_id, "lane_id": lane_id, "text": text})
+    async def nudge_thread(self, run_id, thread_id, text):
+        self.nudges.append({"run_id": run_id, "thread_id": thread_id, "text": text})
 
 
 def _build_event(pr_id=77, build=9001, tasks=("npm test",)):
@@ -153,32 +153,32 @@ async def test_responder_ignores_unknown_pr(session):
     assert out["verdicts"][0]["reason"] == "unknown_pr"
 
 
-async def test_responder_nudges_active_lane(session, make_user):
+async def test_responder_nudges_active_thread(session, make_user):
     _trigger_row(session, "responder-pr-comment", "pr.comment")
     u = make_user()
     session.add(Run(id="r1", created_by=u.id, mode="development", stage="developing"))
-    session.add(Lane(id="lane-1", run_id="r1", persona="developer", status="running"))
+    session.add(Thread(id="thread-1", run_id="r1", persona="developer", status="running"))
     session.add(PrLink(run_id="r1", repo="ServerApp", branch="agent/r1-x", ado_pr_id=77))
     session.commit()
     rm = FakeRM()
     out = await triggers.process(_comment_event(), rm)
     assert out["verdicts"][0]["status"] == "nudged"
-    assert rm.nudges[0]["lane_id"] == "lane-1"
+    assert rm.nudges[0]["thread_id"] == "thread-1"
     assert "please add a test" in rm.nudges[0]["text"]
 
 
-async def test_responder_resumes_finished_lane_from_session_volume(session, make_user):
+async def test_responder_resumes_finished_thread_from_session_volume(session, make_user):
     _trigger_row(session, "responder-pr-comment", "pr.comment")
     u = make_user()
     session.add(Run(id="r1", created_by=u.id, mode="development", stage="pr_ready"))
-    session.add(Lane(id="lane-old", run_id="r1", persona="developer", status="completed"))
+    session.add(Thread(id="thread-old", run_id="r1", persona="developer", status="completed"))
     session.add(Repo(name="ServerApp", integration_branch="main", status="ready"))
     session.add(PrLink(run_id="r1", repo="ServerApp", branch="agent/r1-x", ado_pr_id=77))
     session.commit()
     rm = FakeRM()
     out = await triggers.process(_comment_event(), rm)
     assert out["verdicts"][0]["status"] == "resumed"
-    spawn = rm.lane_manager.spawns[0]
+    spawn = rm.thread_manager.spawns[0]
     assert spawn["persona"] == "responder"
     assert spawn["resume_session"] is True
     assert spawn["writable_repo"].name == "ServerApp"
@@ -201,7 +201,7 @@ async def test_responder_skips_owner_resolution(session, make_user):
     _trigger_row(session, "responder-pr-comment", "pr.comment")
     u = make_user()
     session.add(Run(id="r1", created_by=u.id, mode="development", stage="developing"))
-    session.add(Lane(id="lane-1", run_id="r1", persona="developer", status="running"))
+    session.add(Thread(id="thread-1", run_id="r1", persona="developer", status="running"))
     session.add(PrLink(run_id="r1", repo="ServerApp", branch="agent/r1-x", ado_pr_id=77))
     session.commit()
     out = await triggers.process(

@@ -1,8 +1,8 @@
-"""Per-lane Redis control channel listener (plan §4).
+"""Per-thread Redis control channel listener (plan §4).
 
 Controls: interrupt (stop, immediate) | nudge (graceful interrupt + inject +
 resume — queued delivery would land AFTER the work, plan §8) | mode
-(set_permission_mode) | kill. Messages arrive on lane:{lane_id}:control and are
+(set_permission_mode) | kill. Messages arrive on thread:{thread_id}:control and are
 applied by the runtime's control task.
 """
 
@@ -23,9 +23,9 @@ class ControlMessage:
 
 
 class ControlListener:
-    def __init__(self, redis_url: str, lane_id: str) -> None:
+    def __init__(self, redis_url: str, thread_id: str) -> None:
         self.redis = redis.from_url(redis_url, decode_responses=True)
-        self.channel = f"lane:{lane_id}:control"
+        self.channel = f"thread:{thread_id}:control"
         self.queue: asyncio.Queue[ControlMessage] = asyncio.Queue()
 
     async def listen(self) -> None:

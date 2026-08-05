@@ -2,10 +2,10 @@
 
 The comment author needs no Zagent identity — attribution was settled when the
 run was created; the engine therefore skips owner resolution for handler-routed
-events. Routing: pr_links.ado_pr_id → run. An active lane gets a nudge (graceful
-interrupt + inject); a finished lane is CONTINUED — a responder lane spawned
+events. Routing: pr_links.ado_pr_id → run. An active thread gets a nudge (graceful
+interrupt + inject); a finished thread is CONTINUED — a responder thread spawned
 against the same run with resume_session=True so the worker resumes from the
-lane's durable session volume (BUG-1 fix), then pushes the update.
+thread's durable session volume (BUG-1 fix), then pushes the update.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.delivery import PrLink
-from app.db.models.lane import Lane
+from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.services.runs import TERMINAL_STAGES
@@ -49,13 +49,13 @@ def _pr_link(pr_id: int) -> dict | None:
         session.close()
 
 
-def _active_lane(run_id: str) -> str | None:
+def _active_thread(run_id: str) -> str | None:
     session = get_session()
     try:
-        lane = (session.query(Lane).filter_by(run_id=run_id)
-                .filter(Lane.status.in_(["running", "queued"]))
-                .order_by(Lane.created_at).first())
-        return lane.id if lane else None
+        thread = (session.query(Thread).filter_by(run_id=run_id)
+                .filter(Thread.status.in_(["running", "queued"]))
+                .order_by(Thread.created_at).first())
+        return thread.id if thread else None
     finally:
         session.close()
 
@@ -76,12 +76,12 @@ async def respond(event: TriggerEvent, trigger, run_manager) -> dict:
     finally:
         session.close()
 
-    lane_id = _active_lane(run_id)
-    if lane_id is not None:
-        await run_manager.nudge_lane(run_id, lane_id, _comment_prompt(event))
+    thread_id = _active_thread(run_id)
+    if thread_id is not None:
+        await run_manager.nudge_thread(run_id, thread_id, _comment_prompt(event))
         return {"status": "nudged", "run_id": run_id}
 
-    # The lane finished: continue the run from the durable session volume.
+    # The thread finished: continue the run from the durable session volume.
     session = get_session()
     try:
         run = session.get(Run, run_id)
@@ -89,8 +89,8 @@ async def respond(event: TriggerEvent, trigger, run_manager) -> dict:
         session.expunge_all()
     finally:
         session.close()
-    lane = await run_manager.lane_manager.spawn(
+    thread = await run_manager.thread_manager.spawn(
         run, persona="responder", prompt=_comment_prompt(event),
         persona_prompt=RESPONDER_PERSONA, writable_repo=repo, context_repos=[],
         resume_session=True)
-    return {"status": "resumed", "run_id": run_id, "lane_id": lane.id}
+    return {"status": "resumed", "run_id": run_id, "thread_id": thread.id}
