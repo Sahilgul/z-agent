@@ -1,5 +1,7 @@
-# LiteLLM gateway config — Anthropic-compatible facade in front of Azure AI Foundry.
-# Model routing is PURE CONFIG: Kimi now; Claude-on-Foundry later = add a
+# LiteLLM gateway config — OpenAI-compatible facade in front of Azure AI Foundry.
+# The worker calls the gateway via ChatOpenAI (langchain-openai) on the
+# /chat/completions surface — never the Anthropic /v1/messages surface. Model
+# routing is PURE CONFIG: Kimi now; another open model later = add a
 # model_list entry, zero architecture changes.
 
 model_list:
@@ -14,10 +16,13 @@ model_list:
       model: os.environ/FOUNDRY_MODEL
       api_base: os.environ/FOUNDRY_API_BASE
       api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
-      # The Agent SDK asks for extended thinking, which LiteLLM renders as
-      # reasoning_effort/thinking. The openai/ prefix makes drop_params assume
-      # OpenAI accepts both, so this Foundry deployment 400s unless named here.
-      additional_drop_params: ["reasoning", "reasoning_effort", "thinking"]
+      # Defensive only: drop the Anthropic-only ``thinking`` request param in
+      # case the legacy SDK runtime is ever wired back in. The custom engine
+      # (ChatOpenAI) never sends thinking/reasoning_effort, and reasoning
+      # models emit ``reasoning_content`` in the RESPONSE by default — that is
+      # not a request param and is never dropped here, so thinking tokens flow
+      # through to the worker untouched.
+      additional_drop_params: ["thinking"]
     model_info:
       # EXPLICIT pricing — LiteLLM's registry may not price Kimi and the
       # spend-readback data path depends on correct numbers.
@@ -27,6 +32,14 @@ model_list:
       cache_read_input_token_cost: 0.00000015
       max_tokens: 8192
       mode: chat
+      # K2.6 is a reasoning model, but LiteLLM's internal model registry
+      # (model_prices_and_context_window.json) doesn't flag it with
+      # supports_reasoning — so LiteLLM never calls fill_reasoning_content()
+      # and silently strips ``reasoning_content`` from the response before it
+      # reaches the worker (BerriAI/litellm#20246, #26156). Setting it here
+      # tells LiteLLM to preserve and standardize ``reasoning_content`` so the
+      # worker's ChatOpenAIReasoning subclass can surface it as StepKind.THINKING.
+      supports_reasoning: true
 
   # Second open model route for the open-models gate (≥2 open models).
   # The matrix passes ONLY if ≥2 models pass ALL of a–g. Add a Qwen or Llama
@@ -41,7 +54,7 @@ model_list:
   #     model: os.environ/FOUNDRY_MODEL_2
   #     api_base: os.environ/FOUNDRY_API_BASE_2
   #     api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY_2
-  #     additional_drop_params: ["reasoning", "reasoning_effort", "thinking"]
+  #     additional_drop_params: ["thinking"]
   #   model_info:
   #     # CONFIRM against the Foundry billing page on day 1; these are placeholders.
   #     input_cost_per_token: 0.0000004

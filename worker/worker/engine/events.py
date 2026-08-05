@@ -93,6 +93,18 @@ class EventEmitter:
         sdk_uuid = getattr(msg, "id", None) or getattr(msg, "usage_metadata", None) and None
         content = msg.content if isinstance(msg.content, list) else [msg.content] if msg.content else []
 
+        # OpenAI-compatible reasoning models (Kimi-K2, DeepSeek-R1, …) return
+        # their chain-of-thought in the non-standard ``reasoning_content`` field,
+        # which ChatOpenAIReasoning preserves into additional_kwargs. Surface it
+        # as a THINKING event BEFORE the message text so the transcript reads in
+        # the order the model produced it (think, then answer).
+        reasoning = (msg.additional_kwargs or {}).get("reasoning_content")
+        if reasoning and str(reasoning).strip():
+            events.append(self._next(
+                StepKind.THINKING, "thinking…",
+                {"text": redact(str(reasoning))}, task_id, sdk_uuid,
+            ))
+
         for block in content:
             if isinstance(block, dict):
                 if block.get("type") == "thinking":

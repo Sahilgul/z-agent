@@ -287,5 +287,92 @@ def test_model_suffix_selection():
 def test_model_capabilities_registry():
     assert get_capabilities("kimi-foundry").reasoning is True
     assert get_capabilities("qwen-foundry").reasoning is False
+    # K2.6 has fixed parameters — temperature must not be sent.
+    assert get_capabilities("kimi-foundry").supports_temperature is False
+    assert get_capabilities("qwen-foundry").supports_temperature is True
     # Unknown model gets the conservative default
     assert get_capabilities("unknown").supports_tools is True
+    assert get_capabilities("unknown").supports_temperature is True
+
+
+# ----------------------------------------------- reasoning_content surfacing
+
+def test_from_assistant_surfaces_reasoning_content_as_thinking():
+    """OpenAI-compatible reasoning models (Kimi-K2, DeepSeek-R1, …) return their
+    chain-of-thought in the non-standard ``reasoning_content`` field, which
+    ChatOpenAIReasoning preserves into additional_kwargs. The emitter must
+    surface it as a THINKING event BEFORE the message text."""
+    em = EventEmitter("run-1", "thread-1")
+    ai = AIMessage(
+        content="The answer is 42.",
+        additional_kwargs={"reasoning_content": "Let me work through this step by step."},
+    )
+    events = em.from_assistant(ai, "task-1")
+    # thinking first, then the message
+    assert len(events) == 2
+    assert events[0].kind == StepKind.THINKING
+    assert events[0].detail["text"] == "Let me work through this step by step."
+    assert events[1].kind == StepKind.MESSAGE
+    assert events[1].detail["text"] == "The answer is 42."
+
+
+def test_from_assistant_reasoning_content_redacted():
+    """Reasoning content is redacted at the event boundary like all other
+    text — a secret in the chain-of-thought must not leak verbatim."""
+    em = EventEmitter("run-1", "thread-1")
+    ai = AIMessage(
+        content="done",
+        additional_kwargs={"reasoning_content": "The token is sk-1234567890abcdefghij"},
+    )
+    events = em.from_assistant(ai, "task-1")
+    thinking = events[0]
+    assert thinking.kind == StepKind.THINKING
+    assert "sk-1234567890abcdefghij" not in thinking.detail["text"]
+    assert "REDACTED" in thinking.detail["text"]
+
+
+def test_from_assistant_no_reasoning_content_no_thinking_event():
+    """A plain AIMessage without reasoning_content must not produce a spurious
+    empty THINKING event — the thinking path is opt-in on the field's presence."""
+    em = EventEmitter("run-1", "thread-1")
+    ai = AIMessage(content="just a normal reply")
+    events = em.from_assistant(ai, "task-1")
+    assert len(events) == 1
+    assert events[0].kind == StepKind.MESSAGE
+    assert all(e.kind != StepKind.THINKING for e in events)
+
+
+def test_make_llm_uses_reasoning_subclass_for_reasoning_models():
+    """make_llm must return ChatOpenAIReasoning for reasoning-capable models
+    (so reasoning_content is preserved) and stock ChatOpenAI otherwise."""
+    import os
+    from unittest.mock import patch
+
+    from langchain_openai import ChatOpenAI
+
+    from worker.engine.llm import ChatOpenAIReasoning, make_llm
+
+    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+        reasoning_llm = make_llm("kimi-foundry", streaming=False)
+        plain_llm = make_llm("qwen-foundry", streaming=False)
+    assert isinstance(reasoning_llm, ChatOpenAIReasoning)
+    assert isinstance(plain_llm, ChatOpenAI)
+    assert not isinstance(plain_llm, ChatOpenAIReasoning)
+
+
+def test_make_llm_omits_temperature_for_fixed_param_models():
+    """K2.6 has fixed parameters — passing a non-default temperature makes
+    Azure Foundry 400. make_llm must omit the param entirely for models flagged
+    supports_temperature=False, and include it for models that accept it."""
+    import os
+    from unittest.mock import patch
+
+    from worker.engine.llm import make_llm
+
+    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+        kimi_llm = make_llm("kimi-foundry", streaming=False, temperature=0.0)
+        qwen_llm = make_llm("qwen-foundry", streaming=False, temperature=0.0)
+    # K2.6: temperature must NOT be set (ChatOpenAI defaults to 0.7 when unset)
+    assert kimi_llm.temperature != 0.0
+    # Qwen: temperature IS set to the requested value
+    assert qwen_llm.temperature == 0.0

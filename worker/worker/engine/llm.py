@@ -15,6 +15,8 @@ import random
 import time
 from typing import Any
 
+from langchain_core.messages import AIMessageChunk
+from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
 # --- Model capability registry (LiteLLM doesn't expose this reliably) ---
@@ -24,18 +26,25 @@ class ModelCapabilities:
 
     def __init__(self, *, vision: bool = False, reasoning: bool = False,
                  max_tokens: int = 8192, supports_tools: bool = True,
-                 supports_streaming: bool = True) -> None:
+                 supports_streaming: bool = True,
+                 supports_temperature: bool = True) -> None:
         self.vision = vision
         self.reasoning = reasoning
         self.max_tokens = max_tokens
         self.supports_tools = supports_tools
         self.supports_streaming = supports_streaming
+        self.supports_temperature = supports_temperature
 
 
 # Registry keyed by gateway model alias. Add entries as models are validated.
 # Unknown aliases get the conservative default.
 _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
-    "kimi-foundry": ModelCapabilities(vision=False, reasoning=True, max_tokens=8192),
+    # K2.6 has FIXED parameters — passing temperature/top_p/n/presence_penalty
+    # with non-default values makes Azure Foundry return 400. supports_temperature
+    # = False so make_llm omits the param entirely (don't rely on drop_params).
+    "kimi-foundry": ModelCapabilities(
+        vision=False, reasoning=True, max_tokens=8192, supports_temperature=False,
+    ),
     "qwen-foundry": ModelCapabilities(vision=False, reasoning=False, max_tokens=8192),
 }
 
@@ -44,6 +53,77 @@ _DEFAULT_CAPS = ModelCapabilities()
 
 def get_capabilities(model: str) -> ModelCapabilities:
     return _CAPABILITY_REGISTRY.get(model, _DEFAULT_CAPS)
+
+
+# --- ChatOpenAI subclass that preserves reasoning_content ---
+
+class ChatOpenAIReasoning(ChatOpenAI):
+    """ChatOpenAI variant that preserves ``reasoning_content`` from
+    OpenAI-compatible reasoning models (Kimi-K2, DeepSeek-R1, Qwen-QwQ, …).
+
+    Stock ``ChatOpenAI`` only targets the official OpenAI spec and silently
+    drops the non-standard ``reasoning_content`` field that these models return
+    in their chat-completions responses (langchain-ai/langchain#37960). This
+    subclass captures it into ``additional_kwargs["reasoning_content"]`` on
+    both the streaming and non-streaming conversion paths — the same convention
+    ``ChatDeepSeek`` uses — so the engine can surface it as ``StepKind.THINKING``.
+
+    The request side is unchanged: we send the standard OpenAI chat-completions
+    payload (no ``thinking``/``reasoning_effort`` param), and reasoning models
+    emit ``reasoning_content`` by default.
+    """
+
+    def _create_chat_result(
+        self,
+        response: Any,
+        generation_info: dict | None = None,
+    ) -> Any:
+        rtn = super()._create_chat_result(response, generation_info)
+        try:
+            import openai as _openai  # local import — not all runtimes need it
+        except ImportError:  # pragma: no cover
+            return rtn
+        if not isinstance(response, _openai.BaseModel):
+            return rtn
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return rtn
+        msg = choices[0].message
+        # Primary: native reasoning_content (Kimi/DeepSeek/vLLM convention).
+        if hasattr(msg, "reasoning_content") and msg.reasoning_content:
+            rtn.generations[0].message.additional_kwargs["reasoning_content"] = (
+                msg.reasoning_content
+            )
+        # Fallback: OpenRouter nests it under model_extra["reasoning"].
+        elif hasattr(msg, "model_extra"):
+            model_extra = msg.model_extra
+            if isinstance(model_extra, dict) and (reasoning := model_extra.get("reasoning")):
+                rtn.generations[0].message.additional_kwargs["reasoning_content"] = reasoning
+        return rtn
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict,
+        default_chunk_class: type,
+        base_generation_info: dict | None,
+    ) -> ChatGenerationChunk | None:
+        generation_chunk = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info,
+        )
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        if not choices or generation_chunk is None:
+            return generation_chunk
+        if not isinstance(generation_chunk.message, AIMessageChunk):
+            return generation_chunk
+        top = choices[0]
+        delta = top.get("delta", {}) if isinstance(top, dict) else {}
+        # Primary: native reasoning_content (Kimi/DeepSeek/vLLM convention).
+        if (reasoning_content := delta.get("reasoning_content")) is not None:
+            generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning_content
+        # Fallback: OpenRouter nests it under delta["reasoning"].
+        elif (reasoning := delta.get("reasoning")) is not None:
+            generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning
+        return generation_chunk
 
 
 # --- Per-model prompt suffix selection ---
@@ -238,17 +318,26 @@ def make_llm(
         "base_url": base_url,
         "api_key": api_key,
         "streaming": streaming and caps.supports_streaming,
-        "temperature": temperature,
         "timeout": 600,
         "max_retries": 0,  # we handle retries ourselves (with_gateway_retry)
     }
-    llm = ChatOpenAI(**kwargs)
+    # K2.6 and other fixed-param models 400 on non-default temperature — omit
+    # the param entirely instead of relying on the gateway's drop_params.
+    if caps.supports_temperature:
+        kwargs["temperature"] = temperature
+    # Reasoning models (Kimi-K2, DeepSeek-R1, …) return a non-standard
+    # ``reasoning_content`` field that stock ChatOpenAI silently drops
+    # (langchain-ai/langchain#37960). Use the subclass that preserves it so
+    # the engine can surface thinking tokens as StepKind.THINKING.
+    cls = ChatOpenAIReasoning if caps.reasoning else ChatOpenAI
+    llm = cls(**kwargs)
     if tools and caps.supports_tools:
         llm = llm.bind_tools(tools)
     return llm
 
 
 __all__ = [
+    "ChatOpenAIReasoning",
     "GatewayRetryError",
     "ModelCapabilities",
     "estimate_cost",

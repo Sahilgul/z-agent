@@ -241,6 +241,13 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         async for chunk in with_gateway_retry_aiter(
             lambda: _aiter(llm, messages), max_retries=2,
         ):
+            # Reasoning models stream chain-of-thought in the non-standard
+            # ``reasoning_content`` field (preserved into additional_kwargs by
+            # ChatOpenAIReasoning). Emit it as a THINKING delta so the frontend
+            # folds it into a live <thinking> bubble, separate from the answer.
+            reasoning = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+            if reasoning and delta_sink:
+                await delta_sink(_delta(state, reasoning, kind=StepKind.THINKING))
             content = getattr(chunk, "content", None)
             if content and delta_sink:
                 await delta_sink(_delta(state, content))
@@ -340,12 +347,12 @@ def _aiter(llm: Any, messages: list) -> Any:
     return llm.astream(messages)
 
 
-def _delta(state: EngineState, content: Any) -> TypingDelta:
+def _delta(state: EngineState, content: Any, *, kind: StepKind = StepKind.MESSAGE) -> TypingDelta:
     text = content if isinstance(content, str) else str(content)
     return TypingDelta(
         run_id=state["run_id"], thread_id=state["thread_id"],
         context_id=state.get("context_id", state["thread_id"]),
-        kind=StepKind.MESSAGE, text=text,
+        kind=kind, text=text,
     )
 
 
