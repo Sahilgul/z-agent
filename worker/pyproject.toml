@@ -1,15 +1,39 @@
 [project]
 name = "zagent-worker"
 version = "0.1.0"
-description = "Sandbox-side agent runner: Claude Agent SDK session loop, StepEvent normalizer, Redis forwarder, control listener"
+description = "Sandbox-side agent runner: custom LangGraph engine (replacing Claude Agent SDK), StepEvent normalizer, Redis forwarder, control listener"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    # --- Custom LangGraph engine (Phase 0+ replacement for claude-agent-sdk) ---
+    # Pins per plan §4. Bump only with the Phase 0 gate green (worker/spike/matrix.py).
+    "langgraph==1.2.10",
+    "langgraph-checkpoint==4.1.1",
+    "langgraph-checkpoint-postgres==3.1.1",
+    "langgraph-prebuilt==1.1.0",
+    "langchain-openai>=1.4,<2",
+    "langchain-mcp-adapters>=0.1,<0.2",
+    "langchain-core>=1.4,<2",
+    # --- Platform glue (unchanged) ---
+    "websockets>=13,<16",
+    "redis>=5,<7",
+    "httpx>=0.27,<1",
+    "zagent-contracts",
+]
+
+[project.optional-dependencies]
+# Legacy CAS runtime — kept ONLY for the dual-runtime soak (Phase 5) and as the
+# fallback target if the Phase 0 gate forces the hand-rolled loop. Removed from
+# the default install once the seam is cut.
+cas = [
     # SDK PINNED — fork_session lives in _internal (private API). Bump only with
     # the fork smoke test green (worker/tests/test_fork_smoke.py).
     "claude-agent-sdk==0.2.128",
-    "websockets>=13,<16",
-    "redis>=5,<7",
-    "zagent-contracts",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5",
+    "ruff>=0.8",
 ]
 
 [build-system]

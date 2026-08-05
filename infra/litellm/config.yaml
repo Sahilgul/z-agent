@@ -28,6 +28,24 @@ model_list:
       max_tokens: 8192
       mode: chat
 
+  # Second open model route for the Phase 0 gate (plan §4: ≥2 open models).
+  # The matrix passes ONLY if ≥2 models pass ALL of a–g. Add a Qwen or Llama
+  # variant deployment here; FOUNDRY_MODEL_2 carries the provider prefix +
+  # deployment name, e.g. openai/Qwen2.5-Coder-32B.
+  - model_name: qwen-foundry
+    litellm_params:
+      model: os.environ/FOUNDRY_MODEL_2
+      api_base: os.environ/FOUNDRY_API_BASE_2
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY_2
+      additional_drop_params: ["reasoning", "reasoning_effort", "thinking"]
+    model_info:
+      # CONFIRM against the Foundry billing page on day 1; these are placeholders.
+      input_cost_per_token: 0.0000004
+      output_cost_per_token: 0.0000014
+      cache_read_input_token_cost: 0.0000001
+      max_tokens: 8192
+      mode: chat
+
   # Fallback route, pre-wired: Anthropic Claude hosted on Foundry, same
   # /anthropic/v1 surface. Flip worker env ANTHROPIC_MODEL alias to this when the
   # decision matrix says so — nothing else changes.
