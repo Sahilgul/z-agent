@@ -33,6 +33,8 @@ worker pool refuses new spawns.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -134,8 +136,14 @@ def get_registry() -> SpawnRegistry:
 
 
 def reset_registry() -> None:
-    """Reset for tests."""
+    """Reset for tests/spike-matrix (M-13): the module-level registry is
+    shared across sequential runs in one process (the spike matrix runs
+    models one after another in a single process). Cancel every pending
+    watchdog of the outgoing registry before replacing it, or the 2h
+    hard-cap tasks leak across runs and fire against the wrong spawn ids."""
     global _registry
+    for sid, sp in list(_registry.spawns.items()):
+        _registry._cancel_watchdog(sid)
     _registry = SpawnRegistry()
 
 
@@ -217,10 +225,24 @@ def spawn_swarm(slices: list[dict[str, str]], rationale: str = "") -> str:
             f"one-approval batch). ids: {', '.join(spawn_ids)}")
 
 
+# M-14: the current thread id is per-coroutine state, not a process-wide env
+# var. The old code read os.environ["THREAD_ID"], so in the spike matrix
+# (sequential models in one process) a spawn registered under the WRONG
+# thread id — the previous model's, or "unknown-thread" if unset. A
+# ContextVar scopes it per run/coroutine; the runner sets it at startup and
+# the dispatcher propagates it to the executor thread (see graph.py
+# call_tool_direct). Falls back to the env var for unscoped callers.
+_current_thread_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "current_thread_id")
+
+
+def set_current_thread_id(tid: str) -> None:
+    _current_thread_id_var.set(tid)
+
+
 def _current_thread_id() -> str:
-    """The current thread's id (set by the runner via env)."""
-    import os
-    return os.environ.get("THREAD_ID", "unknown-thread")
+    """The current thread's id (set by the runner via the ContextVar, env fallback)."""
+    return _current_thread_id_var.get(None) or os.environ.get("THREAD_ID", "unknown-thread")
 
 
 # --- AGENTS.md orientation hydration ---

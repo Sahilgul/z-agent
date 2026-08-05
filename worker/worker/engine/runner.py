@@ -31,6 +31,7 @@ hardening fixtures.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import time
@@ -67,6 +68,9 @@ def _permissions_from_env() -> list[dict[str, Any]]:
         return []
 
 
+log = logging.getLogger(__name__)
+
+
 class EngineRunner:
     """One thread = one graph + one checkpointer + one emitter + one forwarder."""
 
@@ -101,6 +105,17 @@ class EngineRunner:
         )
         self.control = ControlListener(self.redis_url, self.thread_id)
         self.delta_channel = DeltaChannel(self.mirror_dir)
+        # M-13: each runner (one per worker process) starts with a FRESH
+        # spawn registry so a process reused across runs (or the spike
+        # matrix running models sequentially in one process) can't inherit
+        # the previous run's live spawns / watchdogs.
+        from worker.engine.fanout import reset_registry
+        reset_registry()
+        # M-14: scope the spawn registry's parent_thread_id to THIS runner
+        # via a ContextVar (not the process-wide env), so concurrent/
+        # sequential runs in one process can't cross-register spawns.
+        from worker.engine.fanout import set_current_thread_id
+        set_current_thread_id(self.thread_id)
 
         self.tuning = SelfTuningLimit()
         self.compactor = Compactor()
@@ -290,18 +305,31 @@ class EngineRunner:
         snap = await graph.aget_state(config)
         messages = list(snap.values.get("messages", []))
         messages.append(tag_message(HumanMessage(content=nudge.text), "nudge"))
-        await self._run_turn(graph, config, {
-            "messages": messages,
-            "done": False,
-            "error": None,
-            "task_id": self.task_id,
-            "needs_compaction": False,
-            # H-03: a control-channel mode change updated self.mode but never
-            # the graph state, so the agent kept the old mode for every
-            # subsequent turn. Carry the live mode into the state delta so
-            # the next turn runs under the mode the user switched to.
-            "mode": self.mode,
-        }, episodic)
+        try:
+            await self._run_turn(graph, config, {
+                "messages": messages,
+                "done": False,
+                "error": None,
+                "task_id": self.task_id,
+                "needs_compaction": False,
+                # H-03: a control-channel mode change updated self.mode but never
+                # the graph state, so the agent kept the old mode for every
+                # subsequent turn. Carry the live mode into the state delta so
+                # the next turn runs under the mode the user switched to.
+                "mode": self.mode,
+            }, episodic)
+        except Exception as exc:  # noqa: BLE001
+            # M-04: a transient error on a nudge (LLM blip, tool timeout) used
+            # to propagate out of _inject_and_run into the main loop's except,
+            # which marked the whole thread failed and exited — killing the
+            # thread and losing the idle-linger so the run could not be nudged
+            # again. Fail the TURN only: emit a warning, drop back to idle, and
+            # keep the thread alive for the next nudge.
+            log.warning("nudge turn failed — failing turn, keeping thread",
+                        run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
+            self.status = "idle"
+            await self.forwarder.heartbeat(self.status)
+            await self._emit_engine_error(f"turn failed (thread alive): {exc}")
 
     def _record_episode(self, episodic: EpisodicMemory, result: dict[str, Any]) -> None:
         """One episode per turn (the memory.search substrate)."""
@@ -351,18 +379,32 @@ class EngineRunner:
 
     async def _heartbeat_loop(self) -> None:
         while not self._stop.is_set():
-            await self.forwarder.heartbeat(self.status)
+            try:
+                await self.forwarder.heartbeat(self.status)
+            except Exception as exc:  # noqa: BLE001
+                # M-06: a single Redis blip used to propagate out of this
+                # background task into the main loop's except, killing the
+                # whole thread. Log and keep beating — the next tick usually
+                # succeeds once Redis recovers.
+                log.warning("heartbeat publish failed — retrying next tick",
+                            run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
             await asyncio.sleep(15)
 
     async def _idle_watchdog(self) -> None:
         while not self._stop.is_set():
             await asyncio.sleep(30)
-            idle_for = time.monotonic() - self.last_activity
-            if self.status == "idle" and idle_for > self.idle_ttl_s:
-                self.status = "completed"
-                await self.forwarder.heartbeat(self.status)
-                self._stop.set()
-                return
+            try:
+                idle_for = time.monotonic() - self.last_activity
+                if self.status == "idle" and idle_for > self.idle_ttl_s:
+                    self.status = "completed"
+                    await self.forwarder.heartbeat(self.status)
+                    self._stop.set()
+                    return
+            except Exception as exc:  # noqa: BLE001
+                # M-06: a heartbeat blip on the completion publish used to
+                # kill the watchdog (and the thread). Log and keep watching.
+                log.warning("idle watchdog heartbeat failed — retrying next tick",
+                            run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
 
     async def _emit_engine_error(self, error: str) -> None:
         from zagent_contracts import StepEvent, StepKind

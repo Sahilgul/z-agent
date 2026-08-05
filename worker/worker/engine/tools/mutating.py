@@ -173,8 +173,10 @@ async def terminal_exec_async(args: dict[str, Any]) -> dict[str, Any]:
     if not command.strip():
         return {"kind": "error", "ok": False, "output": "error: empty command",
                 "tool": "terminal_exec", "args": args}
-    if any(tok in command for tok in ("rm -rf /", "mkfs", ":(){")):
-        pass  # destructiveness is a GATE concern (verbatim card); execution obeys
+    # M-11: removed a dead `if any(tok in command ...): pass` pseudo-guard
+    # here — it matched "rm -rf /", "mkfs", ":(){" then did nothing (pass),
+    # looking like a safety check while enforcing nothing. Destructiveness is
+    # a GATE concern (the verbatim approval card); execution obeys regardless.
     from worker.engine.tools.background import terminal_manager
     try:
         return await terminal_manager().run(

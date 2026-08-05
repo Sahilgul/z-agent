@@ -282,7 +282,14 @@ async def _call_extra_tool(t: Any, name: str, args: dict[str, Any]) -> dict[str,
         before = set(fanout.get_registry().spawns.keys())
     try:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: t.invoke(args))
+        # M-14: propagate per-coroutine ContextVars (the spawn registry's
+        # current_thread_id) into the executor thread. run_in_executor runs
+        # the lambda in a worker thread with NO inherited context, so a
+        # spawn tool would read the process-wide env instead of this run's
+        # ContextVar. copy_context().run(...) carries it across.
+        import contextvars
+        ctx = contextvars.copy_context()
+        result = await loop.run_in_executor(None, lambda: ctx.run(lambda: t.invoke(args)))
         output = str(result)
         is_error = output.startswith("error:")
         out: dict[str, Any] = {

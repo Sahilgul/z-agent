@@ -109,6 +109,10 @@ class TerminalManager:
                 "details": {"background": True, "watch_regex": watch_regex},
             }
         reader.cancel()
+        try:
+            await reader
+        except asyncio.CancelledError:
+            pass
         return {
             "kind": "success" if job.exit_code == 0 else "error",
             "ok": job.exit_code == 0,
@@ -125,6 +129,15 @@ class TerminalManager:
         watch = re.compile(job.watch_regex) if job.watch_regex else None
         with job.output_file.open("ab") as fh:
             while True:
+                # M-08: check the ceiling at the TOP of the loop too. The old
+                # code only checked after a successful read, so a stalled
+                # oversized job (reads timing out forever) escaped the kill
+                # and ran to the JOB_TIMEOUT_S deadline, ballooning the
+                # output file and the ring buffer.
+                if job.total_bytes > OUTPUT_CEILING_BYTES:
+                    job.killed_by = "ceiling"
+                    self.kill(job, reason="ceiling")
+                    break
                 if loop.time() > deadline:
                     job.killed_by = "timeout"
                     self.kill(job, reason="timeout")

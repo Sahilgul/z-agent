@@ -210,6 +210,11 @@ async def run_engine_turn(prompt: str, mode: Mode, autonomy: Autonomy,
     # global env stable.
     prev_ws = os.environ.get("WORKSPACE_DIR")
     os.environ["WORKSPACE_DIR"] = str(workspace)
+    # M-13: models run sequentially in one process and share the
+    # module-level spawn registry; reset it per model so the next model
+    # doesn't inherit this model's live spawns / 2h watchdogs.
+    from worker.engine.fanout import reset_registry
+    reset_registry()
     try:
         graph = build_graph(checkpointer=saver)
         result, interrupts = await _invoke_servicing_approvals(

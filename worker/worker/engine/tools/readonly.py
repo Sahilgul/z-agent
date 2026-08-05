@@ -87,6 +87,14 @@ def file_search(pattern: str, glob: str | None = None, max_results: int = 200) -
         cmd += [str(ws)]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
     out = proc.stdout[:_BASH_MAX_OUTPUT]
+    # M-12: an invalid regex makes rg exit 2 with the error on STDERR, but the
+    # old code only inspected stdout (empty) and returned "no matches" — the
+    # agent never learned its pattern was bad. rg: 0 = matches, 1 = no matches,
+    # 2 = error; treat 2+ as an error so the bad pattern surfaces.
+    if proc.returncode not in (0, 1):
+        err = (proc.stderr or "").strip()
+        return (f"error: file_search failed (exit {proc.returncode}): "
+                f"{err[:200] or 'invalid pattern or I/O error'}")
     if not out:
         return "no matches"
     return out + f"\n[{out.count(chr(10))} matches]"

@@ -176,7 +176,15 @@ def apply_task_updates(tasks: dict[str, Any] | None,
     artifact = [dict(a) for a in tasks.get("artifact", [])]
     tracker = dict(tasks.get("tracker", {}))
 
+    # M-09: the LLM can hand us a non-list `updates` (a dict, a single
+    # update, None) — iterating a dict yields its keys (strings), and each
+    # `upd.get(...)` then crashes. Require a list up front.
+    if not isinstance(updates, list):
+        return tasks, "error: updates must be a list of update objects"
+
     for upd in updates:
+        if not isinstance(upd, dict):
+            return tasks, "error: every update must be an object"
         action = upd.get("action", "upsert")
         tid = upd.get("id")
         if not tid:
@@ -184,7 +192,9 @@ def apply_task_updates(tasks: dict[str, Any] | None,
         if action == "add":
             if not upd.get("content"):
                 return tasks, f"error: task {tid} needs content"
-            artifact = [a for a in artifact if a["id"] != tid]
+            # M-09: a malformed artifact entry (no "id") used to raise
+            # KeyError here. Tolerate it via .get and skip.
+            artifact = [a for a in artifact if a.get("id") != tid]
             artifact.append({
                 "id": tid,
                 "content": upd["content"],
@@ -196,11 +206,11 @@ def apply_task_updates(tasks: dict[str, Any] | None,
             status = upd.get("status")
             if status not in TASK_STATUSES:
                 return tasks, f"error: bad status {status!r} (one of {TASK_STATUSES})"
-            if tid not in tracker and not any(a["id"] == tid for a in artifact):
+            if tid not in tracker and not any(a.get("id") == tid for a in artifact):
                 return tasks, f"error: unknown task id {tid} (add it first)"
             tracker[tid] = status
         elif action == "remove":
-            artifact = [a for a in artifact if a["id"] != tid]
+            artifact = [a for a in artifact if a.get("id") != tid]
             tracker.pop(tid, None)
         else:
             return tasks, f"error: unknown action {action!r}"

@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from worker.engine.security import wrap_untrusted
-from worker.engine.tools.readonly import _resolve as _resolve_path
+from worker.engine.tools.readonly import _resolve as _resolve_path, _workspace
 
 AWAIT_TIMEOUT_DEFAULT_S = 120.0
 # Odd-interval poll rules: irregular cadence, never a fixed tight loop.
@@ -45,6 +45,14 @@ def file_delete(file_path: str) -> str:
         p = _resolve_path(file_path)
     except ValueError as exc:
         return str(exc)
+    # M-10: contain the delete to the workspace. _resolve returns absolute
+    # paths as-is, so file_delete("/etc/passwd") used to escape the workspace
+    # and delete arbitrary files. Reject anything that doesn't resolve under
+    # the workspace root.
+    try:
+        p.resolve().relative_to(_workspace().resolve())
+    except ValueError:
+        return f"error: file_delete refuses paths outside the workspace: {file_path}"
     if not p.exists():
         return f"error: no such file: {file_path}"
     if p.is_dir():

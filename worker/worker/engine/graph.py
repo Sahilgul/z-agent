@@ -484,6 +484,11 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         args = tc.get("args", {}) or {}
 
         decision = approved.get(tc_id)
+        # M-01: the gate may edit-and-resend args (decision["args"]); staging
+        # ops (mode_request, knowledge_draft) used to read the ORIGINAL args,
+        # silently dropping the human's edits. Use the gate-edited args when
+        # present, matching the general-tool execution path below.
+        effective_args = (decision or {}).get("args", args)
         if decision is not None and not decision.get("approved", True):
             # Denied at the gate — the agent sees the reason, nothing executes.
             result = {"kind": "error", "ok": False,
@@ -524,7 +529,7 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         elif name == "mode_request":
             # Approval-routed mode transition — reaching here means the
             # gate approved (MUTATING capability); apply the mode change.
-            target = str(args.get("target_mode", ""))
+            target = str(effective_args.get("target_mode", ""))
             valid = {m.value for m in Mode}
             if target not in valid:
                 result = {"kind": "error", "ok": False,
@@ -550,9 +555,9 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         if name == "knowledge_draft" and result["ok"]:
             drafts = list(state.get("knowledge_drafts", []))
             drafts.append({
-                "scope": args.get("scope"), "title": args.get("title"),
-                "content": args.get("content"), "provenance": args.get("provenance", ""),
-                "status": "auto_approved" if args.get("scope") == "user" else "pending_approval",
+                "scope": effective_args.get("scope"), "title": effective_args.get("title"),
+                "content": effective_args.get("content"), "provenance": effective_args.get("provenance", ""),
+                "status": "auto_approved" if effective_args.get("scope") == "user" else "pending_approval",
             })
             out["knowledge_drafts"] = drafts
 
@@ -575,6 +580,11 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             _tool_kind(name), _tool_title(name, args), detail, task_id, None,
         )
         await _publish_events(config, [event])
+        # M-05: from_assistant() stages every tool_use in emitter._pending_tools
+        # but from_tool_result() (which pops) is never called in production —
+        # the tools_node emits the result event directly. Pop the staged entry
+        # here so the dict can't grow unbounded across a long run.
+        emitter._pending_tools.pop(tc_id, None)
         new_messages.append(tag_message(ToolMessage(
             content=result["output"], tool_call_id=tc_id, name=name,
         ), "tool"))  # type: ignore[arg-type]
@@ -697,7 +707,20 @@ async def compaction_node(state: EngineState, config: RunnableConfig) -> dict[st
     messages = state.get("messages", [])
     force = state.get("force_compact", False)
 
-    new_messages, result = await compactor.compact(messages, force=force)
+    try:
+        new_messages, result = await compactor.compact(messages, force=force)
+    except Exception as exc:
+        # M-03: a summarizer/LLM failure used to propagate and kill the whole
+        # turn. Log it, emit a warning card, and skip compaction this cycle
+        # so the turn survives with the original messages intact.
+        log.warning("compaction failed — skipping this cycle", error=str(exc))
+        await _publish_events(config, [emitter._next(
+            StepKind.STATUS, "⚠ compaction failed",
+            {"kind": "warning", "warning": "compaction_failed",
+             "detail": str(exc)[:500]},
+            task_id, None,
+        )])
+        return {"needs_compaction": False, "force_compact": False}
     out: dict[str, Any] = {
         "needs_compaction": False,
         "force_compact": False,
