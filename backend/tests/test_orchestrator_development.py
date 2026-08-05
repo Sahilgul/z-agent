@@ -131,6 +131,14 @@ async def test_develop_spawns_writable_thread_and_marks_steps_done(session, make
     session.add(thread); session.commit()
     lm = _FakeLaneManager(thread)
     bp = DevelopmentBlueprint()
+    # M-61: verify _develop actually awaits the spawned thread. The old test
+    # never asserted _await_thread was called, so a regression that skipped
+    # the await (returning before the thread finished) would pass silently.
+    awaited: list[str] = []
+
+    async def _spy_await(thread_id, poll_seconds=2.0):
+        awaited.append(thread_id)
+    bp._await_thread = _spy_await
     ctx = _ctx(run, services={"thread_manager": lm}, artifacts={
         "repo_row": repo, "plan_row_id": plan.id, "plan_steps": plan.steps,
         "permissions": {"writable": True, "repos": ["ServerApp"]},
@@ -140,6 +148,7 @@ async def test_develop_spawns_writable_thread_and_marks_steps_done(session, make
     assert ctx.artifacts["develop_thread_id"] == "l1"
     assert lm.spawned[0]["persona"] == "developer"
     assert lm.spawned[0]["writable"] == "ServerApp"
+    assert awaited == ["l1"]  # M-61: _await_thread was invoked with the thread id
     session.expire_all()
     assert session.query(PlanStep).filter_by(plan_id=plan.id).one().status == "done"
 

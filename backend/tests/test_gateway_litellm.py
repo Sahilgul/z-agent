@@ -56,7 +56,7 @@ async def test_key_spend_defaults_zero(monkeypatch):
 
 async def test_read_spend_reconciled_polls(monkeypatch):
     routes = {"/key/info": FakeResponse({"info": {"spend": 7.5}})}
-    install_fake_httpx(monkeypatch, litellm, routes)
+    fake = install_fake_httpx(monkeypatch, litellm, routes)
     client = GatewayClient(base_url="http://gw", master_key="mk")
     real_sleep = asyncio.sleep
     async def fake_sleep(t):
@@ -64,6 +64,12 @@ async def test_read_spend_reconciled_polls(monkeypatch):
     monkeypatch.setattr(litellm.asyncio, "sleep", fake_sleep)
     spend = await client.read_spend_reconciled("sk-1", grace_seconds=0, polls=2)
     assert spend == 7.5
+    # M-68: verify the poll count — read_spend_reconciled(polls=2) must call
+    # key_spend (GET /key/info) exactly twice. The old test only checked the
+    # final spend, so a regression that polled once (or zero times) and still
+    # returned 7.5 would pass silently.
+    info_gets = [c for c in fake.calls if c[0] == "GET" and "/key/info" in c[1]]
+    assert len(info_gets) == 2
 
 
 async def test_health_ok(monkeypatch):

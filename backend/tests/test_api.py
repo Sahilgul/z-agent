@@ -245,8 +245,10 @@ def test_team_stats(admin_client, session):
     r = client.get("/team/stats")
     assert r.status_code == 200
     body = r.json()
-    assert body["total_runs"] >= 2
-    assert body["total_cost_usd"] >= 3.5
+    # M-58: `>=` on a clean DB let a double-count bug pass (4 runs would pass
+    # `>= 2`). Assert EXACT equality — the DB has exactly these 2 runs.
+    assert body["total_runs"] == 2
+    assert body["total_cost_usd"] == 3.5
 
 
 # --------------------------------------------------------------- modes
@@ -386,6 +388,14 @@ def test_create_run(auth_client):
     assert body["mode"] == "ask"
     assert body["title"] == "summarize scribe"
     assert services["run_manager"].created
+    # M-60: POST→GET round-trip. The fake create_run now persists, so the
+    # run is retrievable (was no round-trip coverage — the fake only
+    # appended to self.created, leaving the DB empty).
+    run_id = body["id"]
+    g = client.get(f"/runs/{run_id}")
+    assert g.status_code == 200
+    assert g.json()["id"] == run_id
+    assert g.json()["title"] == "summarize scribe"
 
 
 def test_create_run_unknown_mode(auth_client, monkeypatch):

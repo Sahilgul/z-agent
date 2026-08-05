@@ -27,8 +27,10 @@ class _FakeAdo:
     def __init__(self, payload=None, raise_exc=None):
         self._payload = payload or {"id": 42, "fields": {"System.Title": "Bug: dedupe drift"}}
         self._raise = raise_exc
+        self.calls: list[int] = []  # M-63: record calls so the swallow path is observable
 
     async def get_work_item(self, work_item_id):
+        self.calls.append(work_item_id)
         if self._raise:
             raise self._raise
         return self._payload
@@ -99,6 +101,11 @@ async def test_hydrate_work_item_failure_is_swallowed(session, make_user):
     ctx = _ctx(run, services={"ado_client": ado})
     await bp._hydrate(ctx)
     assert ctx.artifacts["work_item"] is None
+    # M-63: distinguish the swallow path from a no-op None return. The old
+    # assertion (`work_item is None`) was indistinguishable from _hydrate
+    # never calling the client at all. Assert the client WAS called (and
+    # raised) so the swallow path is actually exercised.
+    assert ado.calls == [99]
 
 
 # --------------------------------------------------------------- _draft

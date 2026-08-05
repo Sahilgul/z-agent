@@ -112,6 +112,11 @@ async def test_stop_run_interrupts_and_cancels_task(session, make_user):
     rm._tasks["r1"] = asyncio.create_task(asyncio.sleep(100))
     await rm.stop_run("r1")
     await asyncio.sleep(0)
+    # M-62: assert the cancelled task actually raises CancelledError. The
+    # old test verified the run/thread status but never that the task was
+    # cancelled, so a stop_run that failed to cancel the task would pass.
+    with pytest.raises(asyncio.CancelledError):
+        await rm._tasks["r1"]
     session.expire_all()
     assert session.get(Run, "r1").stage == RunStage.INTERRUPTED.value
     # C-15: stop_run must write the Thread DB status to "stopped" so the
@@ -284,7 +289,9 @@ async def test_continue_to_development_runs_development_blueprint(session, make_
 
     monkeypatch.setattr(run_manager, "blueprint_for", lambda name: SpyBlueprint())
     await rm.continue_to_development("r1")
-    await asyncio.sleep(0)
+    # M-64: await the actual fire-and-forget task instead of sleep(0) — a
+    # single yield was flaky (the task might not complete in one loop tick).
+    await rm._tasks["r1"]
     assert SpyBlueprint.ran is True
     assert "r1" in rm._tasks
 
@@ -303,7 +310,8 @@ async def test_replan_injects_critic_notes(session, make_user, monkeypatch):
 
     monkeypatch.setattr(run_manager, "blueprint_for", lambda name: SpyBlueprint())
     await rm.replan("r1", notes="fix citations")
-    await asyncio.sleep(0)
+    # M-64: await the actual task instead of sleep(0) (flaky single-yield).
+    await rm._tasks["r1"]
     assert captured["notes"] == "fix citations"
 
 

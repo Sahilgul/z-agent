@@ -90,6 +90,32 @@ async def test_spawn_gateway_failure_marks_thread_failed(session, make_user, mon
     assert threads[0].status == "failed"
 
 
+async def test_spawn_gateway_failure_releases_writable_repo_lock(session, make_user, monkeypatch):
+    # M-65: a gateway failure on a WRITABLE thread must release the per-repo
+    # write lock so the next spawn on the same repo isn't blocked forever. The
+    # old test used writable_repo=None, so the writable lock was never exercised
+    # and a leak would go undetected.
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway(fail=True))
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
+                        lambda *a, **k: "cid")
+    # Use the REAL capacity (no try_acquire monkeypatch) so the lock state is
+    # observable; reset the singleton to isolate from other tests.
+    thread_manager.capacity._reserved = 0
+    thread_manager.capacity._reserved_writable = set()
+    repo = Repo(name="ServerApp", integration_branch="main")
+    session.add(repo); session.commit()
+    with pytest.raises(ThreadSpawnError, match="gateway key mint failed"):
+        await lm.spawn(run, "developer", "task", "persona", repo, [])
+    session.expire_all()
+    assert session.query(Thread).filter_by(repo_scope="ServerApp").one().status == "failed"
+    # M-65: the writable-repo lock is released — a fresh try_acquire for the
+    # same repo succeeds (a leak would block the next spawn forever).
+    ok, _ = await thread_manager.capacity.try_acquire("ServerApp")
+    assert ok is True
+    thread_manager.capacity.release("ServerApp")
+
+
 async def test_spawn_container_failure_marks_thread_failed(session, make_user, monkeypatch):
     run = _make_run(session, make_user)
     lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())

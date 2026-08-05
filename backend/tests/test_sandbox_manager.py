@@ -14,8 +14,14 @@ class _FakeContainer:
     def __init__(self, cid="c-1"):
         self.id = cid
         self.short_id = cid[:8]
-    def stop(self, timeout=None): pass
-    def remove(self, force=False): pass
+        # M-71: record stop/remove calls so tests can verify they actually
+        # happened (the old no-op stubs let a regression skip either silently).
+        self.stopped: list = []
+        self.removed: list = []
+    def stop(self, timeout=None):
+        self.stopped.append(timeout)
+    def remove(self, force=False):
+        self.removed.append(force)
 
 
 class _FakeContainers:
@@ -91,6 +97,15 @@ def test_session_subpath_creates_dirs():
     path = sb.session_subpath("r1", "l1")
     assert path.exists()
     assert path.is_dir()
+    # M-70: verify the run/thread path placement — the old test only checked
+    # exists()/is_dir(), so a regression that put the dir in the wrong place
+    # (e.g., sessions_dir/l1/r1 or a flat temp dir) would pass. The contract
+    # is sessions_dir/<run_id>/<thread_id>/ (resume/fork survive shred).
+    from app.core.config import get_settings
+    expected = get_settings().sessions_dir / "r1" / "l1"
+    assert path == expected
+    assert path.parent.name == "r1"  # run_id segment
+    assert path.name == "l1"        # thread_id segment
 
 
 def test_stamp_clone_invokes_git(monkeypatch, tmp_path):
@@ -206,6 +221,11 @@ def test_stop_container_calls_stop_and_remove(monkeypatch):
     client = _FakeDockerClient(container=container)
     _patch_docker(monkeypatch, client)
     sb.sandbox_manager.stop_container("c-9")  # should not raise
+    # M-71: verify stop() and remove() were actually called — the old test
+    # only checked "should not raise", so a regression that skipped either
+    # would pass silently.
+    assert container.stopped == [5]   # timeout=5 per stop_container
+    assert container.removed == [True]  # force=True per stop_container
 
 
 def test_stop_container_swallows_docker_error(monkeypatch):
@@ -238,12 +258,35 @@ def test_purge_expired_sessions_purges_old(monkeypatch):
     (fresh / "f.txt").write_text("x")
     old_ts = time.time() - (31 * 86400)
     fresh_ts = time.time()
+    # M-72: set BOTH the dir and the file mtime — purge now uses the NEWEST
+    # mtime among the dir and its files, so an old dir with a fresh file is
+    # active and survives. Setting the file mtime too keeps this test honest.
     os.utime(old, (old_ts, old_ts))
+    os.utime(old / "f.txt", (old_ts, old_ts))
     os.utime(fresh, (fresh_ts, fresh_ts))
+    os.utime(fresh / "f.txt", (fresh_ts, fresh_ts))
     purged = sb.sandbox_manager.purge_expired_sessions(retention_days=30)
     assert purged == 1
     assert not old.exists()
     assert fresh.exists()
+
+
+def test_purge_expired_sessions_keeps_old_dir_with_fresh_file(monkeypatch):
+    # M-72: an OLD dir (stale dir mtime) with a FRESH file inside is ACTIVE
+    # — the session was written to recently. Purge must use the newest mtime
+    # (dir + files) so this survives (the old dir-only check purged it).
+    sessions = sb.get_settings().sessions_dir
+    stale_dir = sessions / "stale-dir-fresh-file"
+    stale_dir.mkdir(parents=True, exist_ok=True)
+    f = stale_dir / "f.txt"
+    f.write_text("x")
+    old_ts = time.time() - (31 * 86400)
+    fresh_ts = time.time()
+    os.utime(stale_dir, (old_ts, old_ts))   # dir mtime stale (no new entries)
+    os.utime(f, (fresh_ts, fresh_ts))       # file mtime fresh (written today)
+    purged = sb.sandbox_manager.purge_expired_sessions(retention_days=30)
+    assert purged == 0
+    assert stale_dir.exists()  # active session survives
 
 
 def test_purge_expired_sessions_no_dir():

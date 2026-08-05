@@ -80,8 +80,16 @@ async def test_fanout_drops_slow_consumer(fake_redis):
     q = asyncio.Queue(maxsize=1)
     r.subscribers.setdefault("run-1", set()).add(q)
     await r._fanout("run-1", {"type": "x"})
+    # M-67: verify the first message was actually delivered (queued) before
+    # the eviction — the old test only asserted the queue was dropped on the
+    # second message, so a regression that never queued the first would pass.
+    assert q.qsize() == 1
     await r._fanout("run-1", {"type": "y"})  # queue full -> evicted
     assert q not in r.subscribers["run-1"]
+    # M-53: the relay pushes a DROP_SENTINEL on eviction (popping the buffered
+    # "x" to make room) so the consumer's queue.get() unblocks — verify it.
+    from app.events.relay import DROP_SENTINEL
+    assert q.get_nowait() is DROP_SENTINEL
 
 
 async def test_publish_global_fans_to_all_runs(fake_redis):

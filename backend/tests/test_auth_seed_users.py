@@ -12,7 +12,11 @@ def test_seed_creates_system_user_and_ask_mode(session):
     system = session.query(User).filter_by(username="system").one()
     assert system.role == "member"
     assert system.status == "active"
-    assert system.pin_hash == "!locked"
+    # M-56: the system user is a service account that must NEVER log in.
+    # pin_hash is None (was "!locked" — an invalid bcrypt hash that crashed
+    # the login path with a 500). None makes the login route's
+    # `pin_hash is None` guard return a clean 401.
+    assert system.pin_hash is None
     mode = session.query(Mode).filter_by(name="ask").one()
     assert mode.permission_mode == "default"
     assert mode.autonomy_default == "supervised"

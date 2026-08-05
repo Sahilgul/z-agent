@@ -305,9 +305,32 @@ class FakePubSub:
     async def aclose(self) -> None:
         await asyncio.sleep(0)
 
+    async def get_message(self, ignore_subscribe_messages: bool = True,
+                          timeout: float = 0):
+        # M-59: the relay's in-memory delta loop polls get_message; the old
+        # fake had NO get_message, so the delta loop path was untestable via
+        # the conftest fake (relay tests had to monkeypatch a local stub).
+        # Yield one subscribed-channel message per call (or None when empty).
+        await asyncio.sleep(0)
+        for ch in self._channels:
+            messages = self.redis.pubsub_channels.get(ch, [])
+            if messages:
+                msg = messages.pop(0)
+                return {"type": "message", "channel": ch, "data": msg}
+        return None
+
     async def listen(self):
-        return
-        yield  # pragma: no cover
+        # M-59: listen() used to `return` immediately (yield nothing), so the
+        # relay's `async for raw in pubsub.listen()` delta path was entirely
+        # untested via this fake. Yield subscribed-channel messages so the
+        # pubsub path is live.
+        while True:
+            for ch in self._channels:
+                messages = self.redis.pubsub_channels.get(ch, [])
+                while messages:
+                    msg = messages.pop(0)
+                    yield {"type": "message", "channel": ch, "data": msg}
+            await asyncio.sleep(0.05)
 
 
 @pytest.fixture
@@ -423,12 +446,23 @@ class FakeRunManager:
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
                          work_item_id=None, autonomy=None, fanout=None):
+        from app.db.base import get_session
         from app.services.runs import transition
         from zagent_contracts import RunStage
         run = Run(id=str(uuid.uuid4()), created_by=initiated_by, source=source,
                   mode=mode_name, autonomy=autonomy or "supervised", title=task[:256],
                   repo=repo, work_item_id=work_item_id)
         transition(run, RunStage.QUEUED)
+        # M-60: persist the run so a POST→GET round-trip sees it. The fake
+        # used to only append to self.created, leaving the DB empty, so a
+        # follow-up GET returned no runs (no round-trip coverage).
+        session = get_session()
+        try:
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+        finally:
+            session.close()
         self.created.append({"id": run.id, "task": task, "repo": repo, "fanout": fanout})
         return run
 

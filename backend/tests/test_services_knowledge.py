@@ -159,7 +159,12 @@ def test_lexical_rank_deterministic_and_excludes_zero_overlap():
         {"id": "k3", "trigger": "transaction retry policy"},
     ]
     ids = knowledge.lexical_rank("add a transaction to the audit flow", cands)
-    assert ids == ["k1", "k3"] or ids == ["k3", "k1"] or set(ids) == {"k1", "k3"}
+    # M-66: the old assertion (`ids == ["k1","k3"] or ids == ["k3","k1"] or
+    # set(ids) == {"k1","k3"}`) accepted ANY order, so a regression that
+    # reversed the ranking would pass. lexical_rank sorts by (-score, id):
+    # k1 (overlap 2: transaction+audit) ranks above k3 (overlap 1:
+    # transaction). Assert the EXACT deterministic order.
+    assert ids == ["k1", "k3"]
     assert "k2" not in ids
     # stable across calls
     assert knowledge.lexical_rank("add a transaction to the audit flow", cands) == ids

@@ -263,7 +263,17 @@ class SandboxManager:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         purged = 0
         for run_dir in settings.sessions_dir.iterdir() if settings.sessions_dir.exists() else []:
-            mtime = datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc)
+            # M-72: use the NEWEST mtime among the dir and its contents.
+            # A dir created long ago but written to today (file mtime fresh,
+            # dir mtime stale because adding bytes to a file doesn't update
+            # the parent dir's mtime on most filesystems) is ACTIVE and must
+            # not be purged. The old dir-only check purged such active
+            # sessions.
+            mtimes = [datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc)]
+            for child in run_dir.iterdir():
+                if child.is_file():
+                    mtimes.append(datetime.fromtimestamp(child.stat().st_mtime, tz=timezone.utc))
+            mtime = max(mtimes)
             if mtime < cutoff:
                 shutil.rmtree(run_dir, ignore_errors=True)
                 purged += 1
