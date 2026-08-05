@@ -117,4 +117,45 @@ describe("foldStream", () => {
     expect(items[0].role).toBe("user");
     expect(items[1].role).toBe("agent");
   });
+
+  // --- RF console parity: typed status events render as their card kinds ---
+
+  it("maps typed status events to their display card kinds", () => {
+    const items = foldStream(
+      [
+        { thread_id: "l1", kind: "status", title: "tasks", seq: 1, detail: { kind: "todo-checklist", tasks: { artifact: [], tracker: {} } } },
+        { thread_id: "l1", kind: "status", title: "compaction", seq: 2, detail: { kind: "compaction_card", pruned: 3 } },
+        { thread_id: "l1", kind: "status", title: "⚠ stuck", seq: 3, detail: { kind: "warning", detail: "same failing call 3x" } },
+        { thread_id: "l1", kind: "status", title: "◆ recap", seq: 4, detail: { kind: "recap", stage: "plan", summary: "advanced" } },
+      ],
+      [],
+    );
+    expect(items.map((i) => i.kind)).toEqual(["todo_checklist", "compaction", "warning", "recap"]);
+  });
+
+  it("drops untyped status plumbing but keeps typed status events", () => {
+    const items = foldStream(
+      [
+        { thread_id: "l1", kind: "status", title: "session-init", detail: {}, seq: 0 },
+        { thread_id: "l1", kind: "status", title: "turn-complete", detail: { kind: "turn_boundary" }, seq: 1 },
+        { thread_id: "l1", kind: "status", title: "⚠ budget 80%", detail: { kind: "warning", detail: "budget 80% used" }, seq: 2 },
+      ],
+      [],
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe("warning");
+  });
+
+  it("passes approval events through with action_id intact", () => {
+    const items = foldStream(
+      [
+        { thread_id: "l1", kind: "approval", title: "approval: terminal_exec", seq: 5, detail: { kind: "approval_card", action_id: "ap-1", tool: "terminal_exec", args: { command: "git push" } } },
+        { thread_id: "l1", kind: "approval", title: "approval allow", seq: 6, detail: { kind: "approval_decision", action_id: "ap-1", decision: "allow" } },
+      ],
+      [],
+    );
+    expect(items.map((i) => i.kind)).toEqual(["approval", "approval"]);
+    expect(items[0].detail.action_id).toBe("ap-1");
+    expect(items[1].detail.action_id).toBe(items[0].detail.action_id);
+  });
 });

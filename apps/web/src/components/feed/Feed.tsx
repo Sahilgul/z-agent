@@ -8,6 +8,13 @@ import {
   shouldUseViewer,
   type CardKind,
 } from "./cardTypes";
+import {
+  ApprovalCard,
+  CompactionCard,
+  RecapCard,
+  TodoChecklist,
+  WarningCard,
+} from "./cards";
 import { Viewer } from "./Viewer";
 
 /** A feed item — the raw event mapped to a card. */
@@ -24,6 +31,8 @@ export interface FeedItem {
   filePath?: string;
   /** For diff cards: the diff content. */
   diff?: string;
+  /** The typed card payload (todo tasks, compaction counts, approval args…). */
+  detail?: Record<string, unknown>;
 }
 
 /** The two-tier disclosure: a bounded inline preview, click-through to the
@@ -100,7 +109,24 @@ function FeedRow({ item, onOpenViewer }: {
             </pre>
           </details>
         )}
-        {policy === "inline" && !isThinking && item.text && (
+        {policy === "inline" && !isThinking && item.kind === "todo_checklist" && item.detail && (
+          <TodoChecklist detail={item.detail} />
+        )}
+        {policy === "inline" && !isThinking && item.kind === "compaction" && item.detail && (
+          <CompactionCard detail={item.detail} />
+        )}
+        {policy === "inline" && !isThinking && item.kind === "warning" && item.detail && (
+          <WarningCard detail={item.detail} title={item.title} />
+        )}
+        {policy === "inline" && !isThinking && item.kind === "recap" && item.detail && (
+          <RecapCard detail={item.detail} />
+        )}
+        {policy === "inline" && !isThinking && item.kind === "approval" && item.detail && (
+          <ApprovalCard detail={item.detail} title={item.title} />
+        )}
+        {policy === "inline" && !isThinking &&
+          !["todo_checklist", "compaction", "warning", "recap", "approval"].includes(item.kind) &&
+          item.text && (
           <pre className="mt-1 max-h-[220px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.5] text-ink-primary">
             {item.text}
           </pre>

@@ -49,6 +49,44 @@ class EventEmitter:
         self._seq += 1
         return event
 
+    # --- RF: dedicated approval StepKind + action_id pairing ---
+
+    def approval_card(self, payload: dict[str, Any], task_id: str | None) -> StepEvent:
+        """The approval-card StepEvent — kind=APPROVAL (replaces the old
+        STATUS/seq=0 card). action_id pairs the card with its decision event."""
+        approval_id = str(payload.get("approval_id", ""))
+        return self._next(
+            StepKind.APPROVAL, f"approval: {payload.get('tool', '?')}",
+            {
+                "kind": "approval_card",
+                "action_id": approval_id,
+                "approval_id": approval_id,
+                "tool": payload.get("tool"),
+                "args": payload.get("args"),
+                "preview": payload.get("preview"),
+                "destructive": payload.get("destructive", False),
+                "always_allowable": payload.get("always_allowable", False),
+            },
+            task_id, None,
+        )
+
+    def approval_decision(self, approval_id: str, decision: dict[str, Any],
+                          task_id: str | None) -> StepEvent:
+        """The paired decision event — same action_id as the card."""
+        verdict = decision.get("decision", "deny")
+        return self._next(
+            StepKind.APPROVAL, f"approval {verdict}: {decision.get('tool', '')}".rstrip(": "),
+            {
+                "kind": "approval_decision",
+                "action_id": approval_id,
+                "approval_id": approval_id,
+                "decision": verdict,
+                "reason": decision.get("reason"),
+                "edited": "edited_args" in decision,
+            },
+            task_id, None,
+        )
+
     def from_assistant(self, msg: AIMessage, task_id: str | None) -> list[StepEvent]:
         """Turn an AIMessage into StepEvents (thinking/text + pending tool uses)."""
         events: list[StepEvent] = []

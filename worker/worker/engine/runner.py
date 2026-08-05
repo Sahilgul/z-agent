@@ -185,27 +185,16 @@ class EngineRunner:
             decision = await self.broker.wait_decision(payload["approval_id"])
             self.status = "running"
             await self.forwarder.heartbeat(self.status)
+            # RF: the paired decision event (same action_id as the card).
+            decision = {**decision, "tool": payload.get("tool")}
+            await self.forwarder.publish_events([
+                self.emitter.approval_decision(payload["approval_id"], decision, self.task_id)])
             result = await graph.ainvoke(Command(resume=decision), config)
 
     async def _emit_approval_card(self, payload: dict[str, Any]) -> None:
-        """Render the interrupt payload as the approval-card StepEvent."""
-        from zagent_contracts import StepEvent, StepKind
-        event = StepEvent(
-            run_id=self.run_id, thread_id=self.thread_id, context_id=self.context_id,
-            task_id=self.task_id, seq=self.emitter._seq,
-            kind=StepKind.STATUS, title=f"approval: {payload.get('tool', '?')}",
-            detail={
-                "kind": "approval_card",
-                "approval_id": payload.get("approval_id"),
-                "tool": payload.get("tool"),
-                "args": payload.get("args"),
-                "preview": payload.get("preview"),
-                "destructive": payload.get("destructive", False),
-                "always_allowable": payload.get("always_allowable", False),
-            },
-        )
-        self.emitter._seq += 1
-        await self.forwarder.publish_events([event])
+        """Render the interrupt payload as the approval-card StepEvent —
+        dedicated APPROVAL kind with action_id pairing (RF)."""
+        await self.forwarder.publish_events([self.emitter.approval_card(payload, self.task_id)])
 
     # ---------------------------------------------------------------- turn loop
 

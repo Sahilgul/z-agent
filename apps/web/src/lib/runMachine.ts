@@ -109,14 +109,39 @@ export interface StreamItem {
   live: boolean;
   /** Who spoke: agent prose vs the user's own message. Drives chat alignment. */
   role: "user" | "agent" | null;
+  /** The typed card payload (todo tasks, compaction counts, approval args…). */
+  detail: Record<string, unknown>;
+}
+
+/** Typed status sub-kinds → display card kinds (RF console parity, §19 card
+ *  taxonomy): todo-checklist, compaction card, ⚠ warning, ◆ recap, approvals. */
+const DETAIL_KIND_MAP: Record<string, string> = {
+  "todo-checklist": "todo_checklist",
+  compaction_card: "compaction",
+  warning: "warning",
+  critic_finding: "warning",
+  compaction_rollback: "warning",
+  recap: "recap",
+  approval_card: "approval",
+  approval_decision: "approval",
+};
+
+/** Display kind for an event: the typed detail sub-kind wins over the raw
+ *  StepKind so typed STATUS events render as their card kinds. */
+export function displayKind(e: { kind: string; detail: Record<string, unknown> }): string {
+  const sub = typeof e.detail?.kind === "string" ? e.detail.kind : null;
+  return (sub && DETAIL_KIND_MAP[sub]) || e.kind;
 }
 
 /** Status events are the agent's plumbing, not its progress: every turn emits
  *  session-init / thinking_tokens / turn-complete bookkeeping. Rendering them
- *  makes one healthy reply look like a stack of restarts, so they never reach
- *  the stream regardless of what's stored. */
-function isPlumbing(e: { kind: string }): boolean {
-  return e.kind === "status";
+ *  makes one healthy reply look like a stack of restarts, so untyped status
+ *  events never reach the stream. TYPED status events (todo, compaction,
+ *  warning, recap, approval) are progress and DO render (RF). */
+function isPlumbing(e: { kind: string; detail?: Record<string, unknown> }): boolean {
+  if (e.kind !== "status") return false;
+  const sub = typeof e.detail?.kind === "string" ? e.detail.kind : null;
+  return !sub || !(sub in DETAIL_KIND_MAP);
 }
 
 /** Fold WS typing deltas + stored events into display items. Deltas for the
@@ -135,13 +160,14 @@ export function foldStream(
   // user's green bubble.
   const items: StreamItem[] = events.filter((e) => !isPlumbing(e)).map((e) => ({
     key: `e-${e.thread_id}-${e.seq}-${e.detail.role ?? "agent"}`,
-    kind: e.kind,
+    kind: displayKind(e),
     title: e.title,
     text: String(e.detail.text ?? e.detail.output ?? ""),
     threadId: e.thread_id,
     ok: typeof e.detail.ok === "boolean" ? (e.detail.ok as boolean) : null,
     live: false,
     role: e.detail.role === "user" ? "user" : e.detail.role === "agent" ? "agent" : null,
+    detail: e.detail,
   }));
   const live = new Map<string, StreamItem>();
   for (const d of deltas) {
@@ -159,6 +185,7 @@ export function foldStream(
         ok: null,
         live: true,
         role: null,
+        detail: {},
       });
     }
   }

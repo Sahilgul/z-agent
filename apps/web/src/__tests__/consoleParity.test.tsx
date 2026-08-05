@@ -1,0 +1,140 @@
+/** RF exit evidence (P9 acceptance): the 4 previously-missing card kinds
+ *  (todo-checklist, compaction, ⚠ warning, ◆ recap) + the dedicated approval
+ *  kind render from LIVE-shaped StepEvents in BOTH console surfaces —
+ *  the production EventStream and the Phase 9 Feed. */
+
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { EventStream } from "../components/EventStream";
+import { Feed, type FeedItem } from "../components/feed/Feed";
+import { clipPreview, PREVIEW_CLIP_LINES } from "../components/feed/cardTypes";
+import type { StepEvent } from "../types";
+
+const ev = (seq: number, kind: StepEvent["kind"], title: string, detail: Record<string, unknown>): StepEvent => ({
+  run_id: "r1",
+  thread_id: "t1",
+  seq,
+  ts: new Date().toISOString(),
+  kind,
+  title,
+  detail,
+  sdk_message_uuid: null,
+});
+
+// Live-shaped payloads exactly as the engine emits them (RC/RA/RF).
+const TODO = ev(1, "command", "update_tasks", {
+  kind: "todo-checklist",
+  tasks: {
+    artifact: [
+      { id: "t1", content: "wire the gate" },
+      { id: "t2", content: "write tests" },
+    ],
+    tracker: { t1: "completed", t2: "in_progress" },
+  },
+});
+const COMPACTION = ev(2, "status", "compaction", {
+  kind: "compaction_card", pruned: 4, summarized: 2, kept: 9,
+  before_tokens: 12000, after_tokens: 3100, forced: false,
+});
+const WARNING = ev(3, "status", "⚠ same failing call 3x", {
+  kind: "warning", warning: "stuck_loop", detail: "same failing call 3x",
+});
+const RECAP = ev(4, "status", "◆ recap: stage plan", {
+  kind: "recap", stage: "plan", summary: "Stage advanced to plan. Goal: add rate limiting",
+});
+const APPROVAL_CARD = ev(5, "approval", "approval: terminal_exec", {
+  kind: "approval_card", action_id: "ap-tc1", approval_id: "ap-tc1",
+  tool: "terminal_exec", args: { command: "git push origin zagent/x" },
+  destructive: true, always_allowable: false,
+});
+const APPROVAL_DECISION = ev(6, "approval", "approval edited_allow", {
+  kind: "approval_decision", action_id: "ap-tc1", approval_id: "ap-tc1",
+  decision: "edited_allow", edited: true,
+});
+
+const ALL_EVENTS = [TODO, COMPACTION, WARNING, RECAP, APPROVAL_CARD, APPROVAL_DECISION];
+
+const feedItems: FeedItem[] = ALL_EVENTS.map((e) => ({
+  key: `k-${e.seq}`,
+  kind: (e.detail.kind === "todo-checklist" ? "todo_checklist"
+    : e.detail.kind === "compaction_card" ? "compaction"
+    : e.detail.kind === "warning" ? "warning"
+    : e.detail.kind === "recap" ? "recap"
+    : "approval") as FeedItem["kind"],
+  title: e.title,
+  text: "",
+  threadId: e.thread_id,
+  ok: null,
+  live: false,
+  role: null,
+  detail: e.detail,
+}));
+
+describe("EventStream — P9 card parity from live StepEvents", () => {
+  it("renders the todo-checklist card with checkbox states", () => {
+    render(<EventStream events={[TODO]} deltas={[]} />);
+    expect(screen.getByTestId("todo-checklist")).toBeInTheDocument();
+    expect(screen.getByText("wire the gate")).toBeInTheDocument();
+    expect(screen.getByText("write tests")).toBeInTheDocument();
+    expect(screen.getByText("☑")).toBeInTheDocument();
+    expect(screen.getByText("▸")).toBeInTheDocument();
+  });
+
+  it("renders the compaction card with counts and token delta", () => {
+    render(<EventStream events={[COMPACTION]} deltas={[]} />);
+    const card = screen.getByTestId("compaction-card");
+    expect(card.textContent).toContain("pruned 4");
+    expect(card.textContent).toContain("12000 → 3100 tokens");
+  });
+
+  it("renders the ⚠ warning card", () => {
+    render(<EventStream events={[WARNING]} deltas={[]} />);
+    expect(screen.getByTestId("warning-card").textContent).toContain("same failing call 3x");
+  });
+
+  it("renders the ◆ recap block", () => {
+    render(<EventStream events={[RECAP]} deltas={[]} />);
+    expect(screen.getByTestId("recap-card").textContent).toContain("Stage advanced to plan");
+  });
+
+  it("renders approval card verbatim with action_id pairing + destructive badge", () => {
+    const { container } = render(<EventStream events={[APPROVAL_CARD, APPROVAL_DECISION]} deltas={[]} />);
+    const cards = container.querySelectorAll('[data-testid="approval-card"]');
+    expect(cards).toHaveLength(2);
+    // action_id pairing: card and decision share the same action id.
+    expect(cards[0].getAttribute("data-action-id")).toBe("ap-tc1");
+    expect(cards[1].getAttribute("data-action-id")).toBe("ap-tc1");
+    // VERBATIM args, never paraphrased.
+    expect(cards[0].textContent).toContain("git push origin zagent/x");
+    expect(cards[0].textContent).toContain("destructive");
+    expect(cards[1].textContent).toContain("edited_allow");
+    expect(cards[1].textContent).toContain("edited");
+  });
+});
+
+describe("Feed — P9 card parity", () => {
+  it("renders all four missing card kinds + approval", () => {
+    render(<Feed items={feedItems} />);
+    expect(screen.getByTestId("todo-checklist")).toBeInTheDocument();
+    expect(screen.getByTestId("compaction-card")).toBeInTheDocument();
+    expect(screen.getByTestId("warning-card")).toBeInTheDocument();
+    expect(screen.getByTestId("recap-card")).toBeInTheDocument();
+    expect(screen.getAllByTestId("approval-card")).toHaveLength(2);
+  });
+});
+
+describe("Feed preview clip — §19 two-tier disclosure", () => {
+  it("clips at 10 lines (raised from 6)", () => {
+    expect(PREVIEW_CLIP_LINES).toBe(10);
+    const text = Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join("\n");
+    const { clipped, more } = clipPreview(text);
+    expect(clipped.split("\n")).toHaveLength(10);
+    expect(more).toBe(4);
+  });
+
+  it("shows all lines when under the clip", () => {
+    const { clipped, more } = clipPreview("a\nb\nc");
+    expect(clipped).toBe("a\nb\nc");
+    expect(more).toBe(0);
+  });
+});

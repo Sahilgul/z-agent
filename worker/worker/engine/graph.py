@@ -738,6 +738,7 @@ async def goal_router_node(state: EngineState, config: RunnableConfig) -> dict[s
             {"kind": "goal_stage", "stage": artifact["stage"], "goal_id": artifact["goal_id"]},
             task_id, None,
         )])
+        _publish_stage_event_recap(config, emitter, task_id, artifact)
         return {"goal_artifact": artifact, "stage_envelope": artifact["stage"]}
 
     stage = stage_of(goal)
@@ -849,13 +850,35 @@ def _critic_block(state: EngineState, config: RunnableConfig, emitter: EventEmit
     return out
 
 
-def _publish_stage_event(config: RunnableConfig, emitter: EventEmitter,
-                         task_id: str | None, artifact: dict[str, Any]) -> None:
+def _publish_stage_event_recap(config: RunnableConfig, emitter: EventEmitter,
+                               task_id: str | None, artifact: dict[str, Any]) -> None:
+    """RF: ◆ recap block at every stage entry/advance — the progress-recap
+    card kind (§19 taxonomy)."""
+    stage = artifact["stage"]
+    goal_text = str(artifact.get("user_story") or artifact.get("goal", ""))[:120]
     _publish_events(config, [emitter._next(
-        StepKind.STATUS, f"goal stage → {artifact['stage']}",
-        {"kind": "goal_stage", "stage": artifact["stage"], "goal_id": artifact.get("goal_id")},
+        StepKind.STATUS, f"◆ recap: stage {stage}",
+        {
+            "kind": "recap",
+            "stage": stage,
+            "goal_id": artifact.get("goal_id"),
+            "summary": f"Stage advanced to {stage}. Goal: {goal_text}",
+            "critic_iterations": artifact.get("critic_iterations", 0),
+            "blockers": artifact.get("blockers", []),
+        },
         task_id, None,
     )])
+
+
+def _publish_stage_event(config: RunnableConfig, emitter: EventEmitter,
+                         task_id: str | None, artifact: dict[str, Any]) -> None:
+    stage = artifact["stage"]
+    _publish_events(config, [emitter._next(
+        StepKind.STATUS, f"goal stage → {stage}",
+        {"kind": "goal_stage", "stage": stage, "goal_id": artifact.get("goal_id")},
+        task_id, None,
+    )])
+    _publish_stage_event_recap(config, emitter, task_id, artifact)
 
 
 def _first_user_story(state: EngineState) -> str:

@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
+import {
+  ApprovalCard,
+  CompactionCard,
+  RecapCard,
+  TodoChecklist,
+  WarningCard,
+} from "./feed/cards";
 import { foldStream, type StreamItem } from "../lib/runMachine";
 import type { StepEvent } from "../types";
 
@@ -17,6 +24,11 @@ const KIND_RAIL: Record<string, string> = {
   message: "bg-green-bright",
   notebook: "bg-green",
   status: "bg-ink-faint",
+  todo_checklist: "bg-green",
+  compaction: "bg-blue",
+  warning: "bg-warn",
+  recap: "bg-blue-bright",
+  approval: "bg-warn",
 };
 
 const BODY =
@@ -79,7 +91,12 @@ function Item({ item }: { item: StreamItem }) {
             {item.title}
             {item.ok === false && <span className="text-danger-bright"> failed</span>}
           </div>
-          {body && (
+          {item.kind === "todo_checklist" && <TodoChecklist detail={item.detail} />}
+          {item.kind === "compaction" && <CompactionCard detail={item.detail} />}
+          {item.kind === "warning" && <WarningCard detail={item.detail} title={item.title} />}
+          {item.kind === "recap" && <RecapCard detail={item.detail} />}
+          {item.kind === "approval" && <ApprovalCard detail={item.detail} title={item.title} />}
+          {!["todo_checklist", "compaction", "warning", "recap", "approval"].includes(item.kind) && body && (
             <pre className={BODY}>{body}</pre>
           )}
         </div>

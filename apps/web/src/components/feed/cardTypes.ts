@@ -18,7 +18,11 @@ export type CardKind =
   | "message"
   | "notebook"
   | "approval"
-  | "status";
+  | "status"
+  | "todo_checklist"
+  | "compaction"
+  | "warning"
+  | "recap";
 
 export interface CardRail {
   /** Tailwind class for the left rail color. */
@@ -41,6 +45,10 @@ export const CARD_META: Record<CardKind, CardRail> = {
   notebook: { rail: "bg-green", glyph: "N", label: "notebook" },
   approval: { rail: "bg-warn", glyph: "?", label: "approval" },
   status: { rail: "bg-ink-faint", glyph: "·", label: "status" },
+  todo_checklist: { rail: "bg-green", glyph: "☑", label: "tasks" },
+  compaction: { rail: "bg-blue", glyph: "▤", label: "compaction" },
+  warning: { rail: "bg-warn", glyph: "⚠", label: "warning" },
+  recap: { rail: "bg-blue-bright", glyph: "◆", label: "recap" },
 };
 
 /** The two-tier disclosure contract.
@@ -63,16 +71,25 @@ export const DISCLOSURE: Record<CardKind, DisclosurePolicy> = {
   notebook: "inline",
   approval: "inline",
   status: "inline",
+  todo_checklist: "inline",
+  compaction: "inline",
+  warning: "inline",
+  recap: "inline",
 };
 
 /** The inline preview clip limit — how many lines show before the "N more"
- *  counter. Plan §19: "a few clipped lines". */
-export const PREVIEW_CLIP_LINES = 6;
+ *  counter. Plan §19 two-tier disclosure: "feed ≤10 clipped diff lines +
+ *  `+... (N more)`" (RF: raised 6 → 10 to match the locked contract). */
+export const PREVIEW_CLIP_LINES = 10;
 
 /** The character cap for the inline preview body. */
 export const PREVIEW_CLIP_CHARS = 600;
 
-/** A diff/file is "large" if it exceeds this — it goes straight to viewer. */
+/** RF viewer-threshold decision (aligned to §19): the feed renders from
+ *  payloads the engine has ALREADY bounded (edit-preview hunks ≤10 lines,
+ *  truncated tool outputs) and preview-policy cards are always click-through
+ *  to the viewer — so the 4000-char threshold is a FALLBACK for oversize
+ *  payloads, not the primary gate. Kept at 4000. */
 export const VIEWER_THRESHOLD_CHARS = 4000;
 
 export function clipPreview(text: string): { clipped: string; more: number } {

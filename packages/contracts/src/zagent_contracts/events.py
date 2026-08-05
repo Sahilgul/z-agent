@@ -44,6 +44,7 @@ class StepKind(str, Enum):
     MESSAGE = "message"
     NOTEBOOK = "notebook"
     STATUS = "status"
+    APPROVAL = "approval"  # RF: dedicated approval kind (replaces STATUS/seq=0 cards)
 
 
 class StepEvent(BaseModel):

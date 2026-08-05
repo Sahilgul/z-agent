@@ -42,7 +42,7 @@ export interface Thread {
 
 export type StepKind =
   | "thinking" | "command" | "file_read" | "file_edit" | "mcp_call"
-  | "test_run" | "message" | "notebook" | "status";
+  | "test_run" | "message" | "notebook" | "status" | "approval";
 
 export interface StepEvent {
   /** Present on the live WS payload; replay rows are serialized without it. */
