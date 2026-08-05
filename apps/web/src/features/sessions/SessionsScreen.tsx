@@ -4,10 +4,8 @@ import { Button } from "@/components/ui/button";
 import { FilterChips } from "@/components/ui/filter-chips";
 import { Input } from "@/components/ui/input";
 import { PageHead } from "@/components/ui/page-head";
-import { Skeleton } from "@/components/ui/skeleton";
-import { StatusLamp } from "@/components/ui/status-lamp";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { ActionCard } from "../../components/ActionCard";
 import { ApprovalQueue } from "../../components/ApprovalQueue";
 import { EventStream } from "../../components/EventStream";
@@ -15,21 +13,23 @@ import { ThreadChips } from "../../components/ThreadChips";
 import { PipelineBar } from "../../components/PipelineBar";
 import { SessionResume } from "../../components/SessionResume";
 import { SessionTabs } from "../../components/SessionTabs";
-import { agentWorking, stageMeta } from "../../lib/runMachine";
+import { agentWorking } from "../../lib/runMachine";
 import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
 import { useRuns } from "../../stores/run";
+import { useSession } from "../../stores/session";
 import { useUi } from "../../stores/ui";
 import { SwarmView } from "../swarm/SwarmView";
 import { ThreadOverlay } from "./ThreadOverlay";
 import { PlanOverlay } from "./PlanOverlay";
 import { PROverlay } from "./PROverlay";
-import type { Run } from "../../types";
 
-/** The one operating screen. With no run open it lists the rack and takes a
- *  new task; opening a run swaps the same column to the live session —
- *  swarm strip, glass-box trace, action card, composer. Approvals surface
- *  inline on the action card, so a decision never costs a navigation. */
+/** The one operating screen. With no run open it is a clean message-sending
+ *  screen — history lives behind the tab strip's history button, and the
+ *  first message sent here becomes a new session. Opening a run swaps the
+ *  same column to the live session — swarm strip, glass-box trace, action
+ *  card, composer. Approvals surface inline on the action card, so a
+ *  decision never costs a navigation. */
 const MODE_OPTIONS = [
   { value: "ask", label: "ask" },
   { value: "plan", label: "plan" },
@@ -40,52 +40,20 @@ const MODE_OPTIONS = [
 
 type Mode = (typeof MODE_OPTIONS)[number]["value"];
 
-function RunCard({ run, onOpen }: { run: Run; onOpen: () => void }) {
-  const meta = stageMeta(run.stage);
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      data-testid={`run-card-${run.id}`}
-      className="mb-s3 w-full rounded-lg border border-hairline bg-bg-panel p-s4 text-left shadow-card transition-colors duration-fast hover:border-blue-bright"
-    >
-      <div className="mb-s2 flex items-center justify-between">
-        <StatusLamp tone={meta.tone} label={meta.label} />
-        <span className="font-mono text-[11px] text-ink-faint">{run.mode}</span>
-      </div>
-      <div className="mb-s1 text-[15px] font-semibold text-ink-primary">{run.title}</div>
-      {run.auto_summary && (
-        <div className="mb-s2 line-clamp-2 text-[13px] text-ink-secondary">{run.auto_summary.slice(0, 140)}</div>
-      )}
-      <div className="flex items-center justify-between font-mono text-[11px] text-ink-faint">
-        <span>{run.repo ?? "fleet"}</span>
-        <span className="tabular">${run.cost_usd.toFixed(2)}</span>
-      </div>
-    </button>
-  );
-}
-
-function RunListSkeleton() {
-  return (
-    <div aria-label="loading runs">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="mb-s3 rounded-lg border border-hairline bg-bg-panel p-s4 shadow-card">
-          <div className="mb-s2 flex items-center justify-between">
-            <Skeleton className="h-3 w-20 rounded-sm" />
-            <Skeleton className="h-3 w-12 rounded-sm" />
-          </div>
-          <Skeleton className="mb-s2 h-4 w-3/4 rounded-sm" />
-          <Skeleton className="h-3 w-1/2 rounded-sm" />
-        </div>
-      ))}
-    </div>
-  );
-}
+/** One suggestion per mode — the grid doubles as a tour of what the fleet can
+ *  do. Clicking loads the composer (mode included) but never sends: the
+ *  example is a starting point to edit, not a fire-and-forget. */
+const SUGGESTIONS: { mode: Mode; label: string; prompt: string }[] = [
+  { mode: "ask", label: "ask", prompt: "how does the approval flow work end to end?" },
+  { mode: "plan", label: "plan", prompt: "plan adding rate limiting to the gateway" },
+  { mode: "development", label: "develop", prompt: "fix the flaky login redirect and open a PR" },
+  { mode: "debug", label: "debug", prompt: "why did the last patrol run fail?" },
+  { mode: "agent-rnd", label: "swarm", prompt: "spawn 4 explorers to map auth across the fleet" },
+];
 
 export function SessionsScreen() {
   const {
     runs,
-    runsLoaded,
     loadRuns,
     openRun,
     closeRun,
@@ -106,7 +74,6 @@ export function SessionsScreen() {
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [fanout, setFanout] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
-  const [startingNew, setStartingNew] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -148,7 +115,6 @@ export function SessionsScreen() {
         fanout: fanout === "" || Number.isNaN(fanout) ? undefined : fanout,
       });
       setTask("");
-      setStartingNew(false);
       await openRun(run.id);
     } finally {
       setBusy(false);
@@ -183,6 +149,17 @@ export function SessionsScreen() {
       ? 'investigate across the fleet… ("spawn 5 explorers on ClientApp")'
       : "describe the task…";
 
+  const me = useSession((s) => s.me);
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const firstName = me?.display_name?.split(" ")[0];
+
+  const suggest = (s: (typeof SUGGESTIONS)[number]) => {
+    setMode(s.mode);
+    setTask(s.prompt);
+    document.getElementById("session-composer")?.focus();
+  };
+
   return (
     <div className="flex h-full w-full flex-col">
       <SessionTabs
@@ -193,13 +170,9 @@ export function SessionsScreen() {
         // back in the strip instead of vanishing the moment you leave it.
         onOpen={(runId) => {
           reopenTab(runId);
-          setStartingNew(false);
           if (runId !== current?.id) void openRun(runId);
         }}
-        onNew={() => {
-          closeRun();
-          setStartingNew(true);
-        }}
+        onNew={() => closeRun()}
         onClose={(runId) => {
           closeTab(runId);
           if (runId === current?.id) closeRun();
@@ -258,53 +231,59 @@ export function SessionsScreen() {
             {/* The ONLY scrollable region in a session: everything around it is
                 flex-none, so the stream absorbs the height instead of the page. */}
             <div className="min-h-0 flex-1 overflow-hidden">
-              <EventStream events={events} deltas={deltas} prompt={current.title} />
+              <EventStream events={events} deltas={deltas} prompt={current.title} promptTs={current.created_at} />
             </div>
           </div>
         </>
       ) : (
-        <div className="mx-auto min-h-0 w-full max-w-canvas flex-1 overflow-y-auto px-s8 py-s6">
-          <PageHead
-            title={startingNew ? "new session" : "sessions"}
-            sub={
-              startingNew
-                ? "blank slate — describe the task below"
-                : "your runs — describe a task to start a new one"
-            }
-          />
+        <div className="mx-auto flex min-h-0 w-full max-w-canvas flex-1 flex-col overflow-y-auto px-s8 py-s6">
+          <PageHead title="new session" sub="describe the task below — past runs live in history above" />
 
-          {/* Asking for a new session means a clean desk: past runs stay one
-              click away in the tab strip and history, not stacked underneath. */}
-          {startingNew ? (
-            runs.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setStartingNew(false)}
-                className="font-mono text-[12px] text-ink-faint underline-offset-2 hover:text-ink-primary hover:underline"
-              >
-                back to all sessions
-              </button>
-            )
-          ) : !runsLoaded ? (
-            <RunListSkeleton />
-          ) : runs.length === 0 ? (
-            <EmptyState
-              title="your rack is empty"
-              hint="no runs yet — describe the first one below"
-              action={
-                <Button
+          <div className="flex flex-1 flex-col items-center justify-center gap-s6 py-s8">
+            <div className="text-center">
+              <div className="mb-s2 text-[22px] font-semibold text-ink-primary">
+                good {daypart}
+                {firstName ? `, ${firstName}` : ""}
+              </div>
+              <div className="mb-s3 text-[13px] text-ink-faint">describe the task below — or pick a starting point</div>
+              {/* The two pillars, side by side: the swarm does the work, the
+                  fleet is what it works on. */}
+              <div className="flex items-center justify-center gap-s3 font-mono text-[11px] text-ink-faint">
+                <span className="flex items-center gap-s2" title="one lead, many explorers — fan out on any task">
+                  <span className="led" aria-hidden="true" />
+                  powered by swarm agents
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="flex items-center gap-s2" title="the repos, patrols and PRs they run against">
+                  <span className="led led--blue" aria-hidden="true" />
+                  runs across your fleet
+                </span>
+              </div>
+            </div>
+
+            <div className="grid w-full max-w-[560px] grid-cols-1 gap-s2 sm:grid-cols-2">
+              {SUGGESTIONS.map((s, i) => (
+                <button
+                  key={s.mode}
                   type="button"
-                  size="sm"
-                  className="font-mono"
-                  onClick={() => document.getElementById("session-composer")?.focus()}
+                  onClick={() => suggest(s)}
+                  className={cn(
+                    "group rounded-lg border border-hairline bg-bg-panel p-s3 text-left transition-colors duration-fast hover:border-green",
+                    i === SUGGESTIONS.length - 1 && "sm:col-span-2",
+                  )}
                 >
-                  route a run
-                </Button>
-              }
-            />
-          ) : (
-            runs.map((r) => <RunCard key={r.id} run={r} onOpen={() => void openRun(r.id)} />)
-          )}
+                  <div className="text-micro mb-s1 text-green-bright">{s.label}</div>
+                  <div className="text-[13px] text-ink-secondary transition-colors duration-fast group-hover:text-ink-primary">
+                    {s.prompt}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="font-mono text-[11px] text-ink-faint">
+              ⌘K command palette · enter to send · shift+enter for a newline
+            </div>
+          </div>
 
           {tickets.length > 0 && (
             <section aria-label="my ADO tickets" className="mt-s6">

@@ -9,6 +9,7 @@ import {
   WarningCard,
 } from "./feed/cards";
 import { foldStream, type StreamItem } from "../lib/runMachine";
+import { formatClock, formatTook } from "../lib/time";
 import type { StepEvent } from "../types";
 
 /** The glass box: every agent step rendered the SAME way for lead and
@@ -48,26 +49,51 @@ function Thinking({ item }: { item: StreamItem }) {
   );
 }
 
-/** Both voices share the left column and the full width: a transcript reads as
- *  one column of prose, not a chat app's zigzag, and wide payloads — tables,
- *  code fences, file:line citations — get every pixel instead of 80%. The tag
- *  and the frame colour tell the two speakers apart, so alignment doesn't
- *  have to. Markdown is rendered, never printed raw. */
-function Bubble({ role, body }: { role: "user" | "agent"; body: string }) {
-  const isUser = role === "user";
+/** The clock stamp under every message; agent replies also carry the turn's
+ *  "took Ns". Deliberately NOT text-micro — the parity contract reserves that
+ *  class for speaker tags, which agent prose never shows. */
+function MsgMeta({ ts, durationS, right }: { ts?: string | null; durationS?: number | null; right?: boolean }) {
+  const clock = formatClock(ts);
+  if (!clock && durationS == null) return null;
   return (
-    <div className="mb-2.5" data-kind="message" data-role={role}>
-      <div
-        className={cn(
-          "rounded-2xl rounded-tl-sm border px-s4 py-2.5",
-          isUser ? "border-green bg-bg-module" : "border-hairline bg-bg-raised",
-        )}
-      >
-        <div className={cn("text-micro mb-s1", isUser ? "text-green-bright" : "text-ink-faint")}>
-          {isUser ? "you" : "agent"}
+    <div
+      data-testid="msg-meta"
+      className={cn("mt-1 font-mono text-[10.5px] text-ink-faint", right && "text-right")}
+    >
+      {clock}
+      {durationS != null && `${clock ? " · " : ""}${formatTook(durationS)}`}
+    </div>
+  );
+}
+
+/** Speakers are told apart by shape, not tags: the agent answers in plain
+ *  prose (the surrounding trace is chrome enough), while the user's own
+ *  message is a compact right-aligned card so you can re-find what you asked
+ *  while scrolling a long session. Markdown is rendered, never printed raw. */
+function Bubble({ role, body, ts, durationS }: {
+  role: "user" | "agent";
+  body: string;
+  ts?: string | null;
+  durationS?: number | null;
+}) {
+  if (role === "user") {
+    return (
+      <div className="mb-2.5 flex justify-end" data-kind="message" data-role="user">
+        <div className="flex max-w-[80%] flex-col items-end">
+          <div className="rounded-2xl rounded-br-sm bg-bg-module px-s4 py-2.5">
+            <span className="sr-only">you</span>
+            <Markdown>{body}</Markdown>
+          </div>
+          <MsgMeta ts={ts} right />
         </div>
-        <Markdown>{body}</Markdown>
       </div>
+    );
+  }
+  return (
+    <div className="mb-2.5 py-1" data-kind="message" data-role="agent">
+      <span className="sr-only">agent</span>
+      <Markdown>{body}</Markdown>
+      <MsgMeta ts={ts} durationS={durationS} />
     </div>
   );
 }
@@ -82,7 +108,14 @@ function Item({ item }: { item: StreamItem }) {
   // render, so fall back to the title rather than suppressing both.
   const body = isAnswer ? item.text || item.title : item.text;
   if (isAnswer) {
-    return <Bubble role={item.role === "user" ? "user" : "agent"} body={body} />;
+    return (
+      <Bubble
+        role={item.role === "user" ? "user" : "agent"}
+        body={body}
+        ts={item.ts}
+        durationS={item.durationS}
+      />
+    );
   }
   return (
     <div className="mb-2.5 flex gap-2.5" data-kind={item.kind}>
@@ -114,6 +147,7 @@ export function EventStream({
   deltas,
   laneFilter,
   prompt,
+  promptTs,
 }: {
   events: StepEvent[];
   deltas: { thread_id: string; kind: string; text: string }[];
@@ -121,6 +155,8 @@ export function EventStream({
   /** What the user asked — a transcript that opens with the agent's reply reads
    *  like an answer to a question nobody can see. */
   prompt?: string;
+  /** When the prompt was sent (run creation) — stamps the header bubble. */
+  promptTs?: string | null;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   const filtered = laneFilter ? events.filter((e) => e.thread_id === laneFilter) : events;
@@ -150,7 +186,7 @@ export function EventStream({
       aria-relevant="additions"
       aria-label="agent event stream"
     >
-      {prompt && <Bubble role="user" body={prompt} />}
+      {prompt && <Bubble role="user" body={prompt} ts={promptTs} />}
       {items.length === 0 && (
         <div className="px-s2 py-s4 font-mono text-[12px] text-ink-faint">
           no trace yet — the agent's first step lands here

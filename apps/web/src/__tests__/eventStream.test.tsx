@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { EventStream } from "../components/EventStream";
 import type { StepEvent } from "../types";
 
-const ev = (seq: number, kind: StepEvent["kind"], title: string, detail: Record<string, unknown> = {}): StepEvent => ({
+const ev = (seq: number, kind: StepEvent["kind"], title: string, detail: Record<string, unknown> = {}, ts = "2026-08-01T00:00:00Z"): StepEvent => ({
   schema_version: 1,
   run_id: "r1",
   thread_id: "l1",
   seq,
-  ts: "2026-08-01T00:00:00Z",
+  ts,
   kind,
   title,
   detail,
@@ -63,7 +63,7 @@ describe("EventStream", () => {
     expect(container.querySelector(".md-scroll > table")).toBeInTheDocument();
   });
 
-  it("keeps both speakers in the left column, tagged and full width", () => {
+  it("styles the user message as a right-aligned card, the agent reply as plain prose", () => {
     const { container } = render(
       <EventStream
         events={[
@@ -73,16 +73,54 @@ describe("EventStream", () => {
         deltas={[]}
       />,
     );
-    expect(screen.getByText("you")).toBeInTheDocument();
-    expect(screen.getByText("agent")).toBeInTheDocument();
-    // Neither bubble may re-introduce right alignment or a width cap.
-    for (const el of container.querySelectorAll("[data-kind='message']")) {
-      expect(el.className).not.toMatch(/justify-end|max-w-\[/);
-    }
+    const user = container.querySelector("[data-role='user']");
+    const agent = container.querySelector("[data-role='agent']");
+    // User: compact smart card docked right.
+    expect(user?.className).toMatch(/justify-end/);
+    expect(user?.querySelector(".rounded-2xl")).not.toBeNull();
+    // Agent: plain prose — no card frame, no visible speaker tag.
+    expect(agent?.className).not.toMatch(/justify-end/);
+    expect(agent?.querySelector(".rounded-2xl")).toBeNull();
+    expect(agent?.querySelector(".text-micro")).toBeNull();
   });
 
   it("renders a failed marker on bad steps", () => {
     render(<EventStream events={[ev(0, "command", "pytest", { ok: false })]} deltas={[]} />);
     expect(screen.getByText(/failed/)).toBeInTheDocument();
+  });
+
+  it("stamps every message and shows took-Ns under the agent reply", () => {
+    const { container } = render(
+      <EventStream
+        events={[
+          ev(0, "message", "q", { text: "my question", role: "user" }, "2026-08-01T00:00:00Z"),
+          ev(1, "message", "a", { text: "my answer", role: "agent" }, "2026-08-01T00:01:10Z"),
+        ]}
+        deltas={[]}
+      />,
+    );
+    // Both bubbles carry a clock stamp…
+    const metas = container.querySelectorAll("[data-testid='msg-meta']");
+    expect(metas).toHaveLength(2);
+    expect(metas[0].textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+    expect(metas[0].textContent).not.toMatch(/took/); // the user asks; the agent takes time
+    // …and the agent's reply shows the raw-seconds duration at the bottom.
+    expect(metas[1].textContent).toMatch(/took 70s/);
+    expect(container.querySelector("[data-role='agent']")?.textContent).toMatch(/took 70s/);
+  });
+
+  it("shows no took-Ns on replies with no preceding user message", () => {
+    render(
+      <EventStream events={[ev(0, "message", "a", { text: "lone reply", role: "agent" })]} deltas={[]} />,
+    );
+    expect(screen.getByText("lone reply")).toBeInTheDocument();
+    expect(screen.queryByText(/took/)).not.toBeInTheDocument();
+  });
+
+  it("stamps the prompt header bubble with the run's creation time", () => {
+    const { container } = render(
+      <EventStream events={[]} deltas={[]} prompt="fix the flaky login" promptTs="2026-08-01T00:00:00Z" />,
+    );
+    expect(container.querySelector("[data-testid='msg-meta']")?.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
   });
 });
