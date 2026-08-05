@@ -290,7 +290,13 @@ function ColumnVisibilityMenu<T>({
                 onChange={c.getToggleVisibilityHandler()}
                 className="size-3.5 accent-[var(--color-green)]"
               />
-              <span className="truncate">{String(c.columnDef.header)}</span>
+              <span className="truncate">
+                {flexRender(c.columnDef.header, {
+                  table,
+                  header: c.columnDef,
+                  column: c,
+                } as Parameters<typeof flexRender>[1])}
+              </span>
             </label>
           ))}
         </div>

@@ -104,6 +104,14 @@ export function clipPreview(text: string): { clipped: string; more: number } {
 }
 
 export function shouldUseViewer(kind: CardKind, text: string): boolean {
-  if (DISCLOSURE[kind] === "viewer") return true;
+  const policy = DISCLOSURE[kind];
+  // H-62: inline kinds (message, thinking, notebook, …) render their content
+  // inline and must NEVER escalate to the viewer — a long inline message
+  // used to flip useViewer=true, which then rendered the viewer-trigger
+  // block (line 147) ALONGSIDE the inline content, showing the text twice.
+  if (policy === "inline") return false;
+  if (policy === "viewer") return true;
+  // preview: click-through always opens the viewer; the threshold is a
+  // fallback that forces the viewer for oversize payloads.
   return text.length > VIEWER_THRESHOLD_CHARS;
 }

@@ -69,7 +69,17 @@ export function ApprovalQueue({ runId }: { runId: string }) {
       qc.setQueryData(key, (prev ?? []).filter((a) => a.id !== id));
       return { prev };
     },
-    onError: (_e, _v, ctx) => qc.setQueryData(key, ctx?.prev),
+    onError: (_e, vars, ctx) => {
+      // H-59: don't blindly restore the stale `prev` snapshot — approvals
+      // that arrived during the failed mutation (refetch/WS) would be
+      // clobbered and vanish until the next refetch. Re-insert only the
+      // failed approval into the CURRENT cache, preserving any new ones.
+      const cur = qc.getQueryData<Approval[]>(key) ?? [];
+      const failed = (ctx?.prev ?? []).find((a) => a.id === vars.id);
+      if (failed && !cur.some((a) => a.id === vars.id)) {
+        qc.setQueryData(key, [...cur, failed]);
+      }
+    },
     onSettled: () => void qc.invalidateQueries({ queryKey: key }),
   });
 

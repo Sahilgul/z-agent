@@ -73,7 +73,11 @@ function Bubble({ role, body }: { role: "user" | "agent"; body: string }) {
 }
 
 function Item({ item }: { item: StreamItem }) {
-  const isAnswer = item.kind === "message" && !item.live;
+  // H-58: a streaming message (live) used to fall through to the rail-row
+  // branch and only became a Bubble once `live` flipped false — so the pane
+  // showed a one-line rail entry that snapped into a chat bubble mid-stream.
+  // Render messages as bubbles from the first delta so there is no snap.
+  const isAnswer = item.kind === "message";
   // Short replies arrive as a title with no detail body; the answer must still
   // render, so fall back to the title rather than suppressing both.
   const body = isAnswer ? item.text || item.title : item.text;
@@ -126,11 +130,15 @@ export function EventStream({
   // scrollIntoView walks up and scrolls every ancestor — including the
   // overflow:hidden shell and the document — which drags the whole app
   // sideways and up. Drive this pane's own scrollTop instead.
+  // Key on total content length, not items.length: a streaming message
+  // grows its text without adding a new item, so items.length alone misses
+  // mid-stream growth and the pane never follows the live bubble.
+  const streamTick = items.reduce((n, i) => n + i.text.length, 0);
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [items.length]);
+  }, [streamTick, items.length]);
 
   return (
     <div

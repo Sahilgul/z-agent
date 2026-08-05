@@ -43,7 +43,10 @@ function FeedRow({ item, onOpenViewer }: {
   onOpenViewer: (item: FeedItem) => void;
 }) {
   const policy = DISCLOSURE[item.kind];
-  const isMessage = item.kind === "message" && !item.live;
+  // H-58: render messages as bubbles from the first delta (live or not) so a
+  // streaming message doesn't render as a rail row and snap to a bubble
+  // when the stream completes.
+  const isMessage = item.kind === "message";
   const isThinking = item.kind === "thinking" && item.text;
   const isUser = item.role === "user";
 
@@ -169,11 +172,15 @@ export function Feed({
     ? items.filter((i) => i.threadId === threadFilter)
     : items;
 
+  // Key on total content length, not filtered.length: a streaming message
+  // grows its text without adding a new item, so filtered.length alone
+  // misses mid-stream growth and the pane never follows the live bubble.
+  const streamTick = filtered.reduce((n, i) => n + i.text.length, 0);
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [filtered.length]);
+  }, [streamTick, filtered.length]);
 
   return (
     <>

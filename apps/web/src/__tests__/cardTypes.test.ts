@@ -91,6 +91,6 @@ describe("shouldUseViewer", () => {
 
   it("returns false for inline kinds even when large", () => {
     const big = "x".repeat(VIEWER_THRESHOLD_CHARS + 1);
-    expect(shouldUseViewer("message", big)).toBe(true);
+    expect(shouldUseViewer("message", big)).toBe(false);
   });
 });
