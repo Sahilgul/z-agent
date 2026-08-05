@@ -27,9 +27,39 @@ async def launch(task: str, repo_names: list[str] | None, user_id: int,
         repos = [r.name for r in q.order_by(Repo.name).all()]
     finally:
         session.close()
-    missing = sorted(set(repo_names or []) - set(repos))
-    if missing:
-        raise CampaignError(f"repos not ready: {', '.join(missing)}")
+    # M-43: the old "missing = set(repo_names) - set(repos)" lumped every
+    # name that didn't end up in `repos` under one "repos not ready" message,
+    # so a typo (a repo that doesn't EXIST) was indistinguishable from a
+    # repo that exists but isn't USABLE (not-ready), and a wrong-case name
+    # looked identical to both. The caller (and the human reading the 422)
+    # couldn't tell whether to register the repo, mark it ready, or fix
+    # their casing. Split the missing set into three distinct causes.
+    if repo_names:
+        from sqlalchemy import func
+        lowered = [n.lower() for n in repo_names]
+        session = get_session()
+        try:
+            # Case-insensitive lookup so a wrong-case name still resolves to
+            # the existing row (SQLite `IN` is case-sensitive, so a plain
+            # Repo.name.in_(repo_names) would miss "ServerApp" when the
+            # caller typed "serverapp" and we'd mis-report it as not-found).
+            existing = {r.name for r in session.query(Repo.name)
+                        .filter(func.lower(Repo.name).in_(lowered)).all()}
+        finally:
+            session.close()
+        existing_lower = {n.lower() for n in existing}
+        not_found = sorted(n for n in repo_names if n not in existing)
+        wrong_case = sorted(n for n in not_found if n.lower() in existing_lower)
+        not_found = sorted(n for n in not_found if n.lower() not in existing_lower)
+        not_ready = sorted(set(repo_names) - set(not_found) - set(wrong_case) - set(repos))
+        if wrong_case:
+            raise CampaignError(
+                f"repos not found (wrong case): {', '.join(wrong_case)} "
+                f"(known: {', '.join(sorted(existing))})")
+        if not_found:
+            raise CampaignError(f"repos not found: {', '.join(not_found)}")
+        if not_ready:
+            raise CampaignError(f"repos not ready: {', '.join(not_ready)}")
     if not repos:
         raise CampaignError("no ready repos match the campaign scope")
 

@@ -48,7 +48,10 @@ async def test_launch_scoped_subset_and_missing_repos(session, make_user):
     u = make_user()
     out = await campaigns.launch("bump timeouts", ["ClientApp"], u.id, FakeRM())
     assert out["repos"] == ["ClientApp"]
-    with pytest.raises(campaigns.CampaignError, match="not ready"):
+    # M-43: a repo that doesn't EXIST is "not found", not "not ready" — the
+    # old code lumped both under "not ready", so the human couldn't tell
+    # whether to register the repo or mark it ready.
+    with pytest.raises(campaigns.CampaignError, match="not found"):
         await campaigns.launch("x task", ["Ghost-Repo"], u.id, FakeRM())
 
 

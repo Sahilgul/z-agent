@@ -134,6 +134,30 @@ def test_campaigns_launch_422_for_non_ready_repo(admin_client):
     assert r.status_code == 422
 
 
+def test_campaigns_launch_distinguishes_not_found_vs_not_ready(admin_client, session):
+    """M-43: a typo (repo that doesn't exist) and a repo that exists but
+    isn't USABLE must produce DISTINCT 422 messages — the old code lumped
+    both under 'repos not ready', so the human couldn't tell whether to
+    register the repo, mark it ready, or fix their casing."""
+    admin, _, _, _ = admin_client
+    session.add(Repo(name="ServerApp", integration_branch="main", status="provisioning"))
+    session.commit()
+    # not-found: a repo that doesn't exist at all.
+    r = admin.post("/campaigns", json={"task": "do a thing", "repos": ["GhostApp"]})
+    assert r.status_code == 422
+    assert "not found" in r.json()["detail"]
+    assert "GhostApp" in r.json()["detail"]
+    # not-ready: a repo that exists but isn't USABLE.
+    r = admin.post("/campaigns", json={"task": "do a thing", "repos": ["ServerApp"]})
+    assert r.status_code == 422
+    assert "not ready" in r.json()["detail"]
+    assert "ServerApp" in r.json()["detail"]
+    # wrong-case: a repo that exists under a different case.
+    r = admin.post("/campaigns", json={"task": "do a thing", "repos": ["serverapp"]})
+    assert r.status_code == 422
+    assert "wrong case" in r.json()["detail"]
+
+
 # --------------------------------------------------------------- push
 def test_push_vapid_key(auth_client):
     client, _, _, _ = auth_client
