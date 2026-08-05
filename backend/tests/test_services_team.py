@@ -62,11 +62,16 @@ async def test_add_teammate_skips_ado_when_no_org(monkeypatch, session, make_use
 
     class FakeAdo:
         def __init__(self, *a, **k):
-            pass
+            called["n"] += 1  # L-30: prove ADO is never constructed
     monkeypatch.setattr("app.services.team.AdoClient", FakeAdo)
-    user, code = await team.add_teammate("noorg", "N", "")
+    # L-30: pass a NON-empty email so the `if ado_email and settings.ado_org`
+    # guard actually evaluates the (empty) ado_org branch. With an empty email
+    # the guard short-circuits on ado_email and the no-org path is never
+    # exercised — the test would pass vacuously.
+    user, code = await team.add_teammate("noorg", "N", "n@x.com")
     assert user.ado_descriptor is None
     assert code.isdigit()
+    assert called["n"] == 0
 
 
 def test_regenerate_code_invalidates_old(session, make_user):

@@ -37,7 +37,7 @@ class Run(Base):
     auto_summary: Mapped[str] = mapped_column(sa.Text, default="")
     repo: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)  # primary target
     work_item_id: Mapped[int | None] = mapped_column(nullable=True)
-    delivery_id: Mapped[int | None] = mapped_column(sa.ForeignKey("deliveries.id"), nullable=True)  # campaign group
+    delivery_id: Mapped[int | None] = mapped_column(sa.ForeignKey("deliveries.id"), nullable=True, index=True)  # campaign group
     available_actions: Mapped[list] = mapped_column(sa.JSON, default=list)
     session_volume_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
     cost_usd: Mapped[float] = mapped_column(default=0.0)

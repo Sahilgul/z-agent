@@ -50,7 +50,12 @@ def read(run_id: str, after_seq: int | None = None) -> Iterator[dict]:
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if after_seq is not None and record.get("seq", 0) <= after_seq:
+            # L-19: a record without `seq` got record.get("seq", 0)=0, so when
+            # after_seq was set the record was dropped (0 <= after_seq) — even
+            # though it has no position to compare against the cursor. Only
+            # filter records that actually HAVE a seq; yield the rest.
+            seq = record.get("seq")
+            if after_seq is not None and seq is not None and seq <= after_seq:
                 continue
             yield record
 

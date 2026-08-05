@@ -161,11 +161,16 @@ def report(before: datetime | None = None, after: datetime | None = None) -> dic
         if run_ids:
             cost = sum(r.cost_usd for r in
                        session.query(Run).filter(Run.id.in_(run_ids)).all())
+        # L-16: cost is summed over evals WITH a run_id, so divide by that
+        # count — the old `cost / total` spread the run-cost over ALL evals
+        # (including no-run ones), understating cost-per-eval for the runs
+        # that actually executed.
+        evaluated = len(run_ids)
         return {
             "evals": total, "resolved": resolved,
             "resolution_rate": (resolved / total) if total else 0.0,
             "cost_total_usd": round(cost, 4),
-            "cost_per_eval_usd": round(cost / total, 4) if total else 0.0,
+            "cost_per_eval_usd": round(cost / evaluated, 4) if evaluated else 0.0,
         }
     finally:
         session.close()

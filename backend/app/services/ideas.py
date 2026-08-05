@@ -222,6 +222,11 @@ async def summarize(thread_id: int, complete=None) -> dict:
     session = get_session()
     try:
         thread = session.get(IdeaThread, thread_id)
+        # L-18: session.get returns None for a missing thread — assigning
+        # thread.summary_json then raised AttributeError -> 500. Surface
+        # a clean IdeasError instead.
+        if thread is None:
+            raise IdeasError("idea thread not found")
         thread.summary_json = summary
         thread.status = "summarized"
         session.commit()

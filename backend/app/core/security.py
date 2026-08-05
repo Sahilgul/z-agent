@@ -15,7 +15,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.base import get_session
+from app.db.base import db_session, get_session
 from app.db.models.user import User
 
 MAX_FAILED_ATTEMPTS = 5
@@ -83,9 +83,14 @@ def record_success(session: Session, user: User) -> None:
 
 # ------------------------------------------------------------------ deps
 
-def current_user(request: Request) -> User:
+def current_user(request: Request, session: Session = Depends(db_session)) -> User:
     """created_by scoping starts here: every session query hard-scopes by
-    this user's id at the API layer, not just in the UI."""
+    this user's id at the API layer, not just in the UI.
+
+    L-24: use the request-scoped db_session (FastAPI caches it per request)
+    instead of opening a second session via get_session(). Expunge the user
+    before returning so downstream routes see a detached instance (matching
+    the old behavior where current_user's session was closed in finally)."""
     token = request.cookies.get("zagent_token")
     if not token:
         raise HTTPException(status_code=401, detail="not authenticated")
@@ -93,16 +98,20 @@ def current_user(request: Request) -> User:
         payload = decode_token(token)
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid token") from None
-    session = get_session()
     try:
         user = session.get(User, int(payload["sub"]))
         if user is None or user.status != "active":
             raise HTTPException(status_code=401, detail="account inactive")
         if user.token_version != payload.get("token_version"):
             raise HTTPException(status_code=401, detail="session revoked")
+        # Detach so the route handler (which may use its own session) sees
+        # the same detached instance the old code returned.
+        session.expunge(user)
         return user
-    finally:
-        session.close()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid token") from None
 
 
 def admin_user(user: User = Depends(current_user)) -> User:

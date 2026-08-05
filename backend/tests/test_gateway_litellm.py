@@ -24,10 +24,14 @@ async def test_mint_key_returns_virtual_key(monkeypatch):
 
 
 async def test_mint_key_raises_on_http_error(monkeypatch):
+    import httpx
     routes = {"/key/generate": FakeResponse(status_code=500)}
     install_fake_httpx(monkeypatch, litellm, routes)
     client = GatewayClient(base_url="http://gw", master_key="mk")
-    with pytest.raises(Exception):
+    # L-33: `pytest.raises(Exception)` matched anything — a refactor that
+    # raised the wrong error (or no error) would still pass. mint_key calls
+    # resp.raise_for_status(), which raises httpx.HTTPStatusError on a 500.
+    with pytest.raises(httpx.HTTPStatusError):
         await client.mint_key("thread-1", 5.0)
 
 

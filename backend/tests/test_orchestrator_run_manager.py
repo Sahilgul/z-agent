@@ -347,7 +347,12 @@ async def test_create_pr_falls_back_to_computed_workspace(session, make_user, mo
         return PrLink(run_id=run_id, repo=repo_name, branch="b", ado_pr_id=1, status="open")
     monkeypatch.setattr(delivery, "open_pr", fake_open)
     await rm.create_pr("r1")
-    assert "r1" in seen["workspace"]
+    # L-29: the old `assert "r1" in seen["workspace"]` was a substring check
+    # that passed for any path containing "r1" (e.g. a workspaces dir named
+    # "workspaces-r1"). The workspace is keyed by the run id as a path
+    # component, so assert that precisely.
+    from pathlib import Path
+    assert "r1" in Path(seen["workspace"]).parts
 
 
 async def test_merge_pr_calls_delivery_and_completes(session, make_user, monkeypatch):

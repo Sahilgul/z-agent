@@ -51,6 +51,15 @@ class Relay:
     async def publish_thread_status(self, run_id: str, thread_id: str, status: str) -> None:
         await self._fanout(run_id, {"type": "thread_status", "thread_id": thread_id, "status": status})
 
+    async def publish_note(self, run_id: str, text: str) -> None:
+        # L-22: a run-scoped informational note (e.g. swarm capped a
+        # fanout request). Distinct from publish_thread_status, which is
+        # per-thread and requires a real thread_id + a valid status enum —
+        # misusing it with a fake thread id and a free-text sentence was
+        # silently dropped by the UI (no thread matched) and conflated a
+        # sentence with a status. This is the proper channel for run notes.
+        await self._fanout(run_id, {"type": "note", "text": text})
+
     async def publish_run_stage(self, run_id: str, stage: str, available_actions: list[str]) -> None:
         await self._fanout(run_id, {
             "type": "run_stage", "stage": stage, "available_actions": available_actions,

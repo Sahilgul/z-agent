@@ -95,8 +95,6 @@ async def test_await_thread_polls_until_terminal(session, make_user, monkeypatch
 
     transitions = iter(["running", "running", "idle"])
 
-    real_get = type(bp) if False else None
-
     async def fake_sleep(seconds):
         # advance the thread status on each poll
         session.expire_all()

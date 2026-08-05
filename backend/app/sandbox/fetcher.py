@@ -46,11 +46,15 @@ def fetch_one(repo: Repo, golden_dir) -> tuple[bool, str]:
         return False, f"origin/{repo.integration_branch} unresolvable"
     # Keep the local checkout pinned at origin/<integrationBranch> so stamps are
     # same-fs hardlink clones of an always-latest tree.
-    subprocess.run(
+    checkout = subprocess.run(
         ["git", "-C", str(path), "checkout", "--quiet", "-B", repo.integration_branch,
          f"origin/{repo.integration_branch}"],
         capture_output=True, text=True, timeout=120,
     )
+    # L-25: the checkout's returncode was ignored — a broken checkout
+    # (conflicts, missing ref) was reported as success. Fail closed.
+    if checkout.returncode != 0:
+        return False, f"checkout {repo.integration_branch} failed: {checkout.stderr.strip()[:200]}"
     return True, head.stdout.strip()
 
 

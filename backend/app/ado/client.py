@@ -37,6 +37,13 @@ class AdoClient:
         self.org = org or settings.ado_org
         self.project = settings.ado_project
         token = pat if pat is not None else settings.fleet_pat
+        # L-26: an empty fleet_pat produced a valid-looking "Basic Og=="
+        # header (base64 of ":") and sailed to ADO, which returned a
+        # confusing 401/403 instead of a clear "not configured" signal.
+        # Fail fast in the constructor so the misconfiguration is caught
+        # at the call site, not deep inside an ADO request.
+        if not token:
+            raise ValueError("ADO PAT is not configured (fleet_pat is empty)")
         auth = base64.b64encode(f":{token}".encode()).decode()
         self._headers = {"Authorization": f"Basic {auth}"}
         self._base = f"https://dev.azure.com/{self.org}"

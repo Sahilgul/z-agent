@@ -44,3 +44,20 @@ SessionLocal = sessionmaker(bind=engine, class_=Session, expire_on_commit=False,
 
 def get_session() -> Session:
     return SessionLocal()
+
+
+def db_session() -> Session:
+    """FastAPI request-scoped DB session (yield dependency).
+
+    L-24: `current_user` opened its OWN session via get_session() (a second
+    session per request) because get_session() is a plain call, not a
+    FastAPI-managed dependency. This yield-dependency is cached per request
+    by FastAPI, so `Depends(db_session)` in current_user AND in a route
+    handler resolve to the SAME session — one session per request instead
+    of two. The session is closed when the request ends.
+    """
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()

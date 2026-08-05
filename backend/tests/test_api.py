@@ -1127,7 +1127,7 @@ def test_ideas_ask_counsel_uses_injected_completion(auth_client, monkeypatch):
     assert detail["comments"][-1]["author_type"] == "agent"
 
 
-def test_ideas_summarize_and_promote(auth_client, monkeypatch):
+def test_ideas_summarize(auth_client, monkeypatch):
     import app.services.ideas as ideas_svc
     client, _, _, _ = auth_client
     tid = client.post("/ideas", json={"title": "t", "body": "b"}).json()["id"]

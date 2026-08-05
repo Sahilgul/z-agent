@@ -89,9 +89,12 @@ def register_repo(name: str, remote_url: str, integration_branch: str,
     _validate_repo_name(name)
     session = get_session()
     try:
+        # L-17: the OR dedupe query can match multiple rows (a repo matching
+        # the URL AND another matching the name) — one_or_none() raises
+        # MultipleResultsFound -> 500. Use first() to dedupe to any match.
         existing = session.query(Repo).filter(
             (Repo.remote_url == remote_url) | (Repo.name == name)
-        ).one_or_none()
+        ).first()
         if existing:
             if existing.status == RepoStatus.ARCHIVED:
                 existing.status = RepoStatus.REGISTERED

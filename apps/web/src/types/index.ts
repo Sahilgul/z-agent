@@ -67,7 +67,10 @@ export type WsMessage =
       type: "approval_card";
       approval: { id: string; kind: string; payload: Record<string, unknown>; thread_id: string | null };
     }
-  | { type: "approval_resolved"; approval_id: string; decision: string };
+  | { type: "approval_resolved"; approval_id: string; decision: string }
+  // L-22: a run-scoped informational note (e.g. swarm capped a fanout
+  // request). Surfaced as a transient toast.
+  | { type: "note"; text: string };
 
 export interface PlanStep {
   id: number;

@@ -108,9 +108,11 @@ class SwarmBlueprint(Blueprint):
         relay = ctx.services.get("relay")
         if relay and ctx.artifacts.get("fanout") and ctx.artifacts["fanout"] > requested:
             # Requests beyond the cap queue deterministically AND THE UI SAYS
-            # SO — a swarm-scoped thread_status note, not a fake available_action.
-            await relay.publish_thread_status(
-                ctx.run.id, "swarm",
+            # SO — a run-scoped note (L-22: was a misuse of publish_thread_status
+            # with a fake thread id "swarm" and a sentence as the status, which
+            # the UI silently dropped). Use the dedicated publish_note channel.
+            await relay.publish_note(
+                ctx.run.id,
                 f"queued: requested {ctx.artifacts['fanout']} threads, cap {cap} — running {requested}")
 
     # --------------------------------------------------------------- decompose

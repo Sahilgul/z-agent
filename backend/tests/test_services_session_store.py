@@ -74,15 +74,23 @@ def test_materialize_miss_returns_false(tmp_path):
 def test_unpack_rejects_tar_slip(tmp_path):
     import io
     import tarfile
+    dest = tmp_path / "dest"
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         info = tarfile.TarInfo(name="../../evil.txt")
         payload = b"owned"
         info.size = len(payload)
         tar.addfile(info, io.BytesIO(payload))
-    with pytest.raises((ValueError, Exception)):
-        session_store.unpack(buf.getvalue(), tmp_path / "dest")
-    assert not (tmp_path / "evil.txt").exists()
+    # L-31: the old guard was `pytest.raises((ValueError, Exception))` —
+    # Exception matches anything — and it checked `tmp_path/evil.txt`. But
+    # `../../evil.txt` resolved from `tmp_path/dest` climbs two levels to
+    # `tmp_path.parent/evil.txt`, NOT `tmp_path/evil.txt`, so the existence
+    # check passed vacuously even with a broken guard. Tighten to the
+    # specific ValueError the guard raises and assert dest stays empty
+    # (the guard raises before extractall, so nothing is written).
+    with pytest.raises(ValueError):
+        session_store.unpack(buf.getvalue(), dest)
+    assert not any(dest.iterdir())
 
 
 def test_unpack_rejects_sibling_prefix_tar_slip(tmp_path):

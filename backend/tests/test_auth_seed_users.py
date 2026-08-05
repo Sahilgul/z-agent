@@ -52,13 +52,47 @@ def test_seed_creates_playbooks(session):
 
 
 def test_seed_is_idempotent(session):
+    from app.db.models.knowledge import Playbook
     seed_users.seed()
+    # L-32: idempotency was asserted for only a subset of seeded entities
+    # (User/system, Mode/ask, Run/DEMO, IdeaThread/Welcome). The seed also
+    # creates four more Modes, the DEMO Thread + Events, IdeaComments, and
+    # Playbooks — a non-idempotent seed() would double any of them. Capture
+    # counts after the first seed, run a second seed(), and assert every
+    # count is unchanged.
+    demo_run = session.query(Run).filter_by(
+        title="DEMO: How does scribe dedupe questions?").one()
+    welcome = session.query(IdeaThread).filter_by(
+        title="Welcome to Zagent — what should the fleet learn first?").one()
+    counts = {
+        "system_user": session.query(User).filter_by(username="system").count(),
+        "modes": {n: session.query(Mode).filter_by(name=n).count()
+                  for n in ("ask", "plan", "development", "debug", "agent-rnd")},
+        "demo_run": session.query(Run).filter_by(
+            title="DEMO: How does scribe dedupe questions?").count(),
+        "demo_thread": session.query(Thread).filter_by(run_id=demo_run.id).count(),
+        "demo_events": session.query(Event).filter_by(run_id=demo_run.id).count(),
+        "welcome": session.query(IdeaThread).filter_by(
+            title="Welcome to Zagent — what should the fleet learn first?").count(),
+        "welcome_comments": session.query(IdeaComment).filter_by(thread_id=welcome.id).count(),
+        "playbooks": session.query(Playbook).count(),
+    }
     seed_users.seed()
-    assert session.query(User).filter_by(username="system").count() == 1
-    assert session.query(Mode).filter_by(name="ask").count() == 1
-    assert session.query(Run).filter_by(title="DEMO: How does scribe dedupe questions?").count() == 1
+    demo_run2 = session.query(Run).filter_by(
+        title="DEMO: How does scribe dedupe questions?").one()
+    welcome2 = session.query(IdeaThread).filter_by(
+        title="Welcome to Zagent — what should the fleet learn first?").one()
+    assert session.query(User).filter_by(username="system").count() == counts["system_user"]
+    for mode_name in ("ask", "plan", "development", "debug", "agent-rnd"):
+        assert session.query(Mode).filter_by(name=mode_name).count() == counts["modes"][mode_name]
+    assert session.query(Run).filter_by(
+        title="DEMO: How does scribe dedupe questions?").count() == counts["demo_run"]
+    assert session.query(Thread).filter_by(run_id=demo_run2.id).count() == counts["demo_thread"]
+    assert session.query(Event).filter_by(run_id=demo_run2.id).count() == counts["demo_events"]
     assert session.query(IdeaThread).filter_by(
-        title="Welcome to Zagent — what should the fleet learn first?").count() == 1
+        title="Welcome to Zagent — what should the fleet learn first?").count() == counts["welcome"]
+    assert session.query(IdeaComment).filter_by(thread_id=welcome2.id).count() == counts["welcome_comments"]
+    assert session.query(Playbook).count() == counts["playbooks"]
 
 
 def test_seed_creates_demo_run_with_events_and_thread(session):

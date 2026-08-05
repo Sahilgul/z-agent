@@ -79,8 +79,16 @@ def regenerate(user_id: int, _: User = Depends(admin_user)):
 
 
 @router.post("/users/{user_id}/deactivate")
-def deactivate(user_id: int, _: User = Depends(admin_user)):
-    deactivate_user(user_id)
+def deactivate(user_id: int, actor: User = Depends(admin_user)):
+    # L-14: an admin could deactivate themselves (potentially locking out
+    # the only admin) and a missing user raised ValueError -> 500. Guard
+    # self-deactivation and surface not-found as 404.
+    if actor.id == user_id:
+        raise HTTPException(status_code=422, detail="cannot deactivate your own account")
+    try:
+        deactivate_user(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"ok": True}
 
 

@@ -145,14 +145,18 @@ async def test_hydrate_clamps_to_global_cap_and_says_so(session, make_user, monk
     relay_msgs = []
 
     class _Relay:
-        async def publish_thread_status(self, run_id, thread_id, status):
-            relay_msgs.append((thread_id, status))
+        async def publish_note(self, run_id, text):
+            # L-22: swarm now uses publish_note (run-scoped) instead of
+            # misusing publish_thread_status with a fake thread id.
+            relay_msgs.append((run_id, text))
 
     ctx = _ctx(run, services={"relay": _Relay()},
                artifacts={"task": "t", "fanout": 10})
     await SwarmBlueprint()._hydrate(ctx)
     assert ctx.artifacts["requested_fanout"] == 4
-    assert relay_msgs and relay_msgs[0][0] == "swarm" and "queued" in relay_msgs[0][1]
+    # L-22: the note is run-scoped — assert it carried the run id and the
+    # queued sentence (was: fake thread id "swarm" + sentence status).
+    assert relay_msgs and relay_msgs[0][0] == run.id and "queued" in relay_msgs[0][1]
 
 
 async def test_hydrate_unknown_repo_raises(session, make_user):

@@ -118,6 +118,12 @@ export const useRuns = create<RunState>((set, get) => ({
             void api.get<Thread[]>(`/runs/${runId}/threads`).then((threads) => {
               if (myGen === openRunGen) set({ threads });
             });
+          } else if (msg.type === "note") {
+            // L-22: a run-scoped informational note (e.g. swarm capped a
+            // fanout request). Surface it as a transient toast so the UI
+            // actually "says so" — the old misuse of thread_status was
+            // silently dropped because no thread matched the fake id.
+            toast(msg.text);
           }
         },
         (connected) => {

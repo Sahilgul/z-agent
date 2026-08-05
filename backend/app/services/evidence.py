@@ -73,6 +73,14 @@ async def run_test_commands(workspace: str, repo: str,
     if not commands:
         return await run_tests(workspace, repo)
     results = [await run_tests(workspace, repo, command=c) for c in commands]
+    # L-20: when every command passed, the aggregate returncode defaulted to
+    # 0 — the same value an empty `results` would yield (all([])=True, next
+    # (... , 0)=0), conflating "all passed" with "no data". The early return
+    # above normally prevents empty results, but guard defensively so a
+    # caller can never read "no commands ran" as "all passed".
+    if not results:
+        return {"repo": repo, "command": [], "passed": False,
+                "returncode": -1, "stdout": "", "stderr": "no test commands ran"}
     return {
         "repo": repo,
         "command": [r["command"] for r in results],

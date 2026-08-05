@@ -49,7 +49,11 @@ async def run_case(case_id: int, request: Request, _: User = Depends(admin_user)
     try:
         return await bench.start_eval(case_id, request.app.state.run_manager)
     except bench.BenchError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # L-15: not every BenchError is "not found" — mapping all to 404
+        # masked validation/conflict errors as missing-resource. 404 for
+        # not-found, else 422 (client/input) like create_case already does.
+        status = 404 if "not found" in str(exc).lower() else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
 @router.post("/evals/{eval_id}/result")
@@ -57,7 +61,9 @@ def record_result(eval_id: int, body: ResultBody, _: User = Depends(admin_user))
     try:
         return bench.record_result(eval_id, body.outcomes)
     except bench.BenchError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # L-15: same as run_case — 404 for not-found, else 422.
+        status = 404 if "not found" in str(exc).lower() else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
 @router.get("/report")

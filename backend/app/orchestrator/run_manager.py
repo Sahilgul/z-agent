@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
 from datetime import datetime, timezone
 
 from zagent_contracts import RunStage
@@ -52,6 +53,23 @@ class RunManager:
         self.control = control
         self._tasks: dict[str, asyncio.Task] = {}
 
+    def _track(self, run_id: str, coro: Coroutine[object, object, object]) -> asyncio.Task:
+        # L-21: self._tasks was never pruned — completed tasks accumulated
+        # (slow leak for long-lived managers). Prune already-completed
+        # entries lazily on each track() call (bounded growth) rather than
+        # immediately on completion via a done-callback: removing the entry
+        # the moment a task finishes would break awaiters that reach a
+        # just-finished task via rm._tasks[run_id] right after it completes
+        # (e.g. the M-64 fire-and-forget await pattern). Only remove if
+        # it's still us: a newer task for the same run_id would have
+        # replaced a completed entry.
+        for rid, t in list(self._tasks.items()):
+            if t.done():
+                del self._tasks[rid]
+        task = asyncio.ensure_future(coro)
+        self._tasks[run_id] = task
+        return task
+
     # ------------------------------------------------------------ creation
 
     async def create_run(self, source: str, initiated_by: int, mode_name: str,
@@ -84,7 +102,7 @@ class RunManager:
 
         self.ingest.register_run(run.id)
         await self.relay.publish_run_stage(run.id, run.stage, run.available_actions)
-        self._tasks[run.id] = asyncio.create_task(self._execute(run.id, task, repo, fanout))
+        self._track(run.id, self._execute(run.id, task, repo, fanout))
         return run
 
     async def resume_run(self, run_id: str, initiated_by: int) -> Run | None:
@@ -113,7 +131,8 @@ class RunManager:
             session.close()
         self.ingest.register_run(run_id)
         await self.relay.publish_run_stage(run_id, run.stage, run.available_actions)
-        self._tasks[run_id] = asyncio.create_task(
+        self._track(
+            run_id,
             self._execute(run_id, run.title, run.repo,
                           artifacts_extra={"resume_from_thread_id": last_thread_id}))
         return run
@@ -421,7 +440,7 @@ class RunManager:
                       "control": self.control},
             artifacts={"task": task, "repo": repo, **(extra_artifacts or {})},
         )
-        self._tasks[run_id] = asyncio.create_task(self._guarded_execute(run_id, ctx, blueprint))
+        self._track(run_id, self._guarded_execute(run_id, ctx, blueprint))
 
     async def switch_mode(self, run_id: str, mode_name: str) -> None:
         """Mid-session mode switch: validate the Mode row is
