@@ -50,22 +50,29 @@ function FeedRow({ item, onOpenViewer }: {
   const isThinking = item.kind === "thinking" && item.text;
   const isUser = item.role === "user";
 
-  // Messages render as bubbles (chat alignment), not rail rows.
+  // Messages render as bubbles (chat alignment), not rail rows. v2.4: align
+  // with EventStream — agent replies are plain prose (no card frame, no
+  // visible "agent" speaker tag); user messages are a compact card on
+  // bg-module without the loud green border. data-kind/data-role preserved
+  // for the parity tests.
   if (isMessage) {
     const body = item.text || item.title;
-    return (
-      <div className="mb-2.5" data-kind="message" data-role={item.role}>
-        <div
-          className={cn(
-            "rounded-2xl rounded-tl-sm border px-s4 py-2.5",
-            isUser ? "border-green bg-bg-module" : "border-hairline bg-bg-raised",
-          )}
-        >
-          <div className={cn("text-micro mb-s1", isUser ? "text-green-bright" : "text-ink-faint")}>
-            {isUser ? "you" : "agent"}
+    if (isUser) {
+      return (
+        <div className="mb-2.5 flex justify-end" data-kind="message" data-role={item.role}>
+          <div className="flex max-w-[80%] flex-col items-end">
+            <div className="rounded-2xl rounded-br-sm bg-bg-module px-s4 py-2.5">
+              <span className="sr-only">you</span>
+              <Markdown>{body}</Markdown>
+            </div>
           </div>
-          <Markdown>{body}</Markdown>
         </div>
+      );
+    }
+    return (
+      <div className="mb-2.5 py-1" data-kind="message" data-role={item.role}>
+        <span className="sr-only">agent</span>
+        <Markdown>{body}</Markdown>
       </div>
     );
   }
@@ -201,9 +208,9 @@ export function Feed({
         aria-label="agent feed"
       >
         {prompt && (
-          <div className="mb-2.5" data-kind="message" data-role="user">
-            <div className="rounded-2xl rounded-tl-sm border border-green bg-bg-module px-s4 py-2.5">
-              <div className="text-micro mb-s1 text-green-bright">you</div>
+          <div className="mb-2.5 flex justify-end" data-kind="message" data-role="user">
+            <div className="rounded-2xl rounded-br-sm bg-bg-module px-s4 py-2.5">
+              <span className="sr-only">you</span>
               <Markdown>{prompt}</Markdown>
             </div>
           </div>

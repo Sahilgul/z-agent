@@ -6,29 +6,32 @@
    Locked brand palette; shadcn semantic colors rebound (no zinc defaults).
    ========================================================================== */
 @theme {
-  /* v2.3 — neutral charcoal chrome (Cursor-agent class), mono-green accent */
-  --color-bg-base: #1b1b1a;
-  --color-bg-panel: #232322;
-  --color-bg-module: #2c2c2a;
-  --color-bg-raised: #2c2c2a; /* inputs/wells that sit on a panel */
-  --color-jack: #121212; /* terminal wells — deepest surface */
-  --color-hairline: #373736;
+  /* v2.4 — deep-black chrome with neon spring-green accent (devswarm class).
+     Surfaces stay one step above pure black so panel/module/jack keep
+     layering headroom; the green ramp is applied by stroke weight — neon on
+     thin strokes (text/LEDs/focus/glow), one step deeper on fills. */
+  --color-bg-base: #0f110f;
+  --color-bg-panel: #161816;
+  --color-bg-module: #1e211e;
+  --color-bg-raised: #1e211e; /* inputs/wells that sit on a panel */
+  --color-jack: #0a0c0a; /* terminal/code wells — deepest surface */
+  --color-hairline: #282c29;
 
   /* ink */
-  --color-ink-primary: #e8e8e4;
-  --color-ink-secondary: #9c9c96;
-  --color-ink-faint: #74746d; /* AA-legal text tint */
-  --color-ink-ghost: #55554f; /* decorative only — never text */
+  --color-ink-primary: #e8ece8;
+  --color-ink-secondary: #9aa39a;
+  --color-ink-faint: #6f786f; /* AA-legal text tint */
+  --color-ink-ghost: #4a524a; /* decorative only — never text */
 
-  /* accents — mono-green */
-  --color-blue: #5fa777;
-  --color-blue-bright: #7fcb9a; /* interactive text/links/focus */
-  --color-green: #5fa777; /* fills with dark ink (primary button) */
-  --color-green-bright: #7fcb9a;
+  /* accents — neon spring-green ramp (devswarm #00ff96 family) */
+  --color-blue: #00d982; /* mono-green alias */
+  --color-blue-bright: #00ff96; /* interactive text/links/focus — neon core */
+  --color-green: #00d982; /* fills with dark ink (primary button, badges) */
+  --color-green-bright: #00ff96; /* text/LEDs/active nav — neon on thin strokes */
   --color-danger: #b23a45; /* fills/borders only */
   --color-danger-bright: #d96771; /* danger text/icons */
   --color-warn: #d9b36c;
-  --color-ink-on-green: #0c1410;
+  --color-ink-on-green: #06130b;
 
   /* semantic aliases + AA-legal soft fills for tinted badges/banners */
   --color-ok: var(--color-green);
@@ -94,6 +97,9 @@
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35);
   --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.45);
   --shadow-overlay: 0 24px 60px rgb(0 0 0 / 0.6);
+  /* restrained shine — neon glow on thin strokes only (primary button, hover).
+     Two-elements-per-screen budget; never applied to cards/chips/badges. */
+  --shadow-glow: 0 0 14px color-mix(in srgb, var(--color-green-bright) 32%, transparent);
 
   /* motion */
   --ease-soft: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -279,27 +285,38 @@
   }
 
   /* markdown typography (react-markdown output — child selectors, so a
-     component rule is genuinely cleaner than utilities) */
+     component rule is genuinely cleaner than utilities).
+     v2.4: prose, not titled cards. Headings use the UI face (Fraunces is
+     reserved for screen titles per DESIGN.md), sections separate by rhythm,
+     tables read as data not as boxed widgets, inline code blends. */
   .md {
     font-size: 14px;
     line-height: 1.65;
     color: var(--color-ink-primary);
   }
+  .md > :first-child {
+    margin-top: 0;
+  }
+  .md > :last-child {
+    margin-bottom: 0;
+  }
   .md h1,
   .md h2,
   .md h3 {
-    font-family: var(--font-display);
-    font-weight: 500;
-    margin: 18px 0 8px;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    margin: 16px 0 6px;
+    line-height: 1.3;
+    color: var(--color-ink-primary);
   }
   .md h1 {
-    font-size: 22px;
+    font-size: 16px;
   }
   .md h2 {
-    font-size: 18px;
+    font-size: 15px;
   }
   .md h3 {
-    font-size: 15px;
+    font-size: 13.5px;
   }
   .md p {
     margin: 8px 0;
@@ -307,10 +324,10 @@
   .md code {
     font-family: var(--font-mono);
     font-size: 12.5px;
-    background: var(--color-jack);
-    padding: 1px 5px;
+    background: var(--color-bg-module);
+    color: var(--color-green-bright);
+    padding: 0 5px;
     border-radius: 4px;
-    color: var(--color-blue-bright);
   }
   .md pre {
     background: var(--color-jack);
@@ -332,14 +349,18 @@
   .md li {
     margin: 4px 0;
   }
+  .md li::marker {
+    color: var(--color-ink-faint);
+  }
   /* Tables scroll inside their own frame rather than stretching the bubble:
      min-width keeps a narrow table full-width, max-content lets a wide one
-     grow into the scroller instead of crushing its columns. */
+     grow into the scroller instead of crushing its columns.
+     v2.4: horizontal hairlines only — no vertical borders, no zebra, no
+     boxed header fill. Reads as a data table, not a widget. */
   .md .md-scroll {
     overflow-x: auto;
     margin: 12px 0;
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-sm);
+    border-bottom: 1px solid var(--color-hairline);
   }
   .md table {
     border-collapse: collapse;
@@ -349,17 +370,12 @@
   }
   .md th,
   .md td {
-    border-right: 1px solid var(--color-hairline);
     border-bottom: 1px solid var(--color-hairline);
-    padding: 7px 12px;
+    padding: 8px 14px;
     font-size: 13px;
     text-align: left;
     vertical-align: top;
     overflow-wrap: break-word;
-  }
-  /* The wrapper draws the outer frame, so the edge cells must not double it. */
-  .md tr > *:last-child {
-    border-right: 0;
   }
   .md tbody tr:last-child > * {
     border-bottom: 0;
@@ -369,20 +385,15 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--color-ink-secondary);
-    background: var(--color-bg-module);
+    color: var(--color-ink-faint);
     white-space: nowrap;
-  }
-  /* Zebra rows: the cheapest way to keep the eye on one row across many columns. */
-  .md tbody tr:nth-child(even) > * {
-    background: color-mix(in srgb, var(--color-bg-module) 45%, transparent);
   }
   .md td:has(> code:only-child) {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .md a {
-    color: var(--color-blue-bright);
+    color: var(--color-green-bright);
   }
   .md blockquote {
     border-left: 2px solid var(--color-green);

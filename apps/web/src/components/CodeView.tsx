@@ -16,10 +16,17 @@ import toml from "react-syntax-highlighter/dist/esm/languages/prism/toml";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
+import { cn } from "@/lib/utils";
+import { FileIcon, fileKindFromLang, fileKindFromPath, type FileKind } from "./ui/file-icon";
 
 /** The one code surface in the app: VS Code Dark+ via Prism, used by chat
  *  markdown fences and by the file_read / file_edit trace payloads. The
- *  async-light build keeps prism + these grammars out of the main chunk. */
+ *  async-light build keeps prism + these grammars out of the main chunk.
+ *
+ *  v2.4 split: syntax speaks VS Code (vscDarkPlus token colors stay — devs'
+ *  muscle memory), chrome speaks z-agent (jack surface + hairline frame +
+ *  slim icon header). The block sits *in* the theme instead of floating as
+ *  a foreign card. */
 const LANGUAGES: Record<string, unknown> = {
   bash,
   css,
@@ -100,28 +107,27 @@ const LANG_ALIAS: Record<string, string> = {
   md: "markdown",
 };
 
-const PRE_STYLE: CSSProperties = {
-  margin: 0,
-  padding: "10px 12px",
-  background: "#1e1e1e",
-  fontSize: "11.5px",
-  lineHeight: 1.5,
-  color: "#d4d4d4",
-  overflow: "auto",
-};
+/** The slim header strip — VS Code editor-tab language: file-type icon +
+ *  filename or language label in mono micro ink-faint. Same chrome family
+ *  for code blocks and the terminal frame. */
+function CodeHeader({ icon, label }: { icon: FileKind; label: string }) {
+  return (
+    <div className="flex items-center gap-s2 border-b border-hairline bg-bg-module px-s3 py-s1.5">
+      <FileIcon kind={icon} />
+      <span className="truncate font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
+        {label}
+      </span>
+    </div>
+  );
+}
 
-/** Terminal chrome: shell blocks read as a little terminal window — traffic
- *  lights + label on top, Prism bash colors below (commands yellow, strings
- *  green) instead of flat white text. */
+/** Terminal chrome: a slim shell-prompt header (no traffic-light dots — they
+ *  are macOS window chrome, off-palette ornament; DESIGN.md deletes them),
+ *  Prism bash colors below. Testid preserved for codeView.test.tsx. */
 function TerminalFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-md font-mono" data-testid="terminal-frame">
-      <div className="flex items-center gap-1.5 bg-[#3c3c3c] px-3 py-1.5">
-        <span className="h-2 w-2 rounded-full bg-[#ff5f57]" />
-        <span className="h-2 w-2 rounded-full bg-[#febc2e]" />
-        <span className="h-2 w-2 rounded-full bg-[#28c840]" />
-        <span className="ml-1.5 text-[10.5px] text-[#a8a8a8]">terminal</span>
-      </div>
+    <div className="overflow-hidden rounded-md border border-hairline font-mono" data-testid="terminal-frame">
+      <CodeHeader icon="bash" label="terminal" />
       {children}
     </div>
   );
@@ -133,10 +139,14 @@ export function CodeView({
   code,
   lang,
   maxLines,
+  filename,
 }: {
   code: string;
   lang?: string;
   maxLines?: number;
+  /** Optional filename for the header label (trace context). Falls back to
+   *  the language id, then "code". */
+  filename?: string;
 }) {
   let shown = code.replace(/\n$/, "");
   let hidden = 0;
@@ -150,17 +160,20 @@ export function CodeView({
   const wanted = lang ? (LANG_ALIAS[lang] ?? lang) : undefined;
   const resolved = wanted && wanted in LANGUAGES ? wanted : undefined;
   const moreFooter = hidden > 0 && (
-    <div className="bg-[#1e1e1e] px-3 pb-2.5 text-[10.5px] text-ink-faint">
+    <div className="bg-jack px-s3 pb-s2.5 text-[10.5px] text-ink-faint">
       … {hidden} more lines not shown
     </div>
   );
+  const headerLabel = filename ?? resolved ?? "code";
+  const headerIcon = filename ? fileKindFromPath(filename) : fileKindFromLang(resolved);
   // No language (bare fence) or no registered grammar: the highlighter must
   // NEVER see an undefined/unregistered language — refractor throws
   // "Expected `string` for `aliasOrLanguage`" and the error boundary eats the
   // whole screen. Plain dark pre: same chrome, zero risk.
   if (!resolved) {
     return (
-      <div className="overflow-hidden rounded-md font-mono">
+      <div className="overflow-hidden rounded-md border border-hairline font-mono">
+        <CodeHeader icon={headerIcon} label={headerLabel} />
         <pre data-testid="code-plain" style={PRE_STYLE}>{shown}</pre>
         {moreFooter}
       </div>
@@ -173,7 +186,7 @@ export function CodeView({
       customStyle={{
         margin: 0,
         padding: hidden > 0 ? "10px 12px 4px" : "10px 12px",
-        background: "#1e1e1e",
+        background: "var(--color-jack)",
         fontSize: "11.5px",
         lineHeight: 1.5,
       }}
@@ -191,9 +204,20 @@ export function CodeView({
     );
   }
   return (
-    <div className="overflow-hidden rounded-md font-mono">
+    <div className={cn("overflow-hidden rounded-md border border-hairline font-mono")}>
+      <CodeHeader icon={headerIcon} label={headerLabel} />
       {body}
       {moreFooter}
     </div>
   );
 }
+
+const PRE_STYLE: CSSProperties = {
+  margin: 0,
+  padding: "10px 12px",
+  background: "var(--color-jack)",
+  fontSize: "11.5px",
+  lineHeight: 1.5,
+  color: "var(--color-ink-primary)",
+  overflow: "auto",
+};

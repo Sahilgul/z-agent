@@ -29,27 +29,39 @@
 | Tooltip | `--bg-module`, mono 11px — satisfies the icon-only-button visible-label rule |
 | Command | `--jack` input well, `--bg-panel` list, `--blue-bright` active row (ticket/repo pickers) |
 
+## v2.4 — Neon spring-green accent + deep-black chrome + prose markdown
+
+v2.3's warm charcoal + muted sage read as "vintage" / "color damaged in sunshine" against modern dev-tool peers. Direction now:
+
+1. **Deep-black chrome** (one step above pure black, never `#000000` — keeps panel/module/jack layering headroom): `#0F110F` stage, `#161816` panels, `#1E211E` modules, `#0A0C0A` terminal/code (`--jack`). Neutral with a whisper of green, never blue (v2.3's blue-grey-mud warning stands).
+2. **Neon spring-green ramp** (devswarm `#00ff96` family, applied by stroke weight so it shines without halation):
+   - `--green-bright: #00FF96` — the neon core, thin strokes only: accent text, links, LEDs, focus rings, active nav, glow shadows (~13.6:1 on base, AA-clean).
+   - `--green: #00D982` — same hue, slightly deepened for fills with dark ink: primary button, success badges (~9.7:1 vs `#06130B` ink).
+   - Soft tints auto-derive via the existing `color-mix` tokens.
+3. **Restrained shine**: new `--shadow-glow: 0 0 14px color-mix(in srgb, var(--green-bright) 32%, transparent)`, applied to the primary button + hover only. Glow budget: **two elements per screen max** (primary button + live LEDs). More = gaming-RGB, less = expensive. No gradients — the existing glow exception in the LED rule is the only other allowed glow.
+4. **Markdown is prose, not titled cards.** Headings drop Fraunces (which is reserved for screen titles per the Type section) and use the UI face at 16/15/13.5px; sections separate by rhythm, not by looking like boxed sections. Tables lose vertical borders, zebra striping, and the boxed header fill — horizontal hairlines only, header stays mono-caps `--ink-faint` with a bottom rule. Inline code blends (`bg-module` + `green-bright` text) instead of a dark chip. Edge margins normalized so bubbles have clean top/bottom.
+5. **Code-surface split: syntax speaks VS Code, chrome speaks z-agent.** `vscDarkPlus` token colors stay as-is (devs' muscle memory; they were tuned on `#1e1e1e`, so on deeper jack they read slightly brighter — acceptable). The block surface becomes `--jack` + hairline frame, with a slim VS Code-style header: file-type icon (new `FileIcon` set — TS blue, JS yellow, JSON orange, Python blue/yellow, shell green…) + filename or language label in mono micro `--ink-faint`. The terminal frame loses its macOS traffic-light dots (off-palette ornament; "if a surface can't justify an ornament, the ornament is deleted") and gains the same slim header.
+6. **Mermaid diagrams render for real.** A ` ```mermaid ` fence renders as a themed SVG (lazy-loaded via `React.lazy` + `Suspense` so the ~300KB chunk never touches startup or non-diagram sessions; `securityLevel: "strict"` for untrusted agent content; graceful fallback to a code block + "diagram failed to parse" note on parse error). Three-stage UX: skeleton-sweep shimmer while the chunk loads → partial source as code while streaming → themed SVG when complete.
+
 ## Color
 
 | Token | Hex | Usage rule | Contrast (on its bg) |
 |---|---|---|---|
-| `--bg-base` | `#202A35` | App stage, dot-grid ground. Nothing sits directly on it except panels. | — |
-| `--bg-panel` | `#29343F` | Cards, rail, overlay panels. | — |
-| `--bg-module` | `#323F4B` | Inset modules, hover fills, active chip ground. | — |
-| `--jack` | `#0C1013` | Deep inset wells (textareas, code blocks, stream gutters). Never a card. | — |
-| `--ink-primary` | `#EAF0EC` | Titles, data, anything the operator must read. | 13.1:1 on base ✅ |
-| `--ink-secondary` | `#93A6AC` | Descriptions, metadata, secondary labels. | 6.4:1 on base ✅ |
-| `--ink-faint` | `#7C8B92` ✓ approved | Timestamps, hints, placeholders. Replaces `#5D6C73` (2.7:1 ❌) for all text; old value survives only as `--ink-ghost` for decorative glyphs/borders. | 4.7:1 on base ✅ |
-| ~~`--blue`~~ → `--green` | `#5FA777` | **v2.1 mono-green:** blue tokens are aliased to the green family. Cool blue against the blue-grey chrome read as muddy and split the accent. Borders, icons, ≥18px glyphs. | 8.9:1 vs `#0C1410` ✅ |
-| ~~`--blue-bright`~~ → `--green-bright` | `#7FCB9A` | Interactive text, links, focus rings, info tone, active nav. | 5.6:1 on module ✅ |
-| `--green` | `#5FA777` | Fills with dark ink (`#0C1410`) — primary button, success badges. | 8.9:1 vs `#0C1410` ✅ |
-| `--green-bright` | `#7FCB9A` | Live/healthy text, LEDs, progress, routed-state accents. | 5.6:1 on module ✅ |
+| `--bg-base` | `#0F110F` | App stage, dot-grid ground. Nothing sits directly on it except panels. | — |
+| `--bg-panel` | `#161816` | Cards, rail, overlay panels. | — |
+| `--bg-module` | `#1E211E` | Inset modules, hover fills, active chip ground, code headers. | — |
+| `--jack` | `#0A0C0A` | Deep inset wells (textareas, code blocks, stream gutters, diagram bodies). Never a card. | — |
+| `--ink-primary` | `#E8ECE8` | Titles, data, anything the operator must read. | 14.2:1 on base ✅ |
+| `--ink-secondary` | `#9AA39A` | Descriptions, metadata, secondary labels. | 6.8:1 on base ✅ |
+| `--ink-faint` | `#6F786F` | Timestamps, hints, placeholders, mono micro labels. | 4.6:1 on base ✅ |
+| `--green-bright` | `#00FF96` | **v2.4 neon core:** accent text, links, LEDs, focus rings, active nav, glow. Thin strokes only. | 13.6:1 on base ✅ |
+| `--green` | `#00D982` | Fills with dark ink — primary button, success badges. | 9.7:1 vs `#06130B` ✅ |
 | `--danger` | `#B23A45` | Fills and 1px borders only (never text). | 2.2:1 as text ❌ |
-| `--danger-bright` | `#D96771` ✓ approved | Danger *text/icons* (deny buttons, error labels). Same family, AA-legal. | 4.6:1 on panel ✅ |
-| `--warn` | `#D9B36C` | Warn tone (stale lanes, watchdog) — text-safe already, kept from current UI. | 6.1:1 on panel ✅ |
-| `--hairline` | `#3B4854` | All borders. 1px, no heavier rule exists. | — |
+| `--danger-bright` | `#D96771` | Danger *text/icons* (deny buttons, error labels). | 4.6:1 on panel ✅ |
+| `--warn` | `#D9B36C` | Warn tone (stale lanes, watchdog). | 6.1:1 on panel ✅ |
+| `--hairline` | `#282C29` | All borders. 1px, no heavier rule exists. | — |
 
-**Rules (v2.1 — mono-green accent):** green = the single accent (action, healthy, information, navigation — distinguished by weight/placement, not hue), warn = attention, danger = destructive. Everything else stays neutral ink. No gradients anywhere except the LED glow (box-shadow) and the dot-grid.
+**Rules (v2.4 — neon spring-green ramp):** green-bright = the neon accent on thin strokes (action, healthy, information, navigation — distinguished by weight/placement, not hue); green = the deeper fill for large areas. Warn = attention, danger = destructive. Everything else stays neutral ink. No gradients anywhere except the LED glow and the new `--shadow-glow` (both box-shadow).
 
 ## v2.3 — Neutral charcoal + unified terminal monitor (supersedes v2.2)
 
