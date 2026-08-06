@@ -408,6 +408,34 @@ def test_create_run_unknown_mode(auth_client, monkeypatch):
     assert r.status_code == 422
 
 
+def test_create_run_ask_no_repo_succeeds(auth_client):
+    """Ask mode with no repo is general-assistant chat — the agent always
+    responds. No 422, no silent failure. The run is created; the blueprint
+    spawns a worker with no repos mounted (general-assistant persona)."""
+    client, _, services, _ = auth_client
+    r = client.post("/runs", json={"mode": "ask", "task": "hello"})
+    assert r.status_code == 200
+    assert services["run_manager"].created
+
+
+def test_create_run_fleet_mode_no_repo_succeeds(auth_client):
+    """Fleet modes (goal/swarm) mount the whole fleet — no repo or @mention
+    required."""
+    client, _, services, _ = auth_client
+    r = client.post("/runs", json={"mode": "goal", "task": "ship usage stats"})
+    assert r.status_code == 200
+    r = client.post("/runs", json={"mode": "agent-rnd", "task": "map billing", "fanout": 3})
+    assert r.status_code == 200
+
+
+def test_create_run_scoped_mode_with_mention_succeeds(auth_client):
+    """A scoped-mode run with an @mention in the task passes — the hydrate
+    resolves the repo from the mention."""
+    client, _, services, _ = auth_client
+    r = client.post("/runs", json={"mode": "ask", "task": "check `@ServerApp` auth flow"})
+    assert r.status_code == 200
+
+
 def test_create_run_passes_fanout_through(auth_client):
     """User-requested fan-out: the count rides POST /runs into the swarm
     blueprint's hydrate (the Lead still authors the slices)."""

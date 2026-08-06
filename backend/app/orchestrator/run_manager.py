@@ -183,6 +183,15 @@ class RunManager:
             raise
         except Exception as exc:
             log.error("run failed", run_id=run_id, error=str(exc)[:300])
+            # Surface the failure reason in the chat — without this the run
+            # silently flips to "failed" and the user sees an empty session with
+            # no explanation (the @mention "no repo targeted" error is invisible
+            # otherwise). Publish the error text as a run-scoped note so the
+            # event stream renders it inline.
+            try:
+                await self.relay.publish_note(run_id, f"run failed: {str(exc)[:500]}")
+            except Exception:
+                pass
             session = get_session()
             try:
                 row = session.get(Run, run_id)

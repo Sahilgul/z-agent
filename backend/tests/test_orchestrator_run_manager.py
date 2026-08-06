@@ -22,10 +22,13 @@ class _FakeRelay:
     def __init__(self):
         self.stages = []
         self.threads = []
+        self.notes = []
     async def publish_run_stage(self, run_id, stage, actions):
         self.stages.append((run_id, stage, actions))
     async def publish_thread_status(self, run_id, thread_id, status):
         self.threads.append((run_id, thread_id, status))
+    async def publish_note(self, run_id, text):
+        self.notes.append((run_id, text))
 
 
 class _FakeControl:
@@ -357,6 +360,9 @@ async def test_execute_failure_path_marks_failed(session, make_user, monkeypatch
     assert session.get(Run, "r1").stage == RunStage.FAILED.value
     assert session.get(Run, "r1").finished_at is not None
     assert relay.stages[-1][1] == RunStage.FAILED.value
+    # The failure reason is surfaced in the chat as a run-scoped note —
+    # without this the user sees a silently-failed run with no explanation.
+    assert relay.notes[-1] == ("r1", "run failed: agent crashed")
 
 
 async def test_guarded_execute_reraises_cancelled_not_marks_failed(session, make_user, monkeypatch):

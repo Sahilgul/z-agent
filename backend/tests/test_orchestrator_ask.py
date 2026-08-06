@@ -20,7 +20,10 @@ class _FakeLaneManager:
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
                     resume_session=False, resume_from_thread_id=None):
-        self.spawned.append({"persona": persona, "prompt": prompt, "persona_prompt": persona_prompt})
+        self.spawned.append({
+            "persona": persona, "prompt": prompt, "persona_prompt": persona_prompt,
+            "writable_repo": writable_repo, "context_repos": context_repos,
+        })
         return self._thread
 
     async def settle_cost(self, thread_id):
@@ -81,18 +84,21 @@ async def test_hydrate_unknown_mention_raises(session, make_user):
         await bp._hydrate(ctx)
 
 
-async def test_hydrate_no_repo_no_mention_raises(session, make_user):
-    """No default repo: a scoped-mode run with no explicit repo and no @mention
-    fails clearly instead of silently scoping to ServerApp. The old
-    `or "ServerApp"` fallback hid the fleet from the agent."""
+async def test_hydrate_no_repo_no_mention_is_general_assistant(session, make_user):
+    """No default repo: a repo-less ask run is general-assistant chat — the
+    agent always responds. The hydrate sets repo_row=None and context_repos=[]
+    so _investigate spawns a worker with no file access and a general-assistant
+    persona. The old `or "ServerApp"` fallback hid the fleet from the agent;
+    the 422 we briefly tried blocked the user from chatting at all."""
     u = make_user("alice", role="member", status="active")
-    run = Run(id="r1", created_by=u.id, mode="ask", stage="queued", title="t")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="queued", title="hello")
     repo = Repo(name="ServerApp", integration_branch="main")
     session.add_all([run, repo]); session.commit()
     bp = AskBlueprint()
     ctx = _ctx(run)
-    with pytest.raises(RuntimeError, match="no repo targeted"):
-        await bp._hydrate(ctx)
+    await bp._hydrate(ctx)
+    assert ctx.artifacts["repo_row"] is None
+    assert ctx.artifacts["context_repos"] == []
 
 
 async def test_hydrate_missing_repo_raises(session, make_user):
@@ -211,6 +217,35 @@ async def test_investigate_without_mode_row(session, make_user, monkeypatch):
 
     await bp._investigate(ctx)
     assert "Repo guidebook" in lm.spawned[0]["persona_prompt"]
+
+
+async def test_investigate_no_repo_spawns_general_assistant(session, make_user, monkeypatch):
+    """No repo mentioned → general-assistant mode: the worker spawns with no
+    context repos and a persona that tells the agent it has no file access.
+    The agent still responds — it answers from training knowledge. An
+    @mention in a later turn (remount) opts into file access."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="hello")
+    mode = Mode(name="ask", autonomy_default="supervised", enabled=True, persona_prompt="You are a researcher.")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, mode, thread]); session.commit()
+
+    lm = _FakeLaneManager(thread)
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"repo_row": None, "context_repos": [], "guidebook": "", "task": "hello"})
+
+    async def fake_await(self, thread_id, poll_seconds=2.0):
+        return None
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
+
+    await bp._investigate(ctx)
+    assert ctx.artifacts["thread_id"] == "l1"
+    assert lm.spawned[0]["context_repos"] == []
+    assert lm.spawned[0]["writable_repo"] is None
+    assert "general-assistant" in lm.spawned[0]["persona_prompt"]
+    assert "No repo is mounted" in lm.spawned[0]["persona_prompt"]
+    assert lm.spawned[0]["prompt"] == "hello"
 
 
 # --------------------------------------------------------------- _complete

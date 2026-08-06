@@ -39,9 +39,11 @@ class AskBlueprint(Blueprint):
         resolve target + context repos from the explicit field and the task's
         @mentions, load guidebook seed, compose the thread prompt.
 
-        No default repo: the user must @mention a repo (or the API must set
-        run.repo). The old `or "ServerApp"` fallback silently scoped every
-        repo-less ask run to ServerApp, hiding the fleet from the agent."""
+        No default repo: a repo-less ask run is a general-assistant chat — the
+        agent answers questions, explains concepts, discusses architecture
+        without file access. The old `or "ServerApp"` fallback silently scoped
+        every repo-less ask run to ServerApp, hiding the fleet from the agent.
+        An @mention (or the API's run.repo) opts INTO file access."""
         from app.services.mentions import resolve_run_repos
         session = get_session()
         try:
@@ -51,9 +53,6 @@ class AskBlueprint(Blueprint):
             if unknown:
                 raise RuntimeError(
                     f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
-            if target is None:
-                raise RuntimeError(
-                    "no repo targeted — mention one with `@RepoName`")
             guidebook = GUIDEBOOK_SEED.read_text(encoding="utf-8") if GUIDEBOOK_SEED.exists() else ""
         finally:
             session.close()
@@ -68,15 +67,27 @@ class AskBlueprint(Blueprint):
             mode = session.query(Mode).filter_by(name="ask").one_or_none()
         finally:
             session.close()
-        persona_prompt = (mode.persona_prompt if mode else "") + (
-            f"\n\n--- Repo guidebook (curated) ---\n{ctx.artifacts['guidebook']}"
-            "\n\nNavigation protocol: orient in the guidebook, then grep/glob/read on the "
-            "mounted tree as ground truth. Answer with file:line citations. "
-            "Everything is mounted READ-ONLY — do not modify anything."
-        )
-        repo: Repo = ctx.artifacts["repo_row"]
-        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
+        repo: Repo | None = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or ([repo] if repo else [])
         task = ctx.artifacts.get("task") or ctx.run.title
+        if repo is not None:
+            persona_prompt = (mode.persona_prompt if mode else "") + (
+                f"\n\n--- Repo guidebook (curated) ---\n{ctx.artifacts['guidebook']}"
+                "\n\nNavigation protocol: orient in the guidebook, then grep/glob/read on the "
+                "mounted tree as ground truth. Answer with file:line citations. "
+                "Everything is mounted READ-ONLY — do not modify anything."
+            )
+        else:
+            # No repo mentioned — general-assistant mode. The agent can answer
+            # questions, explain concepts, discuss architecture. It has no file
+            # access; an @mention in a later turn (remount) opts into that.
+            persona_prompt = (mode.persona_prompt if mode else "") + (
+                "\n\nNo repo is mounted — you are in general-assistant mode. Answer "
+                "questions, explain concepts, and discuss architecture from your "
+                "training knowledge. You do NOT have file access right now. If the "
+                "user wants you to look at specific code, they can mention a repo "
+                "with `@RepoName` and you'll get read-only access to it on the next turn."
+            )
         thread = await thread_manager.spawn(
             ctx.run, persona="researcher", prompt=task, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=context,
