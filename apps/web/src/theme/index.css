@@ -79,6 +79,9 @@
   --spacing-s8: 32px;
   --spacing-s10: 40px;
   --spacing-s12: 48px;
+  /* brochure scale (v2.5) — landing sections breathe more than the console */
+  --spacing-s16: 64px;
+  --spacing-s20: 80px;
   --spacing-row-sm: 30px;
   --spacing-row-md: 36px;
   --spacing-row-lg: 44px;
@@ -400,6 +403,82 @@
     margin: 10px 0;
     padding: 2px 14px;
     color: var(--color-ink-secondary);
+  }
+
+  /* ------------------------------------------------------------------
+     Landing (v2.5) — the public brochure at `/`. Same tokens, brighter
+     budget: this surface is allowed the hero aura, the neon headline
+     word, and the demo-console LEDs. Geometry stays patch-bay (dot-grid,
+     hairlines, jack wells, mono micro); scale goes editorial (Fraunces
+     display, wide tracking, negative space). The console's
+     html/body{overflow:hidden} shell means the page must scroll itself.
+     ------------------------------------------------------------------ */
+  .lp-page {
+    height: 100%;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+  }
+  /* The brochure's signature glow — two static radial washes of neon
+     behind the hero. Static by design: the budget buys brightness, not
+     motion (motion stays with the demo console's LEDs/rivers). */
+  .lp-aura {
+    background:
+      radial-gradient(
+        720px 460px at 22% -4%,
+        color-mix(in srgb, var(--color-green-bright) 14%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        600px 420px at 84% 6%,
+        color-mix(in srgb, var(--color-green) 10%, transparent),
+        transparent 70%
+      );
+  }
+  .lp-h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(44px, 7vw, 78px);
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+    color: var(--color-ink-primary);
+  }
+  /* Neon keyword — the one place text is allowed to glow. */
+  .lp-neon {
+    color: var(--color-green-bright);
+    text-shadow: 0 0 28px color-mix(in srgb, var(--color-green-bright) 45%, transparent);
+  }
+  .lp-h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(28px, 3.6vw, 40px);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: var(--color-ink-primary);
+  }
+  /* Typed-feed caret in the demo console — reuses the global blink. */
+  .lp-caret {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    margin-left: 3px;
+    vertical-align: -2px;
+    background: var(--color-green-bright);
+    animation: blink 1.1s steps(2, start) infinite;
+  }
+  /* Blueprint jack-strip: each module reads as a 1U bay on the bus.
+     Hover raises the LED — the only interaction on the page that glows
+     besides the primary CTA. */
+  .lp-module {
+    border: 1px solid var(--color-hairline);
+    background: var(--color-bg-panel);
+    border-radius: var(--radius-md);
+    transition:
+      border-color 180ms cubic-bezier(0.2, 0.7, 0.3, 1),
+      background-color 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  .lp-module:hover {
+    border-color: color-mix(in srgb, var(--color-green) 55%, var(--color-hairline));
+    background: var(--color-bg-module);
   }
 }
 

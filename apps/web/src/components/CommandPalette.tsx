@@ -22,6 +22,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { useSession } from "../stores/session";
+import { SCREEN_PATHS } from "../lib/routes";
 import { useAppTranslation } from "@/i18n";
 
 /** Global ⌘K / Ctrl+K command palette — the navigation affordance the
@@ -29,13 +30,13 @@ import { useAppTranslation } from "@/i18n";
  *  primitive that was never mounted. Opens on keydown; closes on selection
  *  or escape (built into the Dialog primitive). */
 const NAV = [
-  { to: "/", labelKey: "nav.sessions", icon: InboxIcon, hint: "⌘1" },
-  { to: "/knowledge", labelKey: "nav.knowledge", icon: BookOpenIcon, hint: "⌘2" },
-  { to: "/ideas", labelKey: "nav.ideas", icon: LightbulbIcon, hint: "⌘3" },
-  { to: "/patrol", labelKey: "nav.patrol", icon: RadarIcon, hint: "⌘4" },
-  { to: "/costs", labelKey: "nav.costs", icon: CircleDollarSignIcon, hint: "⌘5" },
-  { to: "/repos", labelKey: "nav.repos", icon: FolderGit2Icon, hint: "⌘6" },
-  { to: "/team", labelKey: "nav.team", icon: UsersIcon, hint: "⌘7" },
+  { to: SCREEN_PATHS.sessions, labelKey: "nav.sessions", icon: InboxIcon, hint: "⌘1" },
+  { to: SCREEN_PATHS.knowledge, labelKey: "nav.knowledge", icon: BookOpenIcon, hint: "⌘2" },
+  { to: SCREEN_PATHS.ideas, labelKey: "nav.ideas", icon: LightbulbIcon, hint: "⌘3" },
+  { to: SCREEN_PATHS.proposals, labelKey: "nav.patrol", icon: RadarIcon, hint: "⌘4" },
+  { to: SCREEN_PATHS.dashboard, labelKey: "nav.costs", icon: CircleDollarSignIcon, hint: "⌘5" },
+  { to: SCREEN_PATHS.repos, labelKey: "nav.repos", icon: FolderGit2Icon, hint: "⌘6" },
+  { to: SCREEN_PATHS.team, labelKey: "nav.team", icon: UsersIcon, hint: "⌘7" },
 ] as const;
 
 export function CommandPalette() {
@@ -54,7 +55,7 @@ export function CommandPalette() {
       // dead). ⌘N now triggers the same action as the "new run" palette item.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        navigate("/");
+        navigate(SCREEN_PATHS.sessions);
         setOpen(false);
       }
     };

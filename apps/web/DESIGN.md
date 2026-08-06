@@ -43,6 +43,15 @@ v2.3's warm charcoal + muted sage read as "vintage" / "color damaged in sunshine
 5. **Code-surface split: syntax speaks VS Code, chrome speaks z-agent.** `vscDarkPlus` token colors stay as-is (devs' muscle memory; they were tuned on `#1e1e1e`, so on deeper jack they read slightly brighter — acceptable). The block surface becomes `--jack` + hairline frame, with a slim VS Code-style header: file-type icon (new `FileIcon` set — TS blue, JS yellow, JSON orange, Python blue/yellow, shell green…) + filename or language label in mono micro `--ink-faint`. The terminal frame loses its macOS traffic-light dots (off-palette ornament; "if a surface can't justify an ornament, the ornament is deleted") and gains the same slim header.
 6. **Mermaid diagrams render for real.** A ` ```mermaid ` fence renders as a themed SVG (lazy-loaded via `React.lazy` + `Suspense` so the ~300KB chunk never touches startup or non-diagram sessions; `securityLevel: "strict"` for untrusted agent content; graceful fallback to a code block + "diagram failed to parse" note on parse error). Three-stage UX: skeleton-sweep shimmer while the chunk loads → partial source as code while streaming → themed SVG when complete.
 
+## v2.5 — Public landing: brochure brightness on console geometry
+
+The console gains a public front door: `/` is now the landing page (the console moved under `/app`; the landing boots the session only to choose its primary CTA — *sign in* vs *open console* — and never gates or redirects). It is a fifth archetype, **brochure**, and it is allowed to break the density rule: section padding grows to `--s16`/`--s20` (new tokens), Fraunces scales to a `clamp(44px, 7vw, 78px)` headline, negative space is spent freely. What does *not* change: the geometry stays patch-bay (dot-grid stage, hairlines, jack wells, mono micro labels, LEDs), and every color resolves to the locked v2.4 tokens.
+
+1. **Brochure glow budget** (supersedes "two elements per screen" for this surface only): the hero aura (two *static* radial washes of `--green-bright`/`--green` at 14%/10% alpha), the neon headline word (`text-shadow` on thin display strokes — the only place text may glow), the primary CTA's `--shadow-glow`, and the demo console's LEDs + river. Static brightness over motion: the aura never animates.
+2. **Signature element: the self-playing session console.** A scripted typed feed (prompt → plan → three lanes → PR with evidence) plays in a jack well with the slim VS Code-style header, live LED, and a river track. One interval drives a char budget across the script; `prefers-reduced-motion` shows the full frame instantly. It demonstrates the product's grammar without a screenshot or a video.
+3. **Blueprint jack-strip.** The six orchestrator blueprints (ask / plan / debug / development / swarm / goal) render as 1U bays on the bus — LED, mono name, ghost index, one honest contract line each. Feature modules reuse the same `lp-module` bay with a jack icon square.
+4. **i18n:** all section copy lives under `landing.*`; the demo script is demo data (like a screenshot) and stays inline.
+
 ## Color
 
 | Token | Hex | Usage rule | Contrast (on its bg) |
@@ -170,12 +179,13 @@ Scale (px): 10.5 / 11 / 12 / 13.5 / 15 / 17 / 22 / 26. Weights: 400 and 600 only
 | repos | Rack rows — each repo a 1U module with HEAD hash in mono |
 | team | Operator table with setup-code reveal |
 | login | Wordmark + LED on the bare dot-grid stage; the only screen with negative space |
+| landing | **Self-playing session console** — a scripted typed feed (prompt → plan → lanes → PR) in a jack well under the hero aura |
 
 ## Tokens (numeric)
 
 | Group | Values |
 |---|---|
-| Spacing (4pt) | `--s1:4  --s2:8  --s3:12  --s4:16  --s5:20  --s6:24  --s8:32  --s10:40  --s12:48` |
+| Spacing (4pt) | `--s1:4  --s2:8  --s3:12  --s4:16  --s5:20  --s6:24  --s8:32  --s10:40  --s12:48` · brochure-only: `--s16:64  --s20:80` |
 | Radius | `--r-sm:6  --r-md:8  --r-lg:12  --r-pill:999` |
 | Shadow | `--sh-card: 0 1px 2px rgba(12,16,19,.35)` · `--sh-pop: 0 12px 32px rgba(12,16,19,.45)` · `--sh-overlay: 0 24px 60px rgba(12,16,19,.6)` |
 | Z-index | `--z-base:0  --z-sticky:10  --z-rail:20  --z-overlay:100  --z-toast:200` |

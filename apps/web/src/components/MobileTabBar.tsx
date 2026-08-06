@@ -7,16 +7,17 @@ import {
   RadarIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SCREEN_PATHS } from "../lib/routes";
 
 /** Mobile bottom tab bar (Linear/Notion mobile pattern) — replaces the
  *  dropdown MobileNav. Five primary destinations as icon+label tabs,
  *  shown only under 700px. NavLink gives aria-current="page" for free. */
 const TABS = [
-  { to: "/", label: "sessions", icon: InboxIcon, end: true },
-  { to: "/knowledge", label: "knowledge", icon: BookOpenIcon, end: false },
-  { to: "/ideas", label: "ideas", icon: LightbulbIcon, end: false },
-  { to: "/patrol", label: "patrol", icon: RadarIcon, end: false },
-  { to: "/costs", label: "costs", icon: CircleDollarSignIcon, end: false },
+  { to: SCREEN_PATHS.sessions, label: "sessions", icon: InboxIcon, end: true },
+  { to: SCREEN_PATHS.knowledge, label: "knowledge", icon: BookOpenIcon, end: false },
+  { to: SCREEN_PATHS.ideas, label: "ideas", icon: LightbulbIcon, end: false },
+  { to: SCREEN_PATHS.proposals, label: "patrol", icon: RadarIcon, end: false },
+  { to: SCREEN_PATHS.dashboard, label: "costs", icon: CircleDollarSignIcon, end: false },
 ] as const;
 
 export function MobileTabBar() {

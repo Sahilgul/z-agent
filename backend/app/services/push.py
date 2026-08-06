@@ -101,4 +101,5 @@ def send_to_user(user_id: int, title: str, body: str, url: str = "/", sender=Non
 
 
 def approval_deep_link(run_id: str, approval_id: str) -> str:
-    return f"/?screen=approvals&run={run_id}&card={approval_id}"
+    # The console lives under /app; `/` is the public landing page.
+    return f"/app?screen=approvals&run={run_id}&card={approval_id}"

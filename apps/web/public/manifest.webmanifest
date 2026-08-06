@@ -2,10 +2,10 @@
   "name": "Zagent",
   "short_name": "Zagent",
   "description": "Autonomous engineering platform — org-agnostic, adoptable against any set of repositories",
-  "start_url": "/",
+  "start_url": "/app",
   "display": "standalone",
-  "background_color": "#202A35",
-  "theme_color": "#202A35",
+  "background_color": "#0F110F",
+  "theme_color": "#0F110F",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]

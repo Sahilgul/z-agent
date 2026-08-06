@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { SideRail } from "./components/SideRail";
+import { CONSOLE_HOME } from "./lib/routes";
 import { useSession } from "./stores/session";
 
 // Code-split per route — the data router wraps navigation in startTransition,
@@ -12,6 +13,9 @@ import { useSession } from "./stores/session";
 // synchronous input" error the legacy BrowserRouter hit.
 const LoginScreen = lazy(() =>
   import("./features/login/LoginScreen").then((m) => ({ default: m.LoginScreen })),
+);
+const LandingScreen = lazy(() =>
+  import("./features/landing/LandingScreen").then((m) => ({ default: m.LandingScreen })),
 );
 const SessionsScreen = lazy(() =>
   import("./features/sessions/SessionsScreen").then((m) => ({ default: m.SessionsScreen })),
@@ -72,7 +76,7 @@ function SkipLink() {
 
 function AdminRoute({ children }: { children: ReactNode }) {
   const me = useSession((s) => s.me);
-  if (me?.role !== "admin") return <Navigate to="/" replace />;
+  if (me?.role !== "admin") return <Navigate to={CONSOLE_HOME} replace />;
   return <>{children}</>;
 }
 
@@ -117,7 +121,7 @@ function RootLayout() {
   return <AuthedShell />;
 }
 
-/** Login route: bounces authed users back to inbox. Also boots the session
+/** Login route: bounces authed users into the console. Also boots the session
  *  (RootLayout doesn't mount at /login, so boot must run here too —
  *  otherwise a refresh on /login hangs on the warming screen forever). */
 function LoginRoute() {
@@ -126,7 +130,7 @@ function LoginRoute() {
     void boot();
   }, [boot]);
   if (!booted) return <WarmingScreen />;
-  if (me) return <Navigate to="/" replace />;
+  if (me) return <Navigate to={CONSOLE_HOME} replace />;
   return (
     <ErrorBoundary>
       <Suspense fallback={<WarmingScreen />}>
@@ -136,9 +140,28 @@ function LoginRoute() {
   );
 }
 
+/** Landing route: public brochure at `/`. Boots the session in the background
+ *  so the primary CTA can flip between "sign in" and "open console" — but
+ *  never gates or redirects; the page must paint instantly and stay
+ *  reachable while signed in. */
+function LandingRoute() {
+  const boot = useSession((s) => s.boot);
+  useEffect(() => {
+    void boot();
+  }, [boot]);
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<WarmingScreen />}>
+        <LandingScreen />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
 export const router = createBrowserRouter([
+  { path: "/", element: <LandingRoute /> },
   {
-    path: "/",
+    path: CONSOLE_HOME,
     element: <RootLayout />,
     children: [
       { index: true, element: <SessionsScreen /> },
