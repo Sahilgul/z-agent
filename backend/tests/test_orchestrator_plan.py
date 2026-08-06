@@ -77,6 +77,34 @@ async def test_hydrate_missing_repo_raises(session, make_user):
         await bp._hydrate(_ctx(run))
 
 
+async def test_hydrate_no_repo_no_mention_raises(session, make_user):
+    """No default repo: a scoped-mode plan run with no explicit repo and no
+    @mention fails clearly instead of silently scoping to ServerApp."""
+    u = make_user("alice")
+    run = Run(id="r1", created_by=u.id, mode="plan", stage="queued", title="t")
+    session.add(Repo(name="ServerApp", integration_branch="main")); session.commit()
+    bp = PlanBlueprint()
+    with pytest.raises(RuntimeError, match="no repo targeted"):
+        await bp._hydrate(_ctx(run))
+
+
+async def test_hydrate_mention_sets_context_in_order(session, make_user):
+    """A turn-1 @mention pins the target (first mention) and mounts every
+    mentioned repo as read-only context, in first-appearance order."""
+    u = make_user("alice")
+    run = Run(id="r1", created_by=u.id, mode="plan", stage="queued",
+              title="plan across `@ClientApp` and `@ServerApp`")
+    session.add_all([
+        Repo(name="ServerApp", integration_branch="main"),
+        Repo(name="ClientApp", integration_branch="main"),
+    ]); session.commit()
+    bp = PlanBlueprint()
+    ctx = _ctx(run)
+    await bp._hydrate(ctx)
+    assert ctx.artifacts["repo_row"].name == "ClientApp"
+    assert [r.name for r in ctx.artifacts["context_repos"]] == ["ClientApp", "ServerApp"]
+
+
 async def test_hydrate_fetches_work_item(session, make_user):
     u = make_user("alice")
     run = Run(id="r1", created_by=u.id, mode="plan", stage="queued", repo="ServerApp",

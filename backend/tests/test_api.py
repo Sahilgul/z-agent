@@ -576,6 +576,75 @@ def test_post_intent_text_message(auth_client, session, make_user):
     assert services["run_manager"].nudged == [("r1", "l1", "hurry up")]
 
 
+def test_post_intent_send_message_with_new_mention_replaces_and_nudges(auth_client, session, make_user):
+    """A turn-X @mention that names a repo not already mounted triggers a
+    replace-with-resume (the new container mounts the expanded repo set),
+    then the nudge goes to the REPLACEMENT, not the old thread. Docker
+    can't add mounts to a running container, so the restart is the mechanism."""
+    from app.db.models.repo import Repo
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running",
+                repo_scope="ServerApp",
+                spawn_context={"context_repos": ["ServerApp"]})
+    session.add_all([run, thread,
+                     Repo(name="ServerApp", integration_branch="main"),
+                     Repo(name="ClientApp", integration_branch="main")])
+    session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"text": "also check `@ClientApp`", "source": "text"})
+    assert r.status_code == 200
+    rm = services["run_manager"]
+    # The old thread was replaced...
+    assert ("r1", "l1") in rm.replaced
+    # ...and the nudge went to the replacement, not the old thread.
+    assert rm.nudged == [("r1", "replacement-l1", "also check `@ClientApp`")]
+
+
+def test_post_intent_send_message_with_unknown_mention_returns_422(auth_client, session, make_user):
+    """An @mention that names a repo not in the fleet is a 422, not a silent
+    remount that drops the name — the user has to fix the typo."""
+    from app.db.models.repo import Repo
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running",
+                repo_scope="ServerApp",
+                spawn_context={"context_repos": ["ServerApp"]})
+    session.add_all([run, thread, Repo(name="ServerApp", integration_branch="main")])
+    session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"text": "check `@GhostRepo`", "source": "text"})
+    assert r.status_code == 422
+    assert "not registered" in r.json()["detail"]
+    # No replace, no nudge — the message didn't land.
+    rm = services["run_manager"]
+    assert rm.replaced == []
+    assert rm.nudged == []
+
+
+def test_post_intent_send_message_with_already_mounted_mention_skips_replace(auth_client, session, make_user):
+    """An @mention that names a repo ALREADY mounted skips the restart —
+    the diff is empty, so the plain nudge path runs (regression: no
+    unnecessary container restart for a repo that's already in the workspace)."""
+    from app.db.models.repo import Repo
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running",
+                repo_scope="ServerApp",
+                spawn_context={"context_repos": ["ServerApp", "ClientApp"]})
+    session.add_all([run, thread,
+                     Repo(name="ServerApp", integration_branch="main"),
+                     Repo(name="ClientApp", integration_branch="main")])
+    session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"text": "look at `@ServerApp` again", "source": "text"})
+    assert r.status_code == 200
+    rm = services["run_manager"]
+    # No replace (already mounted), plain nudge to the original thread.
+    assert rm.replaced == []
+    assert rm.nudged == [("r1", "l1", "look at `@ServerApp` again")]
+
+
 def test_post_intent_run_not_found(auth_client):
     client, _, _, _ = auth_client
     r = client.post("/runs/ghost/intent", json={"intent": "stop_run", "source": "button"})

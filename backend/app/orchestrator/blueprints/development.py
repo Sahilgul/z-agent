@@ -59,15 +59,23 @@ class DevelopmentBlueprint(Blueprint):
 
     # --------------------------------------------------------------- hydrate
     async def _hydrate(self, ctx: BlueprintContext) -> None:
-        """Load the approved plan + steps, resolve writable scope from the mode row,
-        stamp the workspace path on the run, and compute the branch name."""
+        """Load the approved plan + steps, resolve writable + context scope from
+        the mode row and the task's @mentions, stamp the workspace path on the
+        run, and compute the branch name."""
+        from app.services.mentions import resolve_run_repos
         session = get_session()
         try:
             run = session.get(Run, ctx.run.id)
-            repo_name = (run.repo if run else None) or ctx.artifacts.get("repo") or "ServerApp"
-            repo = session.query(Repo).filter_by(name=repo_name).one_or_none()
-            if repo is None:
-                raise RuntimeError(f"repo '{repo_name}' not registered")
+            target, context, unknown = resolve_run_repos(
+                session, ctx.artifacts.get("repo") or (run.repo if run else None),
+                ctx.artifacts.get("task") or ctx.run.title)
+            if unknown:
+                raise RuntimeError(
+                    f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
+            if target is None:
+                raise RuntimeError(
+                    "no repo targeted — mention one with `@RepoName`")
+            repo = target
             plan = (
                 session.query(Plan)
                 .filter_by(run_id=run.id, status="approved")
@@ -85,11 +93,12 @@ class DevelopmentBlueprint(Blueprint):
             # lazy relationship; the stamp node runs after this session closes).
             test_cmds = list(repo.profile.test_cmds) if repo.profile and repo.profile.test_cmds else None
             branch = delivery.branch_name_for(run)
-            workspace = str(_workspaces_root()) + "/" + run.id + "/" + (repo_name or "")
+            workspace = str(_workspaces_root()) + "/" + run.id + "/" + (repo.name or "")
             run.session_volume_path = workspace
             run.last_active_at = datetime.now(timezone.utc)
             session.commit()
             ctx.artifacts["repo_row"] = repo
+            ctx.artifacts["context_repos"] = context
             ctx.artifacts["plan_row_id"] = plan.id
             ctx.artifacts["plan_steps"] = [s for s in plan.steps]
             ctx.artifacts["permissions"] = permissions
@@ -104,6 +113,7 @@ class DevelopmentBlueprint(Blueprint):
     async def _develop(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         permissions: dict = ctx.artifacts.get("permissions") or {}
         writable = self._writable_repo(repo, permissions)
         prompt = self._compose_developer_prompt(ctx)
@@ -113,7 +123,7 @@ class DevelopmentBlueprint(Blueprint):
                                         "when its success_criterion is met.")
         thread = await thread_manager.spawn(
             ctx.run, persona="developer", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=writable, context_repos=[repo],
+            writable_repo=writable, context_repos=context,
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
         ctx.artifacts["develop_thread_id"] = thread.id
@@ -140,9 +150,11 @@ class DevelopmentBlueprint(Blueprint):
                                         "Report a verdict (pass/fail) per step with evidence "
                                         "(file:line). Do not trust the developer's claims.")
         # writable_repo=None: the evaluator is read-only — it verifies, never edits.
+        repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         thread = await thread_manager.spawn(
             ctx.run, persona="evaluator", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=[repo],
+            writable_repo=None, context_repos=context,
         )
         ctx.artifacts["evaluator_thread_id"] = thread.id
         await self._await_thread(thread.id)

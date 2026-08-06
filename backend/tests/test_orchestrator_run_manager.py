@@ -681,6 +681,93 @@ async def test_kill_replace_wrong_run_raises(session, make_user):
         await rm.kill_replace_thread("r1", "l1")
 
 
+# ----------------------------------------------------------- remount_thread (turn-X @mention expansion)
+async def test_remount_thread_unions_extra_repos_onto_stored_set(session, make_user, monkeypatch):
+    """A turn-X @mention that names a repo not already mounted unions into
+    the replacement's context. The stored spawn_context snapshot is the
+    source of truth; extras append (de-duped), the writable target stays first."""
+    from app.db.models.repo import Repo
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running",
+                repo_scope="ServerApp",
+                spawn_context={"prompt": "trace", "persona_prompt": "p",
+                               "context_repos": ["ServerApp"]})
+    session.add_all([run, thread,
+                     Repo(name="ServerApp", integration_branch="main"),
+                     Repo(name="ClientApp", integration_branch="main")])
+    session.commit()
+
+    captured = {}
+
+    class _Replacement:
+        id = "thread-new"
+
+    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                         resume_session=False, resume_from_thread_id=None):
+        captured["writable_repo"] = writable_repo
+        captured["context_repos"] = context_repos
+        captured["resume_from_thread_id"] = resume_from_thread_id
+        return _Replacement()
+    rm.thread_manager.spawn = fake_spawn
+
+    replacement = await rm.remount_thread("r1", "l1", ["ClientApp"])
+    assert replacement.id == "thread-new"
+    # ServerApp (stored target) stays first/writable; ClientApp (extra) appends.
+    assert [r.name for r in captured["context_repos"]] == ["ServerApp", "ClientApp"]
+    assert captured["writable_repo"].name == "ServerApp"
+    assert captured["resume_from_thread_id"] == "l1"
+    session.expire_all()
+    assert session.get(Thread, "l1").status == "replaced"
+
+
+async def test_remount_thread_dedupes_already_mounted_names(session, make_user, monkeypatch):
+    """An @mention that names a repo ALREADY mounted skips the restart —
+    the diff in the intent path is empty, so remount is never called. This
+    test guards the dedupe inside remount itself: a duplicate extra does
+    not double-mount."""
+    from app.db.models.repo import Repo
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running",
+                repo_scope="ServerApp",
+                spawn_context={"context_repos": ["ServerApp", "ClientApp"]})
+    session.add_all([run, thread,
+                     Repo(name="ServerApp", integration_branch="main"),
+                     Repo(name="ClientApp", integration_branch="main")])
+    session.commit()
+
+    captured = {}
+
+    class _Replacement:
+        id = "thread-new"
+
+    async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                         resume_session=False, resume_from_thread_id=None):
+        captured["context_repos"] = context_repos
+        return _Replacement()
+    rm.thread_manager.spawn = fake_spawn
+
+    await rm.remount_thread("r1", "l1", ["ServerApp"])  # already mounted
+    assert [r.name for r in captured["context_repos"]] == ["ServerApp", "ClientApp"]
+
+
+async def test_remount_thread_refuses_terminal_thread(session, make_user):
+    """A terminal thread can't be remounted — mirrors H-41 (kill_replace
+    refused on terminal). Re-resurrecting a dead thread double-spawns and
+    leaks capacity."""
+    u = make_user("a")
+    rm, _, _, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage=RunStage.INVESTIGATING.value)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed",
+                spawn_context={"context_repos": []})
+    session.add_all([run, thread]); session.commit()
+    with pytest.raises(ValueError, match="thread already terminal"):
+        await rm.remount_thread("r1", "l1", ["ClientApp"])
+
+
 # --------------------------------------------------------------- start_plan (debug -> plan promotion)
 async def test_start_plan_chains_into_plan_blueprint_with_seed(session, make_user, monkeypatch):
     u = make_user("a")

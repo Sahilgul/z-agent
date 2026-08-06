@@ -55,15 +55,44 @@ async def test_hydrate_uses_artifacts_repo_over_run_repo(session, make_user):
     assert ctx.artifacts["repo_row"].name == "ServerApp"
 
 
-async def test_hydrate_defaults_to_serverapp(session, make_user):
+async def test_hydrate_mention_sets_context_in_order(session, make_user):
+    """A turn-1 @mention pins the target (first mention) and mounts every
+    mentioned repo as read-only context, in first-appearance order."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="queued", title="compare `@ClientApp` and `@ServerApp`")
+    session.add_all([
+        Repo(name="ServerApp", integration_branch="main"),
+        Repo(name="ClientApp", integration_branch="main"),
+    ]); session.commit()
+    bp = AskBlueprint()
+    ctx = _ctx(run)
+    await bp._hydrate(ctx)
+    assert ctx.artifacts["repo_row"].name == "ClientApp"  # first mention is the target
+    assert [r.name for r in ctx.artifacts["context_repos"]] == ["ClientApp", "ServerApp"]
+
+
+async def test_hydrate_unknown_mention_raises(session, make_user):
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="queued", title="check `@GhostRepo`")
+    session.add(Repo(name="ServerApp", integration_branch="main")); session.commit()
+    bp = AskBlueprint()
+    ctx = _ctx(run)
+    with pytest.raises(RuntimeError, match="repo 'GhostRepo' not registered"):
+        await bp._hydrate(ctx)
+
+
+async def test_hydrate_no_repo_no_mention_raises(session, make_user):
+    """No default repo: a scoped-mode run with no explicit repo and no @mention
+    fails clearly instead of silently scoping to ServerApp. The old
+    `or "ServerApp"` fallback hid the fleet from the agent."""
     u = make_user("alice", role="member", status="active")
     run = Run(id="r1", created_by=u.id, mode="ask", stage="queued", title="t")
     repo = Repo(name="ServerApp", integration_branch="main")
     session.add_all([run, repo]); session.commit()
     bp = AskBlueprint()
     ctx = _ctx(run)
-    await bp._hydrate(ctx)
-    assert ctx.artifacts["repo_row"].name == "ServerApp"
+    with pytest.raises(RuntimeError, match="no repo targeted"):
+        await bp._hydrate(ctx)
 
 
 async def test_hydrate_missing_repo_raises(session, make_user):

@@ -161,6 +161,37 @@ async def test_hydrate_missing_repo_raises(session, make_user):
         await bp._hydrate(_ctx(run))
 
 
+async def test_hydrate_mounts_full_fleet_as_context(session, make_user):
+    """Goal is a fleet mode: ALL usable repos are mounted read-only as
+    workspace context, no @mention required. The explicit repo (if any) heads
+    the list as the writable target; the rest of the fleet follows read-only."""
+    run = _run(session, make_user, repo="ServerApp")
+    session.add_all([
+        Repo(name="ServerApp", integration_branch="main", status="ready"),
+        Repo(name="ClientApp", integration_branch="main", status="ready"),
+        Repo(name="Billing-Engine", integration_branch="pg-main", status="ready-no-map"),
+    ])
+    session.add(Mode(name="goal", persona_prompt="p", permission_mode="bypassPermissions",
+                     permissions={"writable": True, "repos": []}))
+    session.commit()
+    bp = GoalBlueprint()
+    ctx = _ctx(run, artifacts={"task": "ship usage stats"})
+    await bp._hydrate(ctx)
+    assert ctx.artifacts["repo_row"].name == "ServerApp"  # explicit target heads
+    names = [r.name for r in ctx.artifacts["context_repos"]]
+    assert names[0] == "ServerApp"
+    assert set(names) == {"ServerApp", "ClientApp", "Billing-Engine"}
+
+
+async def test_hydrate_no_fleet_no_target_raises(session, make_user):
+    """No usable repos and no explicit target -> goal mode has nothing to run
+    against. Fails clearly (no default repo anywhere in the system)."""
+    run = _run(session, make_user, repo=None)
+    bp = GoalBlueprint()
+    with pytest.raises(RuntimeError, match="no usable repos in the fleet"):
+        await bp._hydrate(_ctx(run))
+
+
 # --------------------------------------------------------------- _explore
 async def test_explore_single_researcher_by_default(session, make_user):
     run = _run(session, make_user)

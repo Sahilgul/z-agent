@@ -75,12 +75,19 @@ class PlanBlueprint(Blueprint):
 
     # --------------------------------------------------------------- hydrate
     async def _hydrate(self, ctx: BlueprintContext) -> None:
+        from app.services.mentions import resolve_run_repos
         session = get_session()
         try:
-            target = ctx.artifacts.get("repo") or ctx.run.repo or "ServerApp"
-            repo = session.query(Repo).filter_by(name=target).one_or_none()
-            if repo is None:
-                raise RuntimeError(f"repo '{target}' not registered")
+            target, context, unknown = resolve_run_repos(
+                session, ctx.artifacts.get("repo") or ctx.run.repo,
+                ctx.artifacts.get("task") or ctx.run.title)
+            if unknown:
+                raise RuntimeError(
+                    f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
+            if target is None:
+                raise RuntimeError(
+                    "no repo targeted — mention one with `@RepoName`")
+            repo = target
         finally:
             session.close()
 
@@ -101,6 +108,7 @@ class PlanBlueprint(Blueprint):
             blast_radius = []
 
         ctx.artifacts["repo_row"] = repo
+        ctx.artifacts["context_repos"] = context
         ctx.artifacts["work_item"] = work_item
         ctx.artifacts["blast_radius"] = blast_radius
 
@@ -125,10 +133,11 @@ class PlanBlueprint(Blueprint):
             session.close()
         persona_prompt += _playbook_block("plan")
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         prompt = self._compose_planner_prompt(ctx, repo)
         thread = await thread_manager.spawn(
             ctx.run, persona="planner", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=[repo],
+            writable_repo=None, context_repos=context,
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
         ctx.artifacts["draft_thread_id"] = thread.id
@@ -158,9 +167,10 @@ class PlanBlueprint(Blueprint):
             session.close()
         persona_prompt += _playbook_block("plan")
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         thread = await thread_manager.spawn(
             ctx.run, persona="critic", prompt="Critique the plan above.",
-            persona_prompt=persona_prompt, writable_repo=None, context_repos=[repo],
+            persona_prompt=persona_prompt, writable_repo=None, context_repos=context,
         )
         ctx.artifacts["critique_thread_id"] = thread.id
         await self._await_thread(thread.id)

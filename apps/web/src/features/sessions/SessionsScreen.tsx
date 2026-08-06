@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { FilterChips } from "@/components/ui/filter-chips";
 import { Input } from "@/components/ui/input";
+import { MentionTextarea } from "@/components/MentionTextarea";
 import { PageHead } from "@/components/ui/page-head";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { ActionCard } from "../../components/ActionCard";
 import { ApprovalQueue } from "../../components/ApprovalQueue";
@@ -324,7 +324,7 @@ export function SessionsScreen() {
           />
         )}
         <div className="mx-auto w-full max-w-canvas px-s5 py-s2">
-          <Textarea
+          <MentionTextarea
             id="session-composer"
             rows={1}
             placeholder={placeholder}

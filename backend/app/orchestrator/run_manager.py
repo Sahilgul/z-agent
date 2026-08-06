@@ -348,13 +348,22 @@ class RunManager:
             session.close()
         await self.relay.publish_thread_status(run_id, thread_id, "pinned")
 
-    async def kill_replace_thread(self, run_id: str, thread_id: str) -> Thread:
+    async def kill_replace_thread(
+        self, run_id: str, thread_id: str,
+        extra_context_repo_names: list[str] | None = None,
+    ) -> Thread:
         """Kill-and-replace: the old thread dies; a FRESH thread spawns with the
         SAME spawn context (stored at spawn — never re-derived from the
         blueprint). The session volume survives the container, so the
         replacement resumes where the killed thread left off — now actually
         true, because resume_from_thread_id mounts the old session volume and
-        inherits the old session_id."""
+        inherits the old session_id.
+
+        ``extra_context_repo_names`` unions into the stored mount set: a
+        turn-X @mention that names a repo not already mounted expands the
+        replacement's context (Docker can't add mounts to a running container,
+        so a replace-with-resume is the mechanism). Already-mounted names are
+        de-duped; the writable target (repo_scope) stays first."""
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
@@ -371,6 +380,16 @@ class RunManager:
             persona = thread.persona
             repo_scope = thread.repo_scope
             old_container_id = thread.container_id
+            # Mount set = stored context_repos (names) ∪ extras. The stored
+            # snapshot is the source of truth — re-deriving from the blueprint
+            # would re-resolve @mentions against a possibly-edited task and
+            # silently drop a repo the user added mid-conversation.
+            stored_names: list[str] = list(context.get("context_repos") or [])
+            if repo_scope and repo_scope not in stored_names:
+                stored_names.insert(0, repo_scope)
+            for name in (extra_context_repo_names or []):
+                if name not in stored_names:
+                    stored_names.append(name)
             thread.status = "replaced"
             thread.finished_at = datetime.now(timezone.utc)
             run = session.get(Run, run_id)
@@ -390,23 +409,77 @@ class RunManager:
                 sandbox_manager.wait_for_container_exit, old_container_id,
             )
 
+        # Resolve the unioned names to Repo rows for the spawn call. The
+        # writable target is repo_scope (the run's primary repo); the rest of
+        # the union is read-only context. An unknown name here is a caller bug
+        # (the intent path validates against the fleet before calling) —
+        # skip it rather than crash the replace.
         repo = None
-        if repo_scope:
+        context_repos: list = []
+        if stored_names:
             session = get_session()
             try:
                 from app.db.models.repo import Repo
-                repo = session.query(Repo).filter_by(name=repo_scope).one_or_none()
+                rows = (session.query(Repo)
+                        .filter(Repo.name.in_(stored_names)).all())
+                by_name = {r.name: r for r in rows}
+                if repo_scope and repo_scope in by_name:
+                    repo = by_name[repo_scope]
+                # Preserve stored order (target first); drop unknowns.
+                context_repos = [by_name[n] for n in stored_names if n in by_name]
+                if repo is None and context_repos:
+                    repo = context_repos[0]
             finally:
                 session.close()
         replacement = await self.thread_manager.spawn(
             run, persona=persona,
             prompt=context.get("prompt", "Resume the thread's work."),
             persona_prompt=context.get("persona_prompt", ""),
-            writable_repo=repo, context_repos=[repo] if repo else [],
+            writable_repo=repo, context_repos=context_repos,
             resume_from_thread_id=thread_id,
         )
         await self.relay.publish_thread_status(run_id, replacement.id, "running")
         return replacement
+
+    async def remount_thread(
+        self, run_id: str, thread_id: str,
+        extra_repo_names: list[str],
+    ) -> Thread:
+        """Turn-X @mention expansion: kill+replace the thread, unioning the
+        newly-mentioned repos into the mount set, then wait for the replacement
+        to heartbeat before the caller nudges it. Docker can't add mounts to a
+        running container, so a replace-with-resume is the only mechanism —
+        the cost is a container restart per newly-mentioned repo.
+
+        Returns the replacement thread (the caller nudges it)."""
+        return await self.kill_replace_thread(
+            run_id, thread_id, extra_context_repo_names=extra_repo_names)
+
+    async def _wait_for_heartbeat(
+        self, thread_id: str, timeout_s: float = 20.0,
+        poll_s: float = 0.5,
+    ) -> bool:
+        """Poll Redis for the worker's readiness signal (``thread:{id}:heartbeat``,
+        set at runner startup) so a nudge sent into a still-booting worker isn't
+        lost. Returns True once the key appears, False on timeout — the caller
+        nudges either way (a lost nudge is recoverable; a hung replace is not)."""
+        from app.core.redis_factory import make_redis
+        try:
+            redis = make_redis()
+            key = f"thread:{thread_id}:heartbeat"
+            waited = 0.0
+            while waited < timeout_s:
+                if await redis.get(key):
+                    await redis.aclose()
+                    return True
+                await asyncio.sleep(poll_s)
+                waited += poll_s
+            await redis.aclose()
+            return False
+        except Exception:
+            # A Redis failure during the wait is not fatal — the nudge still
+            # goes out; the worker picks it up when it subscribes.
+            return False
 
     # ------------------------------------------------------------ plan HITL chains
     async def continue_to_development(self, run_id: str) -> None:

@@ -43,7 +43,7 @@ from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.event import Event
 from app.db.models.mode import Mode
-from app.db.models.repo import Repo
+from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
@@ -139,22 +139,49 @@ class GoalBlueprint(Blueprint):
 
     # --------------------------------------------------------------- hydrate
     async def _hydrate(self, ctx: BlueprintContext) -> None:
+        from app.services.mentions import resolve_run_repos
         session = get_session()
         try:
             run = session.get(Run, ctx.run.id)
-            repo_name = (run.repo if run else None) or ctx.artifacts.get("repo") or "ServerApp"
-            repo = session.query(Repo).filter_by(name=repo_name).one_or_none()
-            if repo is None:
-                raise RuntimeError(f"repo '{repo_name}' not registered")
+            # Goal is a fleet mode: ALL usable repos are mounted read-only as
+            # workspace context, no @mention required. The explicit repo (or a
+            # user @mention) still pins the primary writable target — kept on
+            # run.repo for backward-compat (evidence, dashboard grouping) and
+            # used to stamp the workspace path.
+            target, mentioned, unknown = resolve_run_repos(
+                session, ctx.artifacts.get("repo") or (run.repo if run else None),
+                ctx.artifacts.get("task") or ctx.run.title)
+            if unknown:
+                raise RuntimeError(
+                    f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
+            fleet = session.query(Repo).filter(Repo.status.in_(RepoStatus.USABLE)).all()
+            # An explicit target is honored regardless of fleet status (the
+            # user asked for it); it heads the context and is the writable
+            # primary. With no target, the usable fleet IS the context — and
+            # an empty fleet means there's nothing to run goal mode against.
+            # (no default repo anywhere in the system).
+            if target is None:
+                if not fleet:
+                    raise RuntimeError(
+                        "no usable repos in the fleet — register a repo to run goal mode")
+                target = fleet[0]
+                context = list(fleet)
+            else:
+                context = [target] + [r for r in fleet if r.id != target.id]
+            repo = target
             mode = session.query(Mode).filter_by(name=run.mode).one_or_none()
             permissions = (mode.permissions if mode and mode.permissions else {}) or {}
             test_cmds = list(repo.profile.test_cmds) if repo.profile and repo.profile.test_cmds else None
             branch = delivery.branch_name_for(run)
-            workspace = str(_workspaces_root()) + "/" + run.id + "/" + (repo_name or "")
+            workspace = str(_workspaces_root()) + "/" + run.id + "/" + (repo.name or "")
             run.session_volume_path = workspace
+            if not run.repo:
+                run.repo = repo.name
             run.last_active_at = datetime.now(UTC)
             session.commit()
             ctx.artifacts["repo_row"] = repo
+            ctx.artifacts["context_repos"] = context
+            ctx.artifacts["mentioned_repos"] = mentioned  # hints for the planner
             ctx.artifacts["permissions"] = permissions
             ctx.artifacts["branch"] = branch
             ctx.artifacts["workspace"] = workspace
@@ -169,7 +196,7 @@ class GoalBlueprint(Blueprint):
             from app.core.fleet import get_fleet_config
             _repos, graph = get_fleet_config()
             if graph is not None:
-                blast_radius = graph.blast_radius_for(repo_name)
+                blast_radius = graph.blast_radius_for(repo.name)
         except Exception:
             blast_radius = []
         ctx.artifacts["blast_radius"] = blast_radius
@@ -180,6 +207,7 @@ class GoalBlueprint(Blueprint):
         distinct angles; otherwise a single researcher. Both read-only."""
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         task = ctx.artifacts.get("task") or ctx.run.title
         cap = get_settings().global_thread_cap
         requested = max(1, min(int(ctx.artifacts.get("fanout") or 1), cap))
@@ -190,7 +218,7 @@ class GoalBlueprint(Blueprint):
                       f"Angle: {EXPLORE_ANGLES[0]} (but follow the evidence wherever it leads)")
             thread = await thread_manager.spawn(
                 ctx.run, persona="researcher", prompt=prompt, persona_prompt=persona_prompt,
-                writable_repo=None, context_repos=[repo],
+                writable_repo=None, context_repos=context,
                 resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
             )
             ctx.artifacts["thread_ids"].append(thread.id)
@@ -209,7 +237,7 @@ class GoalBlueprint(Blueprint):
                  "thread_hint": f"explorer-{i}"}
                 for i in range(requested)
             ]
-            threads = await thread_manager.spawn_many(ctx.run, specs, [repo])
+            threads = await thread_manager.spawn_many(ctx.run, specs, context)
             ctx.artifacts["thread_ids"].extend(l.id for l in threads)
             await asyncio.gather(*(_await_thread(l.id) for l in threads))
             await asyncio.gather(*(thread_manager.finish_thread(l.id) for l in threads))
@@ -224,11 +252,12 @@ class GoalBlueprint(Blueprint):
     async def _plan(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         prompt = self._compose_planner_prompt(ctx, repo)
         persona_prompt = self._persona(ctx, PLANNER_HINT + PLAN_SCHEMA_HINT)
         thread = await thread_manager.spawn(
             ctx.run, persona="planner", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=[repo],
+            writable_repo=None, context_repos=context,
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         await _await_thread(thread.id)
@@ -248,6 +277,7 @@ class GoalBlueprint(Blueprint):
         reviser can't argue with a stale conversation — it gets the findings."""
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         draft: dict = ctx.artifacts["draft_plan"]
         notes: list[str] = []
         for round_no in range(1, CRITIQUE_ROUNDS + 1):
@@ -258,7 +288,7 @@ class GoalBlueprint(Blueprint):
                 ctx.run, persona="critic", prompt=critic_prompt,
                 persona_prompt=self._persona(
                     ctx, CRITIC_HINT.format(round_no=round_no, rounds=CRITIQUE_ROUNDS)),
-                writable_repo=None, context_repos=[repo],
+                writable_repo=None, context_repos=context,
             )
             ctx.artifacts["thread_ids"].append(critic.id)
             await _await_thread(critic.id)
@@ -273,7 +303,7 @@ class GoalBlueprint(Blueprint):
             reviser = await thread_manager.spawn(
                 ctx.run, persona="reviser", prompt=reviser_prompt,
                 persona_prompt=self._persona(ctx, REVISER_HINT + PLAN_SCHEMA_HINT),
-                writable_repo=None, context_repos=[repo],
+                writable_repo=None, context_repos=context,
             )
             ctx.artifacts["thread_ids"].append(reviser.id)
             await _await_thread(reviser.id)
@@ -334,13 +364,14 @@ class GoalBlueprint(Blueprint):
     async def _develop(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         writable = self._writable_repo(repo, ctx.artifacts.get("permissions") or {})
         branch = ctx.artifacts["branch"]
         prompt = self._compose_developer_prompt(ctx)
         persona_prompt = self._persona(ctx, DEVELOPER_HINT.format(branch=branch))
         thread = await thread_manager.spawn(
             ctx.run, persona="developer", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=writable, context_repos=[repo],
+            writable_repo=writable, context_repos=context,
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         ctx.artifacts["develop_thread_id"] = thread.id
@@ -424,6 +455,7 @@ class GoalBlueprint(Blueprint):
     async def _fix_round(self, ctx: BlueprintContext, suite: dict, round_no: int) -> None:
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         writable = self._writable_repo(repo, ctx.artifacts.get("permissions") or {})
         branch = ctx.artifacts["branch"]
         failures: list[str] = []
@@ -440,7 +472,7 @@ class GoalBlueprint(Blueprint):
         thread = await thread_manager.spawn(
             ctx.run, persona="fixer", prompt=prompt,
             persona_prompt=self._persona(ctx, FIXER_HINT.format(branch=branch)),
-            writable_repo=writable, context_repos=[repo],
+            writable_repo=writable, context_repos=context,
             preserve_workspace=True,  # re-stamping would wipe the implementation
         )
         ctx.artifacts["thread_ids"].append(thread.id)

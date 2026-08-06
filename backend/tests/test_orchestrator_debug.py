@@ -90,6 +90,17 @@ async def test_hydrate_missing_repo_raises(session, make_user):
         await bp._hydrate(_ctx(run))
 
 
+async def test_hydrate_no_repo_no_mention_raises(session, make_user):
+    """No default repo: a scoped-mode debug run with no explicit repo and no
+    @mention fails clearly instead of silently scoping to ServerApp."""
+    u = make_user("alice")
+    run = Run(id="r1", created_by=u.id, mode="debug", stage="queued", title="t")
+    session.add(Repo(name="ServerApp", integration_branch="main")); session.commit()
+    bp = DebugBlueprint()
+    with pytest.raises(RuntimeError, match="no repo targeted"):
+        await bp._hydrate(_ctx(run))
+
+
 # --------------------------------------------------------------- reproduce
 async def test_reproduce_confirms_failure(session, make_user, monkeypatch):
     run, repo, u = _seed(session, make_user)

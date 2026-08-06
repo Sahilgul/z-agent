@@ -36,17 +36,29 @@ class AskBlueprint(Blueprint):
 
     async def _hydrate(self, ctx: BlueprintContext) -> None:
         """Deterministic pre-run hydration (ado/hydrate grows from here):
-        resolve target repo, load guidebook seed, compose the thread prompt."""
+        resolve target + context repos from the explicit field and the task's
+        @mentions, load guidebook seed, compose the thread prompt.
+
+        No default repo: the user must @mention a repo (or the API must set
+        run.repo). The old `or "ServerApp"` fallback silently scoped every
+        repo-less ask run to ServerApp, hiding the fleet from the agent."""
+        from app.services.mentions import resolve_run_repos
         session = get_session()
         try:
-            target = ctx.artifacts.get("repo") or ctx.run.repo or "ServerApp"
-            repo = session.query(Repo).filter_by(name=target).one_or_none()
-            if repo is None:
-                raise RuntimeError(f"repo '{target}' not registered")
+            target, context, unknown = resolve_run_repos(
+                session, ctx.artifacts.get("repo") or ctx.run.repo,
+                ctx.artifacts.get("task") or ctx.run.title)
+            if unknown:
+                raise RuntimeError(
+                    f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
+            if target is None:
+                raise RuntimeError(
+                    "no repo targeted — mention one with `@RepoName`")
             guidebook = GUIDEBOOK_SEED.read_text(encoding="utf-8") if GUIDEBOOK_SEED.exists() else ""
         finally:
             session.close()
-        ctx.artifacts["repo_row"] = repo
+        ctx.artifacts["repo_row"] = target
+        ctx.artifacts["context_repos"] = context
         ctx.artifacts["guidebook"] = guidebook
 
     async def _investigate(self, ctx: BlueprintContext) -> None:
@@ -63,10 +75,11 @@ class AskBlueprint(Blueprint):
             "Everything is mounted READ-ONLY — do not modify anything."
         )
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         task = ctx.artifacts.get("task") or ctx.run.title
         thread = await thread_manager.spawn(
             ctx.run, persona="researcher", prompt=task, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=[repo],
+            writable_repo=None, context_repos=context,
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
         ctx.artifacts["thread_id"] = thread.id

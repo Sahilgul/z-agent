@@ -78,17 +78,24 @@ class SwarmBlueprint(Blueprint):
 
     # --------------------------------------------------------------- hydrate
     async def _hydrate(self, ctx: BlueprintContext) -> None:
+        from app.services.mentions import resolve_run_repos
         cap = get_settings().global_thread_cap
         session = get_session()
         try:
-            target = ctx.artifacts.get("repo") or ctx.run.repo
-            repo = None
-            if target:
-                repo = session.query(Repo).filter_by(name=target).one_or_none()
-                if repo is None:
-                    raise RuntimeError(f"repo '{target}' not registered")
-            context = ([repo] if repo
-                       else session.query(Repo).filter(Repo.status.in_(RepoStatus.USABLE)).all())
+            # Fleet mode: no target + no @mention -> mount the WHOLE usable
+            # fleet as read-only context (the existing fallback). A target
+            # (explicit repo or @mention) narrows context to the named repos.
+            target, mentioned, unknown = resolve_run_repos(
+                session, ctx.artifacts.get("repo") or ctx.run.repo,
+                ctx.artifacts.get("task") or ctx.run.title)
+            if unknown:
+                raise RuntimeError(
+                    f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
+            repo = target
+            if repo is not None:
+                context = mentioned or [repo]
+            else:
+                context = session.query(Repo).filter(Repo.status.in_(RepoStatus.USABLE)).all()
             mode = session.query(Mode).filter_by(name=ctx.run.mode).one_or_none()
             persona_prompt = mode.persona_prompt if mode else ""
         finally:

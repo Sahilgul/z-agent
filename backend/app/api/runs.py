@@ -344,7 +344,50 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                         ))
                     except Exception:  # WS fanout is best-effort; the row is durable
                         pass
-                await run_manager.nudge_thread(run_id, thread_id, intent.text or "")
+                # Turn-X @mention expansion: a mention that names a repo not
+                # already mounted can't be hot-added (Docker mounts are fixed
+                # at container start), so the thread is replaced-with-resume
+                # — the new container mounts the prior session volume + the
+                # expanded repo set, then the user's message is nudged into
+                # the replacement. Already-mounted mentions skip the restart.
+                nudge_target = thread_id
+                from app.services.mentions import extract_mentions
+                mentioned = extract_mentions(intent.text)
+                if mentioned:
+                    session = get_session()
+                    try:
+                        thread_row = session.get(Thread, thread_id)
+                        mounted = set((thread_row.spawn_context or {}).get("context_repos") or [])
+                        if thread_row and thread_row.repo_scope:
+                            mounted.add(thread_row.repo_scope)
+                        new_names = [n for n in mentioned if n not in mounted]
+                    finally:
+                        session.close()
+                    if new_names:
+                        # Validate the new names against the fleet before
+                        # replacing — an unknown mention is a 422, not a
+                        # silent remount that drops the name.
+                        session = get_session()
+                        try:
+                            from app.db.models.repo import Repo
+                            known = {r.name for r in
+                                     session.query(Repo).filter(Repo.name.in_(new_names)).all()}
+                        finally:
+                            session.close()
+                        unknown = [n for n in new_names if n not in known]
+                        if unknown:
+                            raise HTTPException(
+                                status_code=422,
+                                detail=(f"repo '{unknown[0]}' not registered — "
+                                        "mention a registered repo with `@Name`"))
+                        replacement = await run_manager.remount_thread(
+                            run_id, thread_id, new_names)
+                        nudge_target = replacement.id
+                        # Wait for the replacement's readiness signal before
+                        # nudging — a nudge sent into a still-booting worker
+                        # is lost (the control subscription isn't up yet).
+                        await run_manager._wait_for_heartbeat(nudge_target)
+                await run_manager.nudge_thread(run_id, nudge_target, intent.text or "")
             else:
                 await run_manager.nudge_thread(run_id, thread_id, intent.text or "")
     elif kind == ActionKind.APPROVE_PLAN:

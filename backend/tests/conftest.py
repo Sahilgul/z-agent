@@ -532,11 +532,23 @@ class FakeRunManager:
     async def pin_finding(self, run_id, thread_id, note=""):
         self.pinned.append((run_id, thread_id, note))
 
-    async def kill_replace_thread(self, run_id, thread_id):
+    async def kill_replace_thread(self, run_id, thread_id, extra_context_repo_names=None):
         from app.db.models.thread import Thread
         self.replaced.append((run_id, thread_id))
         return Thread(id=f"replacement-{thread_id}", run_id=run_id, persona="explorer",
                     status="running")
+
+    async def remount_thread(self, run_id, thread_id, extra_repo_names):
+        # Turn-X @mention expansion: delegate to kill_replace_thread so the
+        # fake records the same replaced tuple; return a fresh replacement.
+        from app.db.models.thread import Thread
+        self.replaced.append((run_id, thread_id))
+        return Thread(id=f"replacement-{thread_id}", run_id=run_id, persona="explorer",
+                    status="running")
+
+    async def _wait_for_heartbeat(self, thread_id, timeout_s=20.0, poll_s=0.5):
+        # The fake worker is "ready" immediately — no real Redis to poll.
+        return True
 
     async def switch_mode(self, run_id, mode_name):
         self.switched_modes.append((run_id, mode_name))

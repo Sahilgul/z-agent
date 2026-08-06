@@ -163,6 +163,50 @@ async def test_spawn_resume_from_thread_inherits_session_id(session, make_user, 
     assert captured["session_id"] == "sess-prior-abc"
 
 
+async def test_spawn_persists_context_repos_in_spawn_context(session, make_user, monkeypatch):
+    """A replacement thread (mode switch or turn-X @mention expansion)
+    remounts the exact same repo set the original spawn used. The mount
+    snapshot is stored as names in spawn_context so it survives a session
+    close and replays identically across replacements."""
+    run = _make_run(session, make_user)
+    ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway()
+    lm = ThreadManager(ingest, relay, gw)
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
+                        lambda *a, **k: "container-xyz")
+
+    server = Repo(name="ServerApp", integration_branch="main")
+    client = Repo(name="ClientApp", integration_branch="main")
+    session.add_all([server, client]); session.commit()
+
+    thread = await lm.spawn(run, "researcher", "task", "persona", None,
+                          context_repos=[server, client])
+    session.expire_all()
+    row = session.get(Thread, thread.id)
+    assert row.spawn_context["context_repos"] == ["ServerApp", "ClientApp"]
+
+
+async def test_spawn_with_no_context_repos_stores_empty_list(session, make_user, monkeypatch):
+    """An empty context_repos list still persists (no KeyError on lookup
+    during replacement), and a None-style absence is never produced."""
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
+                        lambda *a, **k: "container-xyz")
+
+    thread = await lm.spawn(run, "researcher", "task", "persona", None, [])
+    session.expire_all()
+    row = session.get(Thread, thread.id)
+    assert row.spawn_context["context_repos"] == []
+
+
 async def test_settle_cost_updates_thread_and_run(session, make_user):
     run = _make_run(session, make_user)
     ingest, relay, gw = _FakeIngest(), _FakeRelay(), _FakeGateway(spend=2.25)

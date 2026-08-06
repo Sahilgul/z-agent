@@ -54,19 +54,27 @@ class DebugBlueprint(Blueprint):
 
     # --------------------------------------------------------------- hydrate
     async def _hydrate(self, ctx: BlueprintContext) -> None:
+        from app.services.mentions import resolve_run_repos
         session = get_session()
         try:
             run = session.get(Run, ctx.run.id)
-            repo_name = (run.repo if run else None) or ctx.artifacts.get("repo") or "ServerApp"
-            repo = session.query(Repo).filter_by(name=repo_name).one_or_none()
-            if repo is None:
-                raise RuntimeError(f"repo '{repo_name}' not registered")
+            target, context, unknown = resolve_run_repos(
+                session, ctx.artifacts.get("repo") or (run.repo if run else None),
+                ctx.artifacts.get("task") or ctx.run.title)
+            if unknown:
+                raise RuntimeError(
+                    f"repo '{unknown[0]}' not registered — mention a registered repo with `@Name`")
+            if target is None:
+                raise RuntimeError(
+                    "no repo targeted — mention one with `@RepoName`")
+            repo = target
             # Read the profile's test_cmds while the session is open (profile is
             # a lazy relationship; reproduce runs after this session closes).
             test_cmds = list(repo.profile.test_cmds) if repo.profile and repo.profile.test_cmds else None
             # The repro signal is the run title (or the ADO work item title when present).
             repro = run.title or ctx.artifacts.get("task") or "failing test"
             ctx.artifacts["repo_row"] = repo
+            ctx.artifacts["context_repos"] = context
             ctx.artifacts["repro_signal"] = repro
             ctx.artifacts["test_cmds"] = test_cmds
             ctx.run = run
@@ -106,6 +114,7 @@ class DebugBlueprint(Blueprint):
     async def _diagnose(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         repro = ctx.artifacts.get("repro_signal", "")
         confirmed = ctx.artifacts.get("failure_confirmed")
         prompt = (f"Repro signal: {repro}\nFailure confirmed by control plane: {confirmed}.\n"
@@ -115,7 +124,7 @@ class DebugBlueprint(Blueprint):
                                           "the failure, then isolate the root cause.")
         thread = await thread_manager.spawn(
             ctx.run, persona="debugger", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=[repo],
+            writable_repo=None, context_repos=context,
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
         )
         ctx.artifacts["diagnose_thread_id"] = thread.id
@@ -134,6 +143,7 @@ class DebugBlueprint(Blueprint):
     async def _propose(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
         repo: Repo = ctx.artifacts["repo_row"]
+        context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         diagnosis = ctx.artifacts.get("diagnosis", "")
         prompt = (f"Root-cause diagnosis:\n{diagnosis}\n\nPropose a fix as a structured "
                   "Plan (one or two steps) that the human can promote to a plan run.")
@@ -141,7 +151,7 @@ class DebugBlueprint(Blueprint):
                                             "fix." + PROPOSAL_SCHEMA_HINT)
         thread = await thread_manager.spawn(
             ctx.run, persona="fixer", prompt=prompt, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=[repo],
+            writable_repo=None, context_repos=context,
         )
         ctx.artifacts["propose_thread_id"] = thread.id
         await self._await_thread(thread.id)

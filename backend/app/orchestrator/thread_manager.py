@@ -109,6 +109,12 @@ class ThreadManager:
             spawn_context={"prompt": prompt, "persona_prompt": persona_prompt,
                            "resume_session": resume_session,
                            "mode": run.mode,
+                           # Mount snapshot: a replacement thread (mode switch or
+                           # turn-X @mention expansion) remounts the exact same
+                           # repo set, plus any newly-mentioned repos the caller
+                           # unions in. Names, not ORM rows — survives a session
+                           # close and replays identically across replacements.
+                           "context_repos": [r.name for r in context_repos],
                            **({"preserve_workspace": True} if preserve_workspace else {}),
                            **({"resume_from_thread_id": resume_from_thread_id}
                               if resume_from_thread_id else {})},
