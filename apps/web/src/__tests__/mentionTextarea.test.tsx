@@ -68,7 +68,7 @@ describe("MentionTextarea", () => {
   });
 
   it("opens the dropdown on @ with the full fleet", async () => {
-    const { textarea } = setup(undefined, "@");
+    setup(undefined, "@");
     // The dropdown renders after the @ is typed and the query resolves.
     expect(await screen.findByRole("listbox")).toBeTruthy();
     expect(screen.getByText("ServerApp")).toBeTruthy();
@@ -77,7 +77,7 @@ describe("MentionTextarea", () => {
   });
 
   it("substring-filters the dropdown as the user types", async () => {
-    const { textarea } = setup(undefined, "@bill");
+    setup(undefined, "@bill");
     const listbox = await screen.findByRole("listbox");
     // Only Billing-Engine matches "bill" (case-insensitive).
     expect(listbox.textContent).toContain("Billing-Engine");
