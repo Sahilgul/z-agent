@@ -28,7 +28,10 @@ class ApprovalBridge:
         self.run_id = run_id
         self.thread_id = thread_id
         self.timeout_seconds = timeout_seconds
-        self.always_allowed: set[str] = set()  # "Always Allow" persists the tool class for the run
+        # In-memory fast path only — the source of truth is the Redis set
+        # always_allow:{run_id} (per-run, shared across the run's threads and
+        # surviving container replacement), matching the engine gate contract.
+        self.always_allowed: set[str] = set()
 
     async def ask(self, tool_name: str, tool_input: dict, context) -> dict:
         """Signature matches the SDK can_use_tool callback; returns a PermissionResult."""
@@ -45,6 +48,10 @@ class ApprovalBridge:
         assert isinstance(context, ToolPermissionContext)
 
         if tool_name in AUTO_ALLOW_TOOLS or tool_name in self.always_allowed:
+            return PermissionResultAllow(updated_input=tool_input)
+        members = await self.redis.smembers(f"always_allow:{self.run_id}")
+        if tool_name in set(members):
+            self.always_allowed.add(tool_name)
             return PermissionResultAllow(updated_input=tool_input)
 
         approval_id = str(uuid.uuid4())
@@ -81,6 +88,7 @@ class ApprovalBridge:
             return PermissionResultDeny(message="malformed decision payload — denied")
         if decision.get("decision") == "always_allow":
             self.always_allowed.add(tool_name)
+            await self.redis.sadd(f"always_allow:{self.run_id}", tool_name)
             return PermissionResultAllow(updated_input=tool_input)
         if decision.get("decision") in ("allow", "allow_once"):
             return PermissionResultAllow(updated_input=tool_input)
