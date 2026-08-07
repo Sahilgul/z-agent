@@ -1,7 +1,7 @@
-/* Collegium service worker — app-shell cache only. API + WS traffic is ALWAYS
-   network (a stale run state is worse than no run state). */
-const SHELL = "collegium-shell-v2";
-const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
+/* Collegium service worker — app-shell cache for offline boot only. API + WS
+   traffic is ALWAYS network (a stale run state is worse than no run state). */
+const SHELL = "collegium-shell-v3";
+const ASSETS = ["/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(ASSETS)));
@@ -24,6 +24,24 @@ self.addEventListener("fetch", (e) => {
     ["/auth", "/runs", "/lanes", "/sessions", "/repos", "/modes",
      "/hydration", "/approvals", "/team", "/health"].some((p) => url.pathname.startsWith(p));
   if (isApi || e.request.method !== "GET") return; // network, untouched
+  // index.html / navigations are NETWORK-FIRST: they were cache-first, so a
+  // redeploy left the browser running the previous bundle (with yesterday's
+  // bugs) until the SW happened to update. Cache is now only an offline
+  // fallback — new deploys reach users on the next load, no hard refresh.
+  if (e.request.mode === "navigate" || url.pathname === "/" || url.pathname === "/index.html") {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(SHELL).then((c) => c.put(e.request, copy));
+          return res;
+        })
+        .catch(() => caches.match(e.request).then((hit) => hit || caches.match("/index.html")))
+    );
+    return;
+  }
+  // Hashed build assets (/assets/index-<hash>.js) are immutable — cache-first
+  // is safe and keeps repeat loads instant.
   e.respondWith(
     caches.match(e.request).then((hit) => hit || fetch(e.request))
   );
