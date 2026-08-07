@@ -36,7 +36,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -329,7 +329,7 @@ class GoalBlueprint(Blueprint):
         repo: Repo = ctx.artifacts["repo_row"]
         citations = PlanBlueprint._collect_citations(draft_json)
         lint_report = PlanBlueprint._lint_citations(repo.name, citations)
-        from zagent_contracts import Plan as PlanContract
+        from collegium_contracts import Plan as PlanContract
         plan_contract = PlanContract.model_validate(draft_json)
         structured = dict(draft_json)
         structured["blast_radius"] = ctx.artifacts.get("blast_radius", structured.get("blast_radius", []))

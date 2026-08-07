@@ -116,7 +116,7 @@ class ApprovalGate:
         """Emit the approval-card StepEvent (Phase 1 preview)."""
         if self._event_sink is None:
             return
-        from zagent_contracts import StepEvent, StepKind
+        from collegium_contracts import StepEvent, StepKind
         event = StepEvent(
             run_id=self.run_id, thread_id=self.thread_id, context_id=self.thread_id,
             seq=0,  # the runner's emitter allocates the real seq; this is a signal

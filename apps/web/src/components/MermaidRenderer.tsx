@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
  *  out of sessions that never emit a diagram.
  *
  *  Themed native (not pasted-in): `theme: "base"` + themeVariables mapped to
- *  our tokens so the SVG looks like z-agent drew it. `securityLevel: "strict"`
+ *  our tokens so the SVG looks like Collegium drew it. `securityLevel: "strict"`
  *  because agent-generated diagrams are untrusted content.
  *
  *  Graceful fallback: a parse error or a thrown render renders the raw source

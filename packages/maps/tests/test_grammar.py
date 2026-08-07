@@ -1,11 +1,11 @@
-"""Tests for the canonical grammar module (zagent_maps.grammar)."""
+"""Tests for the canonical grammar module (collegium_maps.grammar)."""
 
 from __future__ import annotations
 
 import json
 
-from zagent_maps import grammar as g
-from zagent_maps.grammar import (
+from collegium_maps import grammar as g
+from collegium_maps.grammar import (
     SCHEMA_VERSION,
     Edge,
     HotFile,

@@ -1,6 +1,6 @@
 # Multi-Actor Contracts — the spec that must come first (Plan Phase 3)
 
-The z-agent harness has multiple actors touching the same workspace and the
+The Collegium harness has multiple actors touching the same workspace and the
 same conversation. This spec defines who can do what, when, and how conflicts
 are detected. Getting this wrong means silent corruption (two agents editing
 the same file, a human approving a tool call that targets a different file

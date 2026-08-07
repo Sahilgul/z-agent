@@ -24,7 +24,7 @@ export function MobileTabBar() {
   return (
     <nav
       aria-label="mobile primary"
-      className="z-rail hidden max-[700px]:flex max-[700px]:h-[56px] max-[700px]:flex-none max-[700px]:border-t max-[700px]:border-hairline max-[700px]:bg-bg-panel"
+      className="z-rail hidden max-[700px]:flex max-[700px]:h-[calc(56px+env(safe-area-inset-bottom))] max-[700px]:flex-none max-[700px]:border-t max-[700px]:border-hairline max-[700px]:bg-bg-panel max-[700px]:pb-[env(safe-area-inset-bottom)]"
     >
       {TABS.map((tab) => (
         <NavLink

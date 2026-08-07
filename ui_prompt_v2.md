@@ -7,7 +7,7 @@ system below — do not throw it away and start over. The archetype, color,
 type, layout, signature, and motion decisions in DESIGN.md are good and
 stay; only the *styling-system* layer changes.
 
-I'm treating zagent as a serious product. The current frontend of
+I'm treating collegium as a serious product. The current frontend of
 `apps/web` is poor — it does not look like a real, shippable SaaS product.
 I want an elite, aesthetically deliberate frontend that could be launched
 after maturing. This is a full redesign, not a tweak.
@@ -15,8 +15,8 @@ after maturing. This is a full redesign, not a tweak.
 ## Product (read the code first, don't guess)
 - Path: `apps/web` (React 18 + Vite + TypeScript + Zustand,
   react-resizable-panels, react-markdown, Capacitor for mobile).
-- It's an AI-agent fleet console: "Route the fleet". Operator-facing,
-  data-dense, live-updating. Not a marketing site.
+- It's an AI-agent fleet console: "a legion of swarm agents, moving as one".
+  Operator-facing, data-dense, live-updating. Not a marketing site.
 - Screens today: inbox, monitor, approvals, knowledge, ideas,
   patrol (proposals), costs (dashboard), repos, team.
 - State: Zustand stores in `src/stores`. API/WS in `src/lib`.

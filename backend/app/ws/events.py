@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 def _authenticate(websocket: WebSocket) -> User | None:
-    token = websocket.cookies.get("zagent_token")
+    token = websocket.cookies.get("collegium_token")
     if not token:
         return None
     try:

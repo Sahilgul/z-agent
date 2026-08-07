@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.models.event import Event
 from app.db.models.mode import Mode

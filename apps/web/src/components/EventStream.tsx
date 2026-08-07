@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { CodeView, langFromPath } from "./CodeView";
@@ -36,9 +36,29 @@ const KIND_RAIL: Record<string, string> = {
 const BODY =
   "mt-1 max-h-[220px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.5] text-ink-primary";
 
+/** EXPERIMENTAL turn separator: a whisper-faint rule drawn BETWEEN turns —
+ *  i.e. only where a new user message follows completed work — never inside
+ *  a message (`---` in prose renders as spacing, see Markdown's hr override).
+ *  Deliberately ghost/40: visible when you look for the boundary, invisible
+ *  when you're reading. Tune or drop after the experiment. */
+function TurnDivider() {
+  return (
+    <div
+      data-testid="turn-divider"
+      aria-hidden="true"
+      className="my-s5 h-px w-full bg-ink-ghost/40"
+    />
+  );
+}
+
 /** Trace kinds whose payload is file content — rendered as VS Code-themed
  *  code instead of raw text. Commands stay raw: the terminal look is right. */
 const CODE_KINDS = new Set(["file_read", "file_edit"]);
+
+/** How close to the bottom (px) counts as "following the stream" — same
+ *  reader tolerance as Feed's M-77. Beyond it the user is reading history
+ *  and the pane must not yank them down on new content. */
+const NEAR_BOTTOM_PX = 120;
 
 /** Language for a code trace row: an edit carrying a unified diff highlights
  *  as diff (green/red lines); everything else resolves from the file path —
@@ -112,7 +132,12 @@ function Bubble({ role, body, ts, durationS }: {
   );
 }
 
-function Item({ item }: { item: StreamItem }) {
+/** Memoized per item content, not identity: foldStream rebuilds item objects
+ *  on every render, so without a field-wise comparator every historical card
+ *  (and its Markdown parse + Prism highlight) re-rendered on every streamed
+ *  token — the steady-state flicker under a growing bubble. */
+const Item = memo(
+  function Item({ item }: { item: StreamItem }) {
   // H-58: a streaming message (live) used to fall through to the rail-row
   // branch and only became a Bubble once `live` flipped false — so the pane
   // showed a one-line rail entry that snapped into a chat bubble mid-stream.
@@ -160,7 +185,20 @@ function Item({ item }: { item: StreamItem }) {
       )}
     </div>
   );
-}
+  },
+  (a, b) =>
+    a.item.kind === b.item.kind &&
+    a.item.title === b.item.title &&
+    a.item.text === b.item.text &&
+    a.item.ok === b.item.ok &&
+    a.item.live === b.item.live &&
+    a.item.ts === b.item.ts &&
+    a.item.role === b.item.role &&
+    a.item.durationS === b.item.durationS &&
+    // Stored events keep stable detail references across folds (the store
+    // appends; it never mutates an event in place), so identity works here.
+    a.item.detail === b.item.detail,
+);
 
 export function EventStream({
   events,
@@ -179,9 +217,16 @@ export function EventStream({
   promptTs?: string | null;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
-  const filtered = laneFilter ? events.filter((e) => e.thread_id === laneFilter) : events;
-  const filteredDeltas = laneFilter ? deltas.filter((d) => d.thread_id === laneFilter) : deltas;
-  const items = foldStream(filtered, filteredDeltas);
+  // foldStream re-runs per token; keying the memo on the RAW store slices
+  // (stable references between renders) keeps the fold itself off the
+  // per-token path when a sibling state change re-renders this pane.
+  const items = useMemo(
+    () => foldStream(
+      laneFilter ? events.filter((e) => e.thread_id === laneFilter) : events,
+      laneFilter ? deltas.filter((d) => d.thread_id === laneFilter) : deltas,
+    ),
+    [events, deltas, laneFilter],
+  );
 
   // scrollIntoView walks up and scrolls every ancestor — including the
   // overflow:hidden shell and the document — which drags the whole app
@@ -189,17 +234,51 @@ export function EventStream({
   // Key on total content length, not items.length: a streaming message
   // grows its text without adding a new item, so items.length alone misses
   // mid-stream growth and the pane never follows the live bubble.
+  //
+  // "smooth" is reserved for a NEW item landing. Growth ticks fire per token
+  // (20-50/sec) and each call would restart the smooth animation toward a
+  // stale target — the constant cancel/restart was the visible pane flicker
+  // ("blink blink") during streaming. Growth scrolls instantly instead.
+  //
+  // Stick-to-bottom (Cursor-style): the pane follows the stream ONLY while
+  // the user is already near the bottom. A reader who scrolled up is left
+  // alone — the stream waits, they scroll back when they're done. The one
+  // exception: the user's own just-sent message always jumps to the bottom,
+  // because sending implies they want to watch the reply land.
   const streamTick = items.reduce((n, i) => n + i.text.length, 0);
+  const prevCount = useRef(0);
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const firstPaint = prevCount.current === 0;
+    const landed = items.length !== prevCount.current;
+    prevCount.current = items.length;
+    const last = items[items.length - 1];
+    const ownMessageLanded = landed && last?.kind === "message" && last?.role === "user";
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom > NEAR_BOTTOM_PX && !ownMessageLanded) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: firstPaint || !landed ? "auto" : "smooth" });
   }, [streamTick, items.length]);
+
+  // The pane shrinks when the composer grows (auto-sizing textarea, mobile
+  // keyboard). If the user is pinned to the bottom, re-pin after the resize
+  // instead of leaving a strip of half-cut text above the composer.
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div
       ref={logRef}
-      className="h-full overflow-x-hidden overflow-y-auto overscroll-contain px-s4 py-s3 text-[13px]"
+      className="scroll-fade-b h-full overflow-x-hidden overflow-y-auto overscroll-contain px-s4 pt-s3 pb-[8vh] text-[13px]"
       data-testid="event-stream"
       role="log"
       aria-live="polite"
@@ -212,8 +291,13 @@ export function EventStream({
           no trace yet — the agent's first step lands here
         </div>
       )}
-      {items.map((i) => (
-        <Item key={i.key} item={i} />
+      {items.map((i, idx) => (
+        <Fragment key={i.key}>
+          {/* A fresh user message closes the previous turn — mark the seam.
+              The opening turn (first item, no prompt above) stays unmarked. */}
+          {(idx > 0 || prompt) && i.kind === "message" && i.role === "user" && <TurnDivider />}
+          <Item item={i} />
+        </Fragment>
       ))}
       <span className="sr-only" aria-live="polite">
         {items.length} events

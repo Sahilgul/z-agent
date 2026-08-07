@@ -15,29 +15,29 @@ from pathlib import Path
 from typing import Any
 
 # ---- env MUST be set before importing app.* (app.db.base builds engine at import)
-os.environ.setdefault("ZAGENT_DB_URL", "sqlite:///:memory:")
-os.environ.setdefault("ZAGENT_REDIS_URL", "redis://localhost:6379/0")
-os.environ.setdefault("ZAGENT_GATEWAY_URL", "http://gateway.test")
-os.environ.setdefault("ZAGENT_LITELLM_MASTER_KEY", "test-master-key")
-os.environ.setdefault("ZAGENT_WORKER_REDIS_URL", "redis://redis:6379/0")
-os.environ.setdefault("ZAGENT_WORKER_GATEWAY_URL", "http://gateway:4000")
-os.environ.setdefault("ZAGENT_WORKER_IMAGE", "zagent-worker:test")
-os.environ.setdefault("ZAGENT_JWT_SECRET", "test-jwt-secret")
-os.environ.setdefault("ZAGENT_ADMIN_USERNAMES", "sahil")
-os.environ.setdefault("ZAGENT_ADO_ORG", "testorg")
-os.environ.setdefault("ZAGENT_ADO_PROJECT", "testproj")
-os.environ.setdefault("ZAGENT_FETCH_PAT", "fetch-pat")
-os.environ.setdefault("ZAGENT_FLEET_PAT", "fleet-pat")
-os.environ.setdefault("ZAGENT_BYO_PAT_ENCRYPTION_KEY", "test-byo-pat-key")  # H-44
-os.environ.setdefault("ZAGENT_GLOBAL_LANE_CAP", "12")
-os.environ.setdefault("ZAGENT_DEFAULT_LANE_BUDGET_USD", "5.0")
+os.environ.setdefault("COLLEGIUM_DB_URL", "sqlite:///:memory:")
+os.environ.setdefault("COLLEGIUM_REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("COLLEGIUM_GATEWAY_URL", "http://gateway.test")
+os.environ.setdefault("COLLEGIUM_LITELLM_MASTER_KEY", "test-master-key")
+os.environ.setdefault("COLLEGIUM_WORKER_REDIS_URL", "redis://redis:6379/0")
+os.environ.setdefault("COLLEGIUM_WORKER_GATEWAY_URL", "http://gateway:4000")
+os.environ.setdefault("COLLEGIUM_WORKER_IMAGE", "collegium-worker:test")
+os.environ.setdefault("COLLEGIUM_JWT_SECRET", "test-jwt-secret")
+os.environ.setdefault("COLLEGIUM_ADMIN_USERNAMES", "sahil")
+os.environ.setdefault("COLLEGIUM_ADO_ORG", "testorg")
+os.environ.setdefault("COLLEGIUM_ADO_PROJECT", "testproj")
+os.environ.setdefault("COLLEGIUM_FETCH_PAT", "fetch-pat")
+os.environ.setdefault("COLLEGIUM_FLEET_PAT", "fleet-pat")
+os.environ.setdefault("COLLEGIUM_BYO_PAT_ENCRYPTION_KEY", "test-byo-pat-key")  # H-44
+os.environ.setdefault("COLLEGIUM_GLOBAL_LANE_CAP", "12")
+os.environ.setdefault("COLLEGIUM_DEFAULT_LANE_BUDGET_USD", "5.0")
 
-_TMP_ROOT = Path(tempfile.mkdtemp(prefix="zagent-test-"))
-os.environ.setdefault("ZAGENT_GOLDEN_DIR", str(_TMP_ROOT / "golden"))
-os.environ.setdefault("ZAGENT_SESSIONS_DIR", str(_TMP_ROOT / "sessions"))
-os.environ.setdefault("ZAGENT_WORKSPACES_DIR", str(_TMP_ROOT / "workspaces"))
+_TMP_ROOT = Path(tempfile.mkdtemp(prefix="collegium-test-"))
+os.environ.setdefault("COLLEGIUM_GOLDEN_DIR", str(_TMP_ROOT / "golden"))
+os.environ.setdefault("COLLEGIUM_SESSIONS_DIR", str(_TMP_ROOT / "sessions"))
+os.environ.setdefault("COLLEGIUM_WORKSPACES_DIR", str(_TMP_ROOT / "workspaces"))
 # fleet-config: real read-only local fixtures
-os.environ.setdefault("ZAGENT_FLEET_CONFIG_DIR", str(Path(__file__).resolve().parents[2] / "fleet-config"))
+os.environ.setdefault("COLLEGIUM_FLEET_CONFIG_DIR", str(Path(__file__).resolve().parents[2] / "fleet-config"))
 
 import pytest  # noqa: E402
 from sqlalchemy import create_engine, DateTime  # noqa: E402
@@ -175,7 +175,7 @@ def _no_knowledge_block(monkeypatch):
 # otherwise rebuild Settings with the default ./transcripts path.
 @pytest.fixture(autouse=True)
 def _isolated_transcripts(monkeypatch, tmp_path):
-    monkeypatch.setenv("ZAGENT_TRANSCRIPTS_DIR", str(tmp_path / "transcripts"))
+    monkeypatch.setenv("COLLEGIUM_TRANSCRIPTS_DIR", str(tmp_path / "transcripts"))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -449,7 +449,7 @@ class FakeRunManager:
                          work_item_id=None, autonomy=None, fanout=None, delivery_id=None):
         from app.db.base import get_session
         from app.services.runs import transition
-        from zagent_contracts import RunStage
+        from collegium_contracts import RunStage
         run = Run(id=str(uuid.uuid4()), created_by=initiated_by, source=source,
                   mode=mode_name, autonomy=autonomy or "supervised", title=task[:256],
                   repo=repo, work_item_id=work_item_id, delivery_id=delivery_id)
@@ -490,7 +490,7 @@ class FakeRunManager:
         from app.db.base import get_session
         from app.db.models.run import Run as _Run
         from app.services.runs import transition
-        from zagent_contracts import RunStage
+        from collegium_contracts import RunStage
         forwarded = {}
         session = get_session()
         try:
@@ -694,7 +694,7 @@ def make_token(user: User) -> str:
 def auth_client(app_client, auth_user):
     client, app, services = app_client
     token = make_token(auth_user)
-    client.cookies.set("zagent_token", token)
+    client.cookies.set("collegium_token", token)
     return client, app, services, auth_user
 
 
@@ -702,7 +702,7 @@ def auth_client(app_client, auth_user):
 def admin_client(app_client, admin_user):
     client, app, services = app_client
     token = make_token(admin_user)
-    client.cookies.set("zagent_token", token)
+    client.cookies.set("collegium_token", token)
     return client, app, services, admin_user
 
 

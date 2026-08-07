@@ -2,7 +2,7 @@
 import sqlite3
 from pathlib import Path
 
-db = Path(__file__).resolve().parents[1] / "backend" / "data" / "zagent.db"
+db = Path(__file__).resolve().parents[1] / "backend" / "data" / "collegium.db"
 if not db.exists():
     print(f"NO DEV DB at {db}")
     raise SystemExit(0)

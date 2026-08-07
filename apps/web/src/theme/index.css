@@ -1,8 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Cursor-style soft lower boundary for scroll panes: streamed text dissolves
+   into the gap above the composer instead of being guillotined by a hard edge.
+   The mask is pinned to the pane's box, so content fades as it scrolls past. */
+@utility scroll-fade-b {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 44px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 44px), transparent 100%);
+}
+
 /* ==========================================================================
-   zagent console theme — DESIGN.md contract as Tailwind v4 @theme tokens.
+   collegium console theme — DESIGN.md contract as Tailwind v4 @theme tokens.
    Locked brand palette; shadcn semantic colors rebound (no zinc defaults).
    ========================================================================== */
 @theme {
@@ -117,6 +125,12 @@
   body,
   #root {
     height: 100%;
+    /* 100% resolves against the LARGE viewport on mobile — with browser
+       chrome (or the Android edge-to-edge nav bar) showing, the shell ends up
+       taller than the visible area and its bottom (tab bar, composer) sits
+       below the fold, unreachable because overflow is hidden. 100dvh tracks
+       the visible viewport; engines without dvh keep the 100% fallback. */
+    height: 100dvh;
     /* The app is a fixed-height shell: only designated panes scroll. Without
        this a tall pane spills past 100% and scrolls the DOCUMENT, dragging the
        side rail and header out of view alongside it. */

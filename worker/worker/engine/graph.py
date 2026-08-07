@@ -42,7 +42,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, StateGraph
 from langgraph.types import interrupt
-from zagent_contracts import StepEvent, StepKind, TypingDelta
+from collegium_contracts import StepEvent, StepKind, TypingDelta
 
 from worker.engine.compaction import Compactor
 from worker.engine.events import EventEmitter
@@ -200,6 +200,25 @@ def _bound_tools(state: EngineState, mode: str) -> list[Any]:
 
 # --- The agent node ---
 
+# Model-side arg aliases observed in the wild: terminal_exec arrives with
+# `cmd` (other harnesses' schema) instead of the bound schema's `command`.
+# Normalized ONCE at the model edge so every downstream reader — the approval
+# card, permission rulesets, stream titles, execution — sees the canonical
+# key. Values stay verbatim; unknown extra keys (timeout_ms) pass through.
+_TOOL_ARG_ALIASES: dict[str, dict[str, str]] = {"terminal_exec": {"cmd": "command"}}
+
+
+def _normalize_tool_call_args(message: AIMessage) -> None:
+    for tc in getattr(message, "tool_calls", None) or []:
+        aliases = _TOOL_ARG_ALIASES.get(tc.get("name", ""))
+        args = tc.get("args")
+        if not aliases or not isinstance(args, dict):
+            continue
+        for alias, canonical in aliases.items():
+            if canonical not in args and isinstance(args.get(alias), str):
+                args[canonical] = args.pop(alias)
+
+
 async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, Any]:
     """Call the LLM with mode-bound tools; stream deltas; collect the AIMessage;
     account usage into the budget; fire budget reminders."""
@@ -254,6 +273,8 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
 
     if ai_message is None:
         return {"error": "no response from LLM", "done": True}
+
+    _normalize_tool_call_args(ai_message)
 
     if metrics:
         metrics.observe("llm_call_latency_s", time.monotonic() - llm_started)

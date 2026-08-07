@@ -3,7 +3,7 @@ import json
 import uuid
 
 import pytest
-from zagent_contracts import StepEvent, StepKind
+from collegium_contracts import StepEvent, StepKind
 
 import app.db.base as db_base
 from app.db.models.event import Event

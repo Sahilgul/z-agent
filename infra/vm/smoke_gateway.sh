@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 # shellcheck disable=SC1091
 source .env
 
-NET="${GATEWAY_NETWORK:-zagent_internal}"
+NET="${GATEWAY_NETWORK:-collegium_internal}"
 MODEL="${GATEWAY_MODEL:-kimi-foundry}"
 CURL_IMAGE="curlimages/curl:8.11.1"
 MSG='{"role":"user","content":"say ok"}'

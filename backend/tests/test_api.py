@@ -121,7 +121,7 @@ def test_first_login_success(app_client, session, make_user):
     body = r.json()
     assert body["username"] == "newbie"
     assert body["first_run"] is True
-    assert "zagent_token" in r.cookies
+    assert "collegium_token" in r.cookies
     session.expire_all()
     fresh = session.get(User, u.id)
     assert fresh.status == "active"
@@ -1375,7 +1375,7 @@ def test_webhook_rejects_bad_signature(app_client, monkeypatch):
     from app.core.config import get_settings
     client, _, _ = app_client
     monkeypatch.setattr(get_settings(), "ado_webhook_secret", "s3cret")
-    r = client.post("/webhooks/ado", content=b"{}", headers={"X-Zagent-Signature": "bad"})
+    r = client.post("/webhooks/ado", content=b"{}", headers={"X-Collegium-Signature": "bad"})
     assert r.status_code == 401
     # no header at all is also a rejection (fail-closed)
     assert client.post("/webhooks/ado", content=b"{}").status_code == 401
@@ -1390,16 +1390,16 @@ def test_webhook_full_ingress_starts_run(app_client, session, make_user, monkeyp
     u.ado_descriptor = "desc-ali"
     u.status = "active"
     session.add(Trigger(name="plan-on-state", source="ado_webhook",
-                        filter_json={"event_type": "work_item.updated", "state": "zagent-plan"},
+                        filter_json={"event_type": "work_item.updated", "state": "collegium-plan"},
                         mode="plan", autonomy="gated"))
     session.commit()
     import json as _json
     payload = _json.dumps({"resource": {"workItemId": 42, "rev": 1,
                                         "revisedBy": {"id": "desc-ali"},
-                                        "fields": {"System.State": {"newValue": "zagent-plan"},
+                                        "fields": {"System.State": {"newValue": "collegium-plan"},
                                                    "System.Title": {"newValue": "hook task"}}}}).encode()
     r = client.post("/webhooks/ado", content=payload,
-                    headers={"X-Zagent-Signature": _ado_hook(payload, "s3cret")})
+                    headers={"X-Collegium-Signature": _ado_hook(payload, "s3cret")})
     assert r.status_code == 200
     assert r.json()["status"] == "matched"
     assert "hook task" in services["run_manager"].created[0]["task"]

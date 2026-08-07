@@ -12,7 +12,7 @@ import json
 import time
 
 import redis.asyncio as redis
-from zagent_contracts import StepEvent, TypingDelta
+from collegium_contracts import StepEvent, TypingDelta
 
 
 class Forwarder:

@@ -1,5 +1,5 @@
 import pytest
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.models.run import Run
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node

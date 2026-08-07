@@ -8,7 +8,7 @@ critique (agentic critic thread, FRESH thread/session): gets the draft Plan JSON
            instructions to verify file/symbol claims via read-only grep on the
            mounted golden repos.
 present  (deterministic): parse+validate the Plan JSON with contracts.Plan, lint
-           every file/symbol citation through zagent_maps lint against the golden
+           every file/symbol citation through collegium_maps lint against the golden
            repo dir (drifted citations flagged in the Plan row's structured
            payload, never crash on lint failure), persist Plan + PlanStep rows,
            transition the run to awaiting_approval.
@@ -20,7 +20,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.ado.client import AdoClient
 from app.core.fleet import get_fleet_config
@@ -185,7 +185,7 @@ class PlanBlueprint(Blueprint):
         repo: Repo = ctx.artifacts["repo_row"]
         citations = self._collect_citations(draft_json)
         lint_report = self._lint_citations(repo.name, citations)
-        from zagent_contracts import Plan as PlanContract
+        from collegium_contracts import Plan as PlanContract
         plan_contract = PlanContract.model_validate(draft_json)
         structured = dict(draft_json)
         structured["blast_radius"] = ctx.artifacts.get("blast_radius", structured.get("blast_radius", []))
@@ -312,13 +312,13 @@ class PlanBlueprint(Blueprint):
         try:
             from app.core.config import get_settings
             repo_root = get_settings().golden_dir / repo_name
-            # Check the golden dir BEFORE importing zagent_maps — the skip
+            # Check the golden dir BEFORE importing collegium_maps — the skip
             # path (golden repo not on disk) must not depend on the maps
             # package being installed, and the heavy import shouldn't run
             # when there's nothing to lint against.
             if not repo_root.exists():
                 return {"repo": repo_name, "skipped": "golden repo not on disk", "total": len(citations)}
-            from zagent_maps.lint import lint
+            from collegium_maps.lint import lint
             report = lint(str(repo_root), citations)
             return report.as_dict()
         except Exception as exc:

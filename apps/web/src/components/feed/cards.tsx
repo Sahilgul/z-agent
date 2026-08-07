@@ -85,10 +85,12 @@ export function RecapCard({ detail }: { detail: Record<string, unknown> }) {
 
 /** What the human is actually approving: a shell command gets the terminal
  *  treatment, a file edit/write gets its verbatim preview, anything else gets
- *  pretty-printed JSON — never the compact `{"command": …}` wire dump. */
+ *  pretty-printed JSON — never the compact `{"command": …}` wire dump.
+ *  `cmd` rides alongside `command`: models habitually emit other harnesses'
+ *  key, and pre-normalization transcripts have it persisted in the payload. */
 function ApprovalBody({ detail }: { detail: Record<string, unknown> }) {
   const args = (detail.args ?? {}) as Record<string, unknown>;
-  const command = typeof args.command === "string" ? args.command : null;
+  const command = [args.command, args.cmd].find((v): v is string => typeof v === "string") ?? null;
   const preview = typeof detail.preview === "string" ? detail.preview : null;
   if (command) {
     return (

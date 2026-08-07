@@ -1,5 +1,5 @@
 """triggers + trigger_events — triggers-as-data. ADO state vocabulary
-(zagent-plan/zagent-dev/zagent-review) lives in ROW FILTERS, never in code; a new
+(collegium-plan/collegium-dev/collegium-review) lives in ROW FILTERS, never in code; a new
 state is config, a new source is one new normalizer. trigger_events is the
 idempotency/dedupe log: (source, external_id, revision) unique.
 """

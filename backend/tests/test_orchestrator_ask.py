@@ -1,7 +1,7 @@
 import asyncio
 
 import pytest
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.models.thread import Thread
 from app.db.models.mode import Mode

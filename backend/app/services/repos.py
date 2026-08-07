@@ -144,7 +144,7 @@ async def onboard(repo_id: int, relay=None) -> None:
             )
             if clone.returncode != 0:
                 raise OnboardingError(f"clone failed — {clone.stderr[:200]}")
-        helper = str(settings.fleet_config_dir.parent / "scripts" / "git-credential-zagent")
+        helper = str(settings.fleet_config_dir.parent / "scripts" / "git-credential-collegium")
         auth = base64.b64encode(f":{settings.fetch_pat}".encode()).decode()
         for args in (
             ["config", "credential.helper", ""],

@@ -1,6 +1,6 @@
 {
-  "name": "Zagent",
-  "short_name": "Zagent",
+  "name": "Collegium",
+  "short_name": "Collegium",
   "description": "Autonomous engineering platform — org-agnostic, adoptable against any set of repositories",
   "start_url": "/app",
   "display": "standalone",

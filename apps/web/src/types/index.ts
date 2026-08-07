@@ -1,4 +1,4 @@
-/** Hand-mirrors of zagent_contracts (packages/contracts) — keep in sync. */
+/** Hand-mirrors of collegium_contracts (packages/contracts) — keep in sync. */
 
 export type RunStage =
   | "queued" | "provisioning" | "investigating" | "planning" | "awaiting_user"

@@ -1,6 +1,6 @@
 // Citation linter (TypeScript half) — drift detection for agent file:line citations.
 //
-// Mirrors the Python linter in `packages/maps/src/zagent_maps/lint.py`. Verifies
+// Mirrors the Python linter in `packages/maps/src/collegium_maps/lint.py`. Verifies
 // that an agent's `path:line` / `path:line-line` citations actually exist in the
 // repo right now: file exists, line number in range, and (best effort) the
 // cited line is not empty/whitespace-only. Pure stdlib (node:fs), never throws

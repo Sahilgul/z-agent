@@ -100,7 +100,7 @@ def test_record_success_resets(session, make_user):
 
 def _req(token: str | None):
     from fastapi import Request
-    headers = [(b"cookie", f"zagent_token={token}".encode())] if token else []
+    headers = [(b"cookie", f"collegium_token={token}".encode())] if token else []
     return Request({"type": "http", "headers": headers, "app": {}})
 
 

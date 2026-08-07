@@ -17,7 +17,7 @@ from collections.abc import Coroutine
 from datetime import datetime, timezone
 from typing import Any
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.core.logging import get_logger
 from app.db.base import get_session

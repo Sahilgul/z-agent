@@ -1,5 +1,5 @@
 # Backend image. Build context = REPO ROOT:
-#   docker build -f backend/Dockerfile -t zagent-backend:0.1.0 .
+#   docker build -f backend/Dockerfile -t collegium-backend:0.1.0 .
 FROM python:3.12-slim
 
 RUN apt-get update \

@@ -9,7 +9,7 @@ from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.db.models.trigger import Trigger, TriggerEventLog
 from app.services import triggers
-from zagent_contracts.triggers import TriggerEvent, TriggerSource
+from collegium_contracts.triggers import TriggerEvent, TriggerSource
 
 
 class FakeRM:
@@ -30,14 +30,14 @@ class FakeRM:
         self.nudges.append({"run_id": run_id, "thread_id": thread_id, "text": text})
 
 
-def _event(descriptor="desc-ali", revision=3, state="zagent-plan", title="fix billing"):
+def _event(descriptor="desc-ali", revision=3, state="collegium-plan", title="fix billing"):
     return TriggerEvent(
         source=TriggerSource.ADO_WEBHOOK, external_id="12345", revision=revision,
         event_type="work_item.updated", changed_by_descriptor=descriptor,
         payload={"state": state, "title": title})
 
 
-def _trigger(session, name="plan-on-state", state="zagent-plan", mode="plan",
+def _trigger(session, name="plan-on-state", state="collegium-plan", mode="plan",
              autonomy="gated", owner="changed_by", rate=20):
     t = Trigger(name=name, source="ado_webhook",
                 filter_json={"event_type": "work_item.updated", "state": state},
@@ -61,14 +61,14 @@ def bound_user(session, make_user):
 def test_normalize_ado_work_item_payload():
     body = {"resource": {"workItemId": 12345, "rev": 7,
                          "revisedBy": {"id": "desc-ali"},
-                         "fields": {"System.State": {"newValue": "zagent-plan"},
+                         "fields": {"System.State": {"newValue": "collegium-plan"},
                                     "System.Title": {"newValue": "fix billing"}},
                          "_links": {"html": {"href": "https://ado/12345"}}}}
     ev = triggers.normalize_ado_work_item(body)
     assert ev.external_id == "12345" and ev.revision == 7
     assert ev.event_type == "work_item.updated"
     assert ev.changed_by_descriptor == "desc-ali"
-    assert ev.payload["state"] == "zagent-plan"
+    assert ev.payload["state"] == "collegium-plan"
     assert ev.payload["title"] == "fix billing"
     assert ev.idempotency_key == ("ado_webhook", "12345", 7)
 
@@ -93,7 +93,7 @@ async def test_matching_trigger_starts_gated_run_owned_by_resolver(session, boun
 
 
 async def test_unmatched_vocabulary_is_ignored(session, bound_user):
-    _trigger(session, state="zagent-plan")
+    _trigger(session, state="collegium-plan")
     out = await triggers.process(_event(state="some-other-state"), FakeRM())
     assert out == {"status": "ignored", "reason": "no_trigger_row"}
     assert session.query(TriggerEventLog).one().status == "ignored"

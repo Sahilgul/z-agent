@@ -1,11 +1,11 @@
-name: zagent
+name: collegium
 
 # Ubuntu-VM stack — the production-shaped deployment.
 # Everything the app needs runs here; the only internet-egress services are
 # `gateway` (Foundry) and `db`-adjacent nothing. Access via the web service's
 # published port (see its `ports:` note).
 #
-#   db          — APP Postgres (ZAGENT_DB_URL points here)
+#   db          — APP Postgres (COLLEGIUM_DB_URL points here)
 #   redis       — event bus (AOF everysec)
 #   gateway-db  — LiteLLM-internal Postgres (disposable; re-mint keys to rebuild)
 #   gateway     — LiteLLM proxy, sole LLM egress, virtual keys + budgets
@@ -28,15 +28,15 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: zagent
+      POSTGRES_USER: collegium
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
-      POSTGRES_DB: zagent
+      POSTGRES_DB: collegium
     volumes:
       - pg-data:/var/lib/postgresql/data
     networks: [internal]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zagent"]
+      test: ["CMD-SHELL", "pg_isready -U collegium"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -92,15 +92,15 @@ services:
     working_dir: /app/backend
     command: ["sh", "-c", "alembic upgrade head && python -m app.auth.seed_users"]
     environment:
-      ZAGENT_DB_URL: postgresql+psycopg://zagent:${POSTGRES_PASSWORD}@db:5432/zagent
-      ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
-      ZAGENT_BOOTSTRAP_ADMIN_USERNAME: ${ZAGENT_BOOTSTRAP_ADMIN_USERNAME:-sahil}
-      ZAGENT_BOOTSTRAP_ADMIN_PIN: ${ZAGENT_BOOTSTRAP_ADMIN_PIN:?set in .env}
+      COLLEGIUM_DB_URL: postgresql+psycopg://collegium:${POSTGRES_PASSWORD}@db:5432/collegium
+      COLLEGIUM_ADMIN_USERNAMES: ${COLLEGIUM_ADMIN_USERNAMES:-sahil}
+      COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME: ${COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME:-sahil}
+      COLLEGIUM_BOOTSTRAP_ADMIN_PIN: ${COLLEGIUM_BOOTSTRAP_ADMIN_PIN:?set in .env}
       # C-13/H-44 strict validation runs at Settings() instantiation, which
       # app.db.base triggers on import — so migrate needs the same secrets as
       # backend or it refuses to boot before alembic even runs.
-      ZAGENT_JWT_SECRET: ${ZAGENT_JWT_SECRET:?set in .env}
-      ZAGENT_BYO_PAT_ENCRYPTION_KEY: ${ZAGENT_BYO_PAT_ENCRYPTION_KEY:?set in .env}
+      COLLEGIUM_JWT_SECRET: ${COLLEGIUM_JWT_SECRET:?set in .env}
+      COLLEGIUM_BYO_PAT_ENCRYPTION_KEY: ${COLLEGIUM_BYO_PAT_ENCRYPTION_KEY:?set in .env}
     depends_on:
       db:
         condition: service_healthy
@@ -111,32 +111,32 @@ services:
       context: ../..
       dockerfile: backend/Dockerfile
     environment:
-      ZAGENT_DB_URL: postgresql+psycopg://zagent:${POSTGRES_PASSWORD}@db:5432/zagent
-      ZAGENT_REDIS_URL: redis://redis:6379/0
-      ZAGENT_GATEWAY_URL: http://gateway:4000
-      ZAGENT_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      ZAGENT_JWT_SECRET: ${ZAGENT_JWT_SECRET:?set in .env}
-      ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
-      ZAGENT_BOOTSTRAP_ADMIN_USERNAME: ${ZAGENT_BOOTSTRAP_ADMIN_USERNAME:-sahil}
-      ZAGENT_BOOTSTRAP_ADMIN_PIN: ${ZAGENT_BOOTSTRAP_ADMIN_PIN}
-      ZAGENT_FETCH_PAT: ${FETCH_PAT:-}
-      ZAGENT_FLEET_PAT: ${FLEET_PAT:-}
-      ZAGENT_ADO_ORG: ${ADO_ORG:-}
-      ZAGENT_ADO_PROJECT: ${ADO_PROJECT:-}
-      ZAGENT_ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET:-}
-      ZAGENT_SERVICE_ACCOUNT_DESCRIPTOR: ${SERVICE_ACCOUNT_DESCRIPTOR:-}
-      ZAGENT_BYO_PAT_ENCRYPTION_KEY: ${ZAGENT_BYO_PAT_ENCRYPTION_KEY:?set in .env}
+      COLLEGIUM_DB_URL: postgresql+psycopg://collegium:${POSTGRES_PASSWORD}@db:5432/collegium
+      COLLEGIUM_REDIS_URL: redis://redis:6379/0
+      COLLEGIUM_GATEWAY_URL: http://gateway:4000
+      COLLEGIUM_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      COLLEGIUM_JWT_SECRET: ${COLLEGIUM_JWT_SECRET:?set in .env}
+      COLLEGIUM_ADMIN_USERNAMES: ${COLLEGIUM_ADMIN_USERNAMES:-sahil}
+      COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME: ${COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME:-sahil}
+      COLLEGIUM_BOOTSTRAP_ADMIN_PIN: ${COLLEGIUM_BOOTSTRAP_ADMIN_PIN}
+      COLLEGIUM_FETCH_PAT: ${FETCH_PAT:-}
+      COLLEGIUM_FLEET_PAT: ${FLEET_PAT:-}
+      COLLEGIUM_ADO_ORG: ${ADO_ORG:-}
+      COLLEGIUM_ADO_PROJECT: ${ADO_PROJECT:-}
+      COLLEGIUM_ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET:-}
+      COLLEGIUM_SERVICE_ACCOUNT_DESCRIPTOR: ${SERVICE_ACCOUNT_DESCRIPTOR:-}
+      COLLEGIUM_BYO_PAT_ENCRYPTION_KEY: ${COLLEGIUM_BYO_PAT_ENCRYPTION_KEY:?set in .env}
       # HOST PATHS, mounted at the SAME path inside this container (see below).
-      ZAGENT_GOLDEN_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/golden/repos
-      ZAGENT_SESSIONS_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/sessions
-      ZAGENT_WORKSPACES_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/workspaces
-      ZAGENT_TRANSCRIPTS_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/transcripts
-      ZAGENT_EVIDENCE_DIR: ${ZAGENT_DATA_ROOT:-/srv/zagent}/evidence
-      ZAGENT_FLEET_CONFIG_DIR: /fleet-config
+      COLLEGIUM_GOLDEN_DIR: ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/golden/repos
+      COLLEGIUM_SESSIONS_DIR: ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/sessions
+      COLLEGIUM_WORKSPACES_DIR: ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/workspaces
+      COLLEGIUM_TRANSCRIPTS_DIR: ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/transcripts
+      COLLEGIUM_EVIDENCE_DIR: ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/evidence
+      COLLEGIUM_FLEET_CONFIG_DIR: /fleet-config
       # The image copies the tree to /app/backend, but WORKDIR is /app — without
       # this the playbook loader finds an empty dir and modes lose their SKILL.md
       # guidance silently.
-      ZAGENT_PLAYBOOKS_DIR: /app/backend/playbooks
+      COLLEGIUM_PLAYBOOKS_DIR: /app/backend/playbooks
     volumes:
       # PATH PARITY (required, not cosmetic): the sandbox manager asks the HOST
       # daemon over docker.sock to bind these dirs into sibling thread containers,
@@ -145,12 +145,12 @@ services:
       # Docker would silently create an empty dir and every thread would see an
       # empty repo. Mounting host path -> identical container path keeps the
       # paths the backend writes and the paths the daemon reads the same string.
-      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/golden:${ZAGENT_DATA_ROOT:-/srv/zagent}/golden
-      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/sessions:${ZAGENT_DATA_ROOT:-/srv/zagent}/sessions
-      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/workspaces:${ZAGENT_DATA_ROOT:-/srv/zagent}/workspaces
+      - ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/golden:${COLLEGIUM_DATA_ROOT:-/srv/collegium}/golden
+      - ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/sessions:${COLLEGIUM_DATA_ROOT:-/srv/collegium}/sessions
+      - ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/workspaces:${COLLEGIUM_DATA_ROOT:-/srv/collegium}/workspaces
       # Backend-only state, but on the same root so one dir is the whole backup.
-      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/transcripts:${ZAGENT_DATA_ROOT:-/srv/zagent}/transcripts
-      - ${ZAGENT_DATA_ROOT:-/srv/zagent}/evidence:${ZAGENT_DATA_ROOT:-/srv/zagent}/evidence
+      - ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/transcripts:${COLLEGIUM_DATA_ROOT:-/srv/collegium}/transcripts
+      - ${COLLEGIUM_DATA_ROOT:-/srv/collegium}/evidence:${COLLEGIUM_DATA_ROOT:-/srv/collegium}/evidence
       - ../../fleet-config:/fleet-config:ro
       # Lane spawning: the sandbox manager drives sibling worker containers.
       - /var/run/docker.sock:/var/run/docker.sock

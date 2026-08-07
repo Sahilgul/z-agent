@@ -102,7 +102,7 @@ export function SideRail() {
     >
       <div className="flex h-[52px] items-center gap-s2 border-b border-hairline px-s4 max-[1100px]:justify-center max-[1100px]:px-0">
         <span className="led" aria-hidden="true" />
-        <span className="font-mono text-[13.5px] font-semibold tracking-[0.03em] max-[1100px]:hidden">zagent</span>
+        <span className="font-mono text-[13.5px] font-semibold tracking-[0.03em] max-[1100px]:hidden">collegium</span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-s2 py-s4 max-[1100px]:px-s1">

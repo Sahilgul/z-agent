@@ -13,9 +13,9 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 @router.post("/ado")
-async def ado_webhook(request: Request, x_zagent_signature: str | None = Header(default=None)):
+async def ado_webhook(request: Request, x_collegium_signature: str | None = Header(default=None)):
     body = await request.body()
-    if not triggers.verify_signature(body, x_zagent_signature):
+    if not triggers.verify_signature(body, x_collegium_signature):
         raise HTTPException(status_code=401, detail="bad webhook signature")
     try:
         event = triggers.normalize_ado_work_item(await request.json())

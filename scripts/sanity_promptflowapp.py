@@ -1,6 +1,6 @@
 """Sanity check: run the Python generator against a real repo checkout.
 
-Does NOT write .zagent/ into the repo — writes map.json/map.md to a temp
+Does NOT write .collegium/ into the repo — writes map.json/map.md to a temp
 dir and prints module count, top-5 hot files, and crash count.
 
 Point SANITY_REPO at any local checkout (default: the golden tree layout).
@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from zagent_maps import generate, to_dict, render_markdown
+from collegium_maps import generate, to_dict, render_markdown
 
 REPO = Path(os.environ.get("SANITY_REPO", "./golden/repos/PromptFlowApp"))
 
@@ -21,7 +21,7 @@ def main():
         print(f"ERROR: repo not found: {REPO}", file=sys.stderr)
         return 2
     repo_map, report = generate(str(REPO))
-    tmp = Path(tempfile.mkdtemp(prefix="zagent_sanity_py_"))
+    tmp = Path(tempfile.mkdtemp(prefix="collegium_sanity_py_"))
     out = tmp / "PromptFlowApp_map.json"
     out.write_text(json.dumps(to_dict(repo_map), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (tmp / "PromptFlowApp_map.md").write_text(render_markdown(repo_map), encoding="utf-8")

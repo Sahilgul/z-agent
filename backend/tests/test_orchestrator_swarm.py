@@ -210,7 +210,7 @@ async def test_decompose_unparsable_degrades_to_single_slice(session, make_user)
 
 # --------------------------------------------------------------- fanout + collect
 async def test_fanout_spawns_one_read_only_thread_per_slice(session, make_user):
-    from zagent_contracts import Decomposition
+    from collegium_contracts import Decomposition
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session)
     decomp = Decomposition.model_validate_json(DECOMPOSE_JSON)
@@ -244,7 +244,7 @@ async def test_collect_gathers_notebooks_from_events(session, make_user):
 
 # --------------------------------------------------------------- synthesize
 async def test_synthesize_sets_auto_summary_with_counter_proposal(session, make_user):
-    from zagent_contracts import Decomposition
+    from collegium_contracts import Decomposition
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session, synthesis_reply="Billing flows through the engine nightly.")
     decomp = Decomposition(slices=[{"title": "a", "prompt": "p"}],
@@ -261,7 +261,7 @@ async def test_synthesize_sets_auto_summary_with_counter_proposal(session, make_
 
 
 async def test_synthesize_empty_swarm_does_not_spawn(session, make_user):
-    from zagent_contracts import Decomposition
+    from collegium_contracts import Decomposition
     run = _seed(session, make_user)
     lm = _FakeLaneMgr(session)
     ctx = _ctx(run, services={"thread_manager": lm},

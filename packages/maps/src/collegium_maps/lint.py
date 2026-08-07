@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from zagent_maps.grammar import to_posix
+from collegium_maps.grammar import to_posix
 
 
 @dataclass
@@ -214,8 +214,8 @@ def render_report(report: LintReport) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry: ``python -m zagent_maps.lint <repo_path> <citations.json>``."""
-    parser = argparse.ArgumentParser(prog="zagent-maps-lint", description=__doc__)
+    """CLI entry: ``python -m collegium_maps.lint <repo_path> <citations.json>``."""
+    parser = argparse.ArgumentParser(prog="collegium-maps-lint", description=__doc__)
     parser.add_argument("repo_path", help="Path to the repo to lint citations against.")
     parser.add_argument("citations", help="JSON file of citations (array or {citations:[]}).")
     parser.add_argument("--json", action="store_true",

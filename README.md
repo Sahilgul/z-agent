@@ -1,12 +1,14 @@
-# Zagent
+# Collegium
 
 An ADO-native autonomous engineering platform — org-agnostic and adoptable
-against any set of repositories. Zagent takes a task, plans it, runs LLM agents
+against any set of repositories. Collegium takes a task, plans it, runs LLM agents
 in isolated per-repo sandboxes, streams every step to a live console, and opens
 the pull request — with a human in the loop at whatever depth you choose.
 
+Collegium is a [Collegium Labs](https://collegiumlabs.com) product.
+
 The unit of work is a **run**. A run owns one or more **threads** (each a
-container running Zagent's custom agent engine against one repo), moves through
+container running Collegium's custom agent engine against one repo), moves through
 a fixed **stage** machine, and exposes exactly the actions that are legal right
 now. Everything a thread does arrives as an event on a Redis stream, lands in
 Postgres, mirrors to a JSONL transcript, and fans out over a WebSocket to the
@@ -38,9 +40,9 @@ container start through a git credential helper so it never touches
 
 ## The engine (`worker/worker/engine/`)
 
-Threads run Zagent's **own harness** — a LangGraph StateGraph with
+Threads run Collegium's **own harness** — a LangGraph StateGraph with
 interrupt-driven approvals, not a vendor SDK loop. (The legacy Claude Agent SDK
-runtime still exists behind `ZAGENT_ENGINE_RUNTIME=sdk` as a fallback through
+runtime still exists behind `COLLEGIUM_ENGINE_RUNTIME=sdk` as a fallback through
 the RE soak; `custom` is the default since the RB cutover.) What the custom
 engine gives you:
 
@@ -64,7 +66,7 @@ engine gives you:
   and agent-triggered), stuck-loop watchdogs, background-terminal contract
   (ring buffer, regex watch), and goal-stage recaps emitted as first-class
   StepEvents.
-- **Durable state** — Postgres checkpointer when `ZAGENT_ENGINE_DATABASE_URL`
+- **Durable state** — Postgres checkpointer when `COLLEGIUM_ENGINE_DATABASE_URL`
   is set (falls back to in-memory with a loud warning), so interrupted runs
   resume with approvals intact.
 
@@ -92,7 +94,7 @@ The defaults are deliberately self-contained: SQLite on disk and an in-process
 fake Redis, so the backend boots with zero services running.
 
 ```bash
-uv sync --package zagent-backend --all-extras
+uv sync --package collegium-backend --all-extras
 
 cd backend
 uv run alembic upgrade head
@@ -108,7 +110,7 @@ npm install
 npm run dev        # http://localhost:5173, proxies API + WS to :8000
 ```
 
-Sign in with `ZAGENT_BOOTSTRAP_ADMIN_USERNAME` / `ZAGENT_BOOTSTRAP_ADMIN_PIN`
+Sign in with `COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME` / `COLLEGIUM_BOOTSTRAP_ADMIN_PIN`
 (defaults `sahil` / `4545` — override both before any shared deployment).
 
 Runs will reach the point of needing a real LLM gateway and ADO credentials; the
@@ -143,7 +145,7 @@ Reachable at `http://<vm>:8080`.
 
 ### Data root — read this before changing volumes
 
-All durable state lives under `ZAGENT_DATA_ROOT` (default `/srv/zagent`):
+All durable state lives under `COLLEGIUM_DATA_ROOT` (default `/srv/collegium`):
 `golden/`, `sessions/`, `workspaces/`, `transcripts/`, `evidence/`. Back up that
 one directory plus a Postgres dump and you have the whole system.
 
@@ -160,24 +162,24 @@ and container path identical for anything a thread mounts.
 
 ## Configuration
 
-Settings live in `backend/app/core/config.py` and take a `ZAGENT_` env prefix.
+Settings live in `backend/app/core/config.py` and take a `COLLEGIUM_` env prefix.
 The ones that matter most:
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `ZAGENT_DB_URL` | `sqlite:///./data/zagent.db` | Postgres in the VM stack |
-| `ZAGENT_REDIS_URL` | `memory://0` | In-process fake; set a real URL in any deployment |
-| `ZAGENT_JWT_SECRET` | `dev-only-change-me` | **Must** be overridden |
-| `ZAGENT_BYO_PAT_ENCRYPTION_KEY` | `dev-only-byo-pat-key` | At-rest key for user PATs |
-| `ZAGENT_BOOTSTRAP_ADMIN_PIN` | `4545` | First admin, created once by the seed |
-| `ZAGENT_FETCH_PAT` / `ZAGENT_FLEET_PAT` | empty | ADO: read-only fetcher, and read/write for pushes and PRs |
-| `ZAGENT_ADO_WEBHOOK_SECRET` | empty | Empty means webhook ingress rejects everything (fail-closed) |
-| `ZAGENT_DEFAULT_THREAD_BUDGET_USD` | `5.0` | Enforced by the gateway virtual key |
-| `ZAGENT_GLOBAL_THREAD_CAP` | `12` | Concurrent threads across the whole system |
-| `ZAGENT_APPROVAL_TIMEOUT_SECONDS` | `900` | After this the worker denies and the card expires |
-| `ZAGENT_ENGINE_RUNTIME` | `custom` | `sdk` keeps the legacy fallback alive through the RE soak |
-| `ZAGENT_ENGINE_CANARY` | `false` | Read-only threads on the custom engine before the flag flip |
-| `ZAGENT_ENGINE_DATABASE_URL` | empty | Postgres checkpointer DSN for workers; empty = in-memory fallback |
+| `COLLEGIUM_DB_URL` | `sqlite:///./data/collegium.db` | Postgres in the VM stack |
+| `COLLEGIUM_REDIS_URL` | `memory://0` | In-process fake; set a real URL in any deployment |
+| `COLLEGIUM_JWT_SECRET` | `dev-only-change-me` | **Must** be overridden |
+| `COLLEGIUM_BYO_PAT_ENCRYPTION_KEY` | `dev-only-byo-pat-key` | At-rest key for user PATs |
+| `COLLEGIUM_BOOTSTRAP_ADMIN_PIN` | `4545` | First admin, created once by the seed |
+| `COLLEGIUM_FETCH_PAT` / `COLLEGIUM_FLEET_PAT` | empty | ADO: read-only fetcher, and read/write for pushes and PRs |
+| `COLLEGIUM_ADO_WEBHOOK_SECRET` | empty | Empty means webhook ingress rejects everything (fail-closed) |
+| `COLLEGIUM_DEFAULT_THREAD_BUDGET_USD` | `5.0` | Enforced by the gateway virtual key |
+| `COLLEGIUM_GLOBAL_THREAD_CAP` | `12` | Concurrent threads across the whole system |
+| `COLLEGIUM_APPROVAL_TIMEOUT_SECONDS` | `900` | After this the worker denies and the card expires |
+| `COLLEGIUM_ENGINE_RUNTIME` | `custom` | `sdk` keeps the legacy fallback alive through the RE soak |
+| `COLLEGIUM_ENGINE_CANARY` | `false` | Read-only threads on the custom engine before the flag flip |
+| `COLLEGIUM_ENGINE_DATABASE_URL` | empty | Postgres checkpointer DSN for workers; empty = in-memory fallback |
 
 The Compose files accept the ADO and gateway secrets under short aliases
 (`FETCH_PAT`, `FLEET_PAT`, `ADO_ORG`, `LITELLM_MASTER_KEY`, …) and map them onto
@@ -195,7 +197,7 @@ Autonomy is a separate dial, and it earns its way up:
 - **supervised** — every write, bash, and git action raises an approval card.
 - **gated** — file edits proceed; bash, git, and MCP mutations still ask.
 - **autonomous** — nothing is bridged. Unlocked only after a track record of
-  completed gated runs (`ZAGENT_AUTONOMY_PROMOTE_*` thresholds).
+  completed gated runs (`COLLEGIUM_AUTONOMY_PROMOTE_*` thresholds).
 
 Approval cards are not open-ended. The worker blocks for
 `approval_timeout_seconds`, then denies deterministically; the backend expires

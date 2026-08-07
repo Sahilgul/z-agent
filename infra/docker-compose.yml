@@ -1,4 +1,4 @@
-name: zagent
+name: collegium
 
 # Local-era stack:
 #   redis (AOF everysec) — Streams durability across restarts
@@ -69,25 +69,25 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     environment:
-      ZAGENT_DB_URL: sqlite:////data/zagent.db
-      ZAGENT_REDIS_URL: redis://redis:6379/0
-      ZAGENT_GATEWAY_URL: http://gateway:4000
-      ZAGENT_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      ZAGENT_JWT_SECRET: ${ZAGENT_JWT_SECRET:?set in .env}
-      ZAGENT_ADMIN_USERNAMES: ${ZAGENT_ADMIN_USERNAMES:-sahil}
-      ZAGENT_FETCH_PAT: ${FETCH_PAT:-}
-      ZAGENT_FLEET_PAT: ${FLEET_PAT:-}
-      ZAGENT_ADO_ORG: ${ADO_ORG:-}
-      ZAGENT_ADO_PROJECT: ${ADO_PROJECT:-}
-      ZAGENT_GOLDEN_DIR: /golden/repos
-      ZAGENT_SESSIONS_DIR: /sessions
-      ZAGENT_WORKSPACES_DIR: /workspaces
-      ZAGENT_TRANSCRIPTS_DIR: /transcripts
-      ZAGENT_EVIDENCE_DIR: /evidence
-      ZAGENT_FLEET_CONFIG_DIR: /fleet-config
+      COLLEGIUM_DB_URL: sqlite:////data/collegium.db
+      COLLEGIUM_REDIS_URL: redis://redis:6379/0
+      COLLEGIUM_GATEWAY_URL: http://gateway:4000
+      COLLEGIUM_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      COLLEGIUM_JWT_SECRET: ${COLLEGIUM_JWT_SECRET:?set in .env}
+      COLLEGIUM_ADMIN_USERNAMES: ${COLLEGIUM_ADMIN_USERNAMES:-sahil}
+      COLLEGIUM_FETCH_PAT: ${FETCH_PAT:-}
+      COLLEGIUM_FLEET_PAT: ${FLEET_PAT:-}
+      COLLEGIUM_ADO_ORG: ${ADO_ORG:-}
+      COLLEGIUM_ADO_PROJECT: ${ADO_PROJECT:-}
+      COLLEGIUM_GOLDEN_DIR: /golden/repos
+      COLLEGIUM_SESSIONS_DIR: /sessions
+      COLLEGIUM_WORKSPACES_DIR: /workspaces
+      COLLEGIUM_TRANSCRIPTS_DIR: /transcripts
+      COLLEGIUM_EVIDENCE_DIR: /evidence
+      COLLEGIUM_FLEET_CONFIG_DIR: /fleet-config
       # Image copies the tree to /app/backend while WORKDIR is /app; without this
       # the playbook loader silently finds nothing.
-      ZAGENT_PLAYBOOKS_DIR: /app/backend/playbooks
+      COLLEGIUM_PLAYBOOKS_DIR: /app/backend/playbooks
     volumes:
       - app-data:/data
       - golden:/golden

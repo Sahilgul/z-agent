@@ -15,10 +15,16 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from zagent_contracts import StepKind
+from collegium_contracts import StepKind
 
 from worker.engine.events import EventEmitter
-from worker.engine.graph import _should_continue, _tool_kind, _tool_title, build_graph
+from worker.engine.graph import (
+    _normalize_tool_call_args,
+    _should_continue,
+    _tool_kind,
+    _tool_title,
+    build_graph,
+)
 from worker.engine.llm import get_capabilities
 from worker.engine.security import is_sensitive_path, redact, redact_dict
 from worker.engine.state import Budget, EngineState, PromptOrigin, tag_message
@@ -370,3 +376,35 @@ def test_make_llm_omits_temperature_for_fixed_param_models():
     assert kimi_llm.temperature != 0.0
     # Qwen: temperature IS set to the requested value
     assert qwen_llm.temperature == 0.0
+
+
+def test_tool_arg_aliases_normalized_at_model_edge():
+    """Models habitually call terminal_exec with cmd= (other harnesses' schema)
+    instead of the bound schema's command=. Without normalization the approval
+    card shows a raw JSON dump, `_tool_title` renders "$ ", permission glob
+    rules miss, and execution fails with "empty command". Values stay verbatim;
+    unknown extra keys pass through."""
+    msg = AIMessage(content="", tool_calls=[{
+        "id": "tc1", "name": "terminal_exec",
+        "args": {"cmd": "pwd && ls -la", "timeout_ms": 30000},
+    }])
+    _normalize_tool_call_args(msg)
+    assert msg.tool_calls[0]["args"] == {
+        "command": "pwd && ls -la", "timeout_ms": 30000,
+    }
+    assert _tool_title("terminal_exec", msg.tool_calls[0]["args"]) == "$ pwd && ls -la"
+
+    # The canonical key already present wins; the alias is left alone.
+    msg2 = AIMessage(content="", tool_calls=[{
+        "id": "tc2", "name": "terminal_exec",
+        "args": {"command": "ls", "cmd": "should-not-win"},
+    }])
+    _normalize_tool_call_args(msg2)
+    assert msg2.tool_calls[0]["args"]["command"] == "ls"
+
+    # Other tools are untouched.
+    msg3 = AIMessage(content="", tool_calls=[{
+        "id": "tc3", "name": "file_read", "args": {"cmd": "x"},
+    }])
+    _normalize_tool_call_args(msg3)
+    assert msg3.tool_calls[0]["args"] == {"cmd": "x"}

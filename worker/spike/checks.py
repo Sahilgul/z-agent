@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from zagent_contracts import Notebook, Plan
+from collegium_contracts import Notebook, Plan
 
 from spike.agent_loop import MAX_TURNS_DEFAULT, AgentRecorder, make_llm, run_agent_loop
 

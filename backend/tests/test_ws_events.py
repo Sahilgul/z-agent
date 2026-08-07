@@ -17,7 +17,7 @@ def test_authenticate_no_token(session, make_user):
 
 def test_authenticate_invalid_token(session, make_user):
     from app.ws.events import _authenticate
-    ws = _FakeWs(cookies={"zagent_token": "not.a.jwt"})
+    ws = _FakeWs(cookies={"collegium_token": "not.a.jwt"})
     assert _authenticate(ws) is None
 
 
@@ -26,7 +26,7 @@ def test_authenticate_user_not_found(session, make_user):
     u = make_user("ghost", role="member", status="active", pin="1234")
     token = issue_token(u)
     session.delete(u); session.commit()
-    ws = _FakeWs(cookies={"zagent_token": token})
+    ws = _FakeWs(cookies={"collegium_token": token})
     assert _authenticate(ws) is None
 
 
@@ -34,7 +34,7 @@ def test_authenticate_inactive(session, make_user):
     from app.ws.events import _authenticate
     u = make_user("dormant", role="member", status="pending", pin="1234")
     token = issue_token(u)
-    ws = _FakeWs(cookies={"zagent_token": token})
+    ws = _FakeWs(cookies={"collegium_token": token})
     assert _authenticate(ws) is None
 
 
@@ -44,7 +44,7 @@ def test_authenticate_revoked(session, make_user):
     token = issue_token(u)
     u.token_version += 1
     session.commit()
-    ws = _FakeWs(cookies={"zagent_token": token})
+    ws = _FakeWs(cookies={"collegium_token": token})
     assert _authenticate(ws) is None
 
 
@@ -52,7 +52,7 @@ def test_authenticate_success(session, make_user):
     from app.ws.events import _authenticate
     u = make_user("alice", role="member", status="active", pin="1234")
     token = issue_token(u)
-    ws = _FakeWs(cookies={"zagent_token": token})
+    ws = _FakeWs(cookies={"collegium_token": token})
     user = _authenticate(ws)
     assert user is not None
     assert user.username == "alice"
@@ -65,7 +65,7 @@ def test_authenticate_decode_exception_returns_none(monkeypatch):
     def boom(token):
         raise RuntimeError("decode blew up")
     monkeypatch.setattr(security, "decode_token", boom)
-    ws = _FakeWs(cookies={"zagent_token": "anything"})
+    ws = _FakeWs(cookies={"collegium_token": "anything"})
     assert events._authenticate(ws) is None
 
 
@@ -112,7 +112,7 @@ async def test_ws_close_run_not_found(session, make_user):
     u = make_user("alice", role="member", status="active", pin="1234")
     token = issue_token(u)
     relay = FakeRelay()
-    ws = _FakeWebSocket(cookies={"zagent_token": token}, relay=relay, run_id="ghost")
+    ws = _FakeWebSocket(cookies={"collegium_token": token}, relay=relay, run_id="ghost")
     await run_events_ws(ws, "ghost")
     assert ws.closed_with == 4404
     assert not ws.accepted
@@ -128,7 +128,7 @@ async def test_ws_close_run_owned_by_other(session, make_user):
     session.commit()
     token = issue_token(u)
     relay = FakeRelay()
-    ws = _FakeWebSocket(cookies={"zagent_token": token}, relay=relay, run_id="r1")
+    ws = _FakeWebSocket(cookies={"collegium_token": token}, relay=relay, run_id="r1")
     await run_events_ws(ws, "r1")
     assert ws.closed_with == 4404
 
@@ -144,7 +144,7 @@ async def test_ws_accepts_and_forwards_messages(session, make_user):
     session.commit()
     token = issue_token(u)
     relay = FakeRelay()
-    ws = _FakeWebSocket(cookies={"zagent_token": token}, relay=relay, run_id="r1")
+    ws = _FakeWebSocket(cookies={"collegium_token": token}, relay=relay, run_id="r1")
     ws._disconnect_after = 2  # raise WebSocketDisconnect after 2nd message
 
     task = asyncio.create_task(run_events_ws(ws, "r1"))

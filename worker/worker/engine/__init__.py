@@ -1,4 +1,4 @@
-"""z-agent custom engine.
+"""Collegium custom engine.
 
 Replaces the Claude Agent SDK coupling with a LangGraph StateGraph that talks
 to the LiteLLM gateway over the OpenAI-compatible protocol. The spike

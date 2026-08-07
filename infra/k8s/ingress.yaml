@@ -3,7 +3,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: zagent
+  name: collegium
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
@@ -11,15 +11,15 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [zagent.zagentharness.ai]
-      secretName: zagent-tls
+    - hosts: [collegium.collegiumlabs.com]
+      secretName: collegium-tls
   rules:
-    - host: zagent.zagentharness.ai
+    - host: collegium.collegiumlabs.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: zagent-backend
+                name: collegium-backend
                 port: { number: 80 }

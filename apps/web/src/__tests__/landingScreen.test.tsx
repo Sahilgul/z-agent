@@ -21,7 +21,9 @@ describe("LandingScreen", () => {
   it("renders the hero headline, aura section, and the demo console", () => {
     renderLanding();
     expect(screen.getByTestId("landing-hero")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Route the fleet.");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Collegium — a legion of swarm agents, moving as one.",
+    );
     expect(screen.getByTestId("landing-demo")).toBeInTheDocument();
   });
 

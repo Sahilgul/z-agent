@@ -1,5 +1,5 @@
 import pytest
-from zagent_contracts import ActionKind, IntentSource, RunStage, UserIntent
+from collegium_contracts import ActionKind, IntentSource, RunStage, UserIntent
 
 from app.db.models.run import Run
 from app.services.intents import (

@@ -138,7 +138,7 @@ async def test_complete_pull_request(monkeypatch):
 async def test_complete_pull_request_plumbs_commit_message(monkeypatch):
     """G-23: complete_pull_request must send the human's merge_commit_message
     through to ADO as completionOptions.mergeCommitMessage (the audit
-    trail ties the ADO merge commit to the Zagent approval). The existing
+    trail ties the ADO merge commit to the Collegium approval). The existing
     test only checked the response status, not that the message was
     plumbed into the PATCH body. Capture the PATCH body and assert it."""
     captured: dict[str, object] = {}
@@ -155,7 +155,7 @@ async def test_complete_pull_request_plumbs_commit_message(monkeypatch):
 
     monkeypatch.setattr(ado_mod.httpx, "AsyncClient", lambda *a, **k: _CaptureClient())
     c = AdoClient(pat="p", org="o")
-    msg = "Zagent run r1 — evidence package attached"
+    msg = "Collegium run r1 — evidence package attached"
     await c.complete_pull_request("repo-1", 7, msg)
     body = captured["json"]
     assert body["status"] == "completed"

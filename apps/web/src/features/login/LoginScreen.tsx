@@ -68,7 +68,7 @@ export function LoginScreen() {
               ⌁
             </span>
             <span className="font-display text-[28px] font-semibold tracking-[0.01em] text-ink-primary">
-              zagent
+              collegium
             </span>
             <span className="led" aria-hidden="true" />
           </div>

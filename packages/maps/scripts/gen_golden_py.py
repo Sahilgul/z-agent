@@ -6,7 +6,7 @@ the golden stays byte-stable across runs.
 import json
 from pathlib import Path
 
-from zagent_maps import generate, to_dict
+from collegium_maps import generate, to_dict
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "python_repo"

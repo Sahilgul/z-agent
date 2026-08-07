@@ -27,7 +27,7 @@ def test_branch_name_for_without_thread():
     run = Run(id="r1234567-aaaa", title="Fix the Scribe Summary Bug!")
     name = delivery.branch_name_for(run)
     # agent/<run_id>-<slug> — the agent/* namespace carries the ADO
-    # branch policies; a zagent/* prefix would be rejected on push.
+    # branch policies; a collegium/* prefix would be rejected on push.
     assert name == "agent/r1234567-fix-the-scribe-summary-bug"
 
 
@@ -170,7 +170,7 @@ def test_git_success(monkeypatch):
     out = asyncio.run(delivery._git(["status"], cwd="/ws", env_extra={"FLEET_PAT": "p"}))
     assert out == "ok\n"
     assert captured["env"]["FLEET_PAT"] == "p"
-    assert captured["env"]["ZAGENT_CREDENTIAL_SCOPE"] == "fleet"
+    assert captured["env"]["COLLEGIUM_CREDENTIAL_SCOPE"] == "fleet"
     assert "GIT_CREDENTIAL_HELPER" in captured["env"]
 
 
@@ -225,7 +225,7 @@ def test_commit_pending_dirty_tree_commits_with_bot_identity(monkeypatch):
         delivery.commit_pending("r1", "/ws", "agent/r1-x", message="goal: ship it"))
     assert committed is True
     commit = calls[-1]
-    assert commit[0] == "-c" and "user.name=zagent[bot]" in commit
+    assert commit[0] == "-c" and "user.name=collegium[bot]" in commit
     assert "commit" in commit and "goal: ship it" in commit
 
 

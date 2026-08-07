@@ -1,8 +1,8 @@
-// Canonical map grammar for Zagent's repo-map (layer 1 of the context system).
+// Canonical map grammar for Collegium's repo-map (layer 1 of the context system).
 //
 // This module is the SINGLE source of truth for the shape of a `map.json`
 // document on the TypeScript side. It MUST stay byte-identical in key order and
-// sorting with the Python grammar in `packages/maps/src/zagent_maps/grammar.py`
+// sorting with the Python grammar in `packages/maps/src/collegium_maps/grammar.py`
 // so that a TS repo mapped by either generator produces the same structure for
 // equivalent inputs. That parity is what makes the map diff-stable across runs
 // and across the two language ecosystems.

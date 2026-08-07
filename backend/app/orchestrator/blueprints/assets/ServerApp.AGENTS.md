@@ -1,4 +1,4 @@
-# ServerApp — Zagent Guidebook (Phase 1 seed, hand-curated)
+# ServerApp — Collegium Guidebook (Phase 1 seed, hand-curated)
 
 > Navigation map for the read-only researcher lane. Orient here, then verify
 > with grep/glob/read on the mounted tree — the tree is ground truth, this file

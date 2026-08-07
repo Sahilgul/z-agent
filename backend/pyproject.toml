@@ -1,5 +1,5 @@
 [project]
-name = "zagent-backend"
+name = "collegium-backend"
 version = "0.1.0"
 description = "FastAPI control plane: orchestrator, event pipeline, ADO/gateway adapters, sandbox manager"
 requires-python = ">=3.12,<3.13"
@@ -20,7 +20,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "python-dotenv>=1.0",
     "docker>=7",
-    "zagent-contracts",
+    "collegium-contracts",
 ]
 
 [project.optional-dependencies]

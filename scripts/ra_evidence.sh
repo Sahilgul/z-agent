@@ -7,7 +7,7 @@ set -euo pipefail
 
 CONTAINER="ra-evidence-pg"
 PORT="${RA_PG_PORT:-55432}"
-DB="zagent"
+DB="collegium"
 export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${PORT}/${DB}"
 
 cleanup() {

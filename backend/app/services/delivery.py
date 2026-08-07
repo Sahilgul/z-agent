@@ -4,7 +4,7 @@ Branch naming follows agent/<run8>-<slug> (thread suffix when a thread
 stamps it) so ADO branch policies scoped to the agent/* namespace accept
 the push. The evidence package is built BEFORE the PR opens — a PR without a
 complete package never leaves the station. Merge ceremony identity: the
-human's decision lives in Zagent's evidence trail (merged_by); completion rides
+human's decision lives in Collegium's evidence trail (merged_by); completion rides
 FLEET_PAT (service account granted bypass-policies-on-complete). When compliance
 disallows policy bypass (settings.merge_native_ui), the merge tap hands off to
 ADO's native complete UI via deep link instead (merge-identity lock).
@@ -150,8 +150,8 @@ async def _git(args: list[str], cwd: str, env_extra: dict[str, str]) -> str:
     import os
     env = dict(os.environ)
     env.update(env_extra)
-    env["ZAGENT_CREDENTIAL_SCOPE"] = "fleet"
-    env["GIT_CREDENTIAL_HELPER"] = str(settings.scripts_dir / "git-credential-zagent")
+    env["COLLEGIUM_CREDENTIAL_SCOPE"] = "fleet"
+    env["GIT_CREDENTIAL_HELPER"] = str(settings.scripts_dir / "git-credential-collegium")
     proc = await asyncio.create_subprocess_exec(
         "git", *args, cwd=cwd, env=env,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -195,7 +195,7 @@ async def commit_pending(run_id: str, workspace: str, branch: str,
         log.info("commit_pending: clean tree, nothing to do", run_id=run_id, branch=branch)
         return False
     subject = message or f"goal: uncommitted work safety net (run {run_id[:8]})"
-    await _git(["-c", "user.name=zagent[bot]", "-c", "user.email=zagent-bot@localhost",
+    await _git(["-c", "user.name=collegium[bot]", "-c", "user.email=collegium-bot@localhost",
                 "commit", "-m", subject], cwd=workspace, env_extra=env)
     log.info("commit_pending: committed", run_id=run_id, branch=branch)
     return True
@@ -237,12 +237,12 @@ async def open_pr(run_id: str, repo_name: str, workspace: str,
     client = ado_client or AdoClient()
     description = (
         f"{package['plan_title']}\n\n"
-        f"---\nEvidence package (Zagent run {run_id[:8]}):\n"
+        f"---\nEvidence package (Collegium run {run_id[:8]}):\n"
         f"- plan steps: {len(package['plan_steps'])} (all done/skipped)\n"
         f"- threads: {len(package['threads'])} · cost ${package['total_cost_usd']:.2f}\n"
         f"- test signals: {len(package['test_signals'])}\n"
         f"- evidence sha256: {package['sha256']}\n"
-        f"Full package: Zagent run record {run_id[:8]} (PrLink.evidence).\n"
+        f"Full package: Collegium run record {run_id[:8]} (PrLink.evidence).\n"
     )
     pr = await client.create_pull_request(
         repo_id=repo.ado_repo_id or repo.name,
@@ -279,7 +279,7 @@ def pr_web_url(repo: Repo, pr_id: int) -> str:
 
 async def merge_pr(run_id: str, user_id: int,
                    ado_client: AdoClient | None = None) -> dict:
-    """Merge ceremony: the Zagent approval IS the approval of record. Service
+    """Merge ceremony: the Collegium approval IS the approval of record. Service
     account completes; merged_by stamps the deciding human. When
     settings.merge_native_ui is on (compliance disallows bypass-on-complete),
     NO completion call is made — the human completes in ADO's own UI under
@@ -326,7 +326,7 @@ async def merge_pr(run_id: str, user_id: int,
     client = ado_client or AdoClient()
     await client.complete_pull_request(
         repo_id=repo.ado_repo_id or repo.name, pr_id=pr_id,
-        merge_commit_message=f"Zagent run {run_id[:8]} — evidence package attached",
+        merge_commit_message=f"Collegium run {run_id[:8]} — evidence package attached",
     )
 
     session = get_session()

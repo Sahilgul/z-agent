@@ -13,7 +13,7 @@ Date: 2026-08-05 · Workstream: RB (plan §23) · Doctrine: DONE = WIRED + EVIDE
 
 ## Exit evidence (all three required items)
 
-1. **docker build green** — `docker build -f worker/Dockerfile -t zagent-worker:0.2.0 .` completes; the langgraph stack installs from the worker project.
+1. **docker build green** — `docker build -f worker/Dockerfile -t collegium-worker:0.2.0 .` completes; the langgraph stack installs from the worker project.
 
 2. **Container boot log shows the engine runner** — the API-spawned worker container's first log line:
 
@@ -23,7 +23,7 @@ Date: 2026-08-05 · Workstream: RB (plan §23) · Doctrine: DONE = WIRED + EVIDE
 
    (`ENGINE=sdk` prints the legacy line and boots the CAS fallback — verified.)
 
-3. **Live API-created thread streams StepEvents from the custom engine into the console feed** — `POST /runs` → backend spawned `zagent-thread-*` on the custom engine → `GET /runs/{id}/events` served `command (code_search)`, `message`, `status (turn complete)` StepEvents, and the console rendered them live (screenshot below). Checkpoints for the thread landed in Postgres (`checkpoints` table) during the same run.
+3. **Live API-created thread streams StepEvents from the custom engine into the console feed** — `POST /runs` → backend spawned `collegium-thread-*` on the custom engine → `GET /runs/{id}/events` served `command (code_search)`, `message`, `status (turn complete)` StepEvents, and the console rendered them live (screenshot below). Checkpoints for the thread landed in Postgres (`checkpoints` table) during the same run.
 
 ![live thread feed](rb-live-thread-feed.png)
 

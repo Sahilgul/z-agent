@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 
 import pytest
-from zagent_contracts import StepEvent, StepKind
+from collegium_contracts import StepEvent, StepKind
 
 from worker.engine.checkpointer import DeltaChannel, make_checkpointer
 from worker.engine.compaction import CompactionPolicy, Compactor

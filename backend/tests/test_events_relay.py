@@ -48,7 +48,7 @@ async def test_unsubscribe_unknown_run_is_noop(fake_redis):
 async def test_publish_step_fans_out_to_subscribers(fake_redis):
     r = _relay(fake_redis)
     q = r.subscribe("run-1")
-    from zagent_contracts import StepEvent, StepKind
+    from collegium_contracts import StepEvent, StepKind
     ev = StepEvent(run_id="run-1", thread_id="l1", seq=1, kind=StepKind.MESSAGE, title="t")
     await r.publish_step("run-1", ev)
     msg = q.get_nowait()

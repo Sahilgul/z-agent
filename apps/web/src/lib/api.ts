@@ -1,4 +1,4 @@
-/** fetch wrapper — cookie JWT (httponly zagent_token set at login), JSON in/out.
+/** fetch wrapper — cookie JWT (httponly collegium_token set at login), JSON in/out.
  *  A 401 anywhere means the session died: notify via the session store event. */
 
 export class ApiError extends Error {

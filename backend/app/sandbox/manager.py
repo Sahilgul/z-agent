@@ -69,7 +69,7 @@ def stamp_clone(repo: Repo, run_id: str, thread_id: str, fresh: bool = True) -> 
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "-C", str(golden_repo), "fetch", "--quiet", "origin"],
                    check=True, timeout=300, env={"GIT_TERMINAL_PROMPT": "0",
-                                                 "ZAGENT_CREDENTIAL_SCOPE": "fetch",
+                                                 "COLLEGIUM_CREDENTIAL_SCOPE": "fetch",
                                                  **_env()})
     subprocess.run(["git", "clone", "--quiet", str(golden_repo), str(dest)], check=True, timeout=600)
     subprocess.run(
@@ -165,7 +165,7 @@ class SandboxManager:
             # FLEET_PAT injected at container start (never baked into the image);
             # the credential helper keeps it out of remote URLs and .git/config.
             env["FLEET_PAT"] = self.settings.fleet_pat
-            env["ZAGENT_CREDENTIAL_SCOPE"] = "fleet"
+            env["COLLEGIUM_CREDENTIAL_SCOPE"] = "fleet"
         return env
 
     def run_thread_container(self, run: Run, thread: Thread, prompt: str, persona_prompt: str,
@@ -221,7 +221,7 @@ class SandboxManager:
             # (8 hex chars) — birthday-paradox collision at ~65k threads meant
             # Docker refused a duplicate name and thread spawn failed. Use
             # the full UUID (unique by construction) as the name suffix.
-            name=f"zagent-thread-{thread.id}",
+            name=f"collegium-thread-{thread.id}",
             remove=False,
         )
         log.info("thread container started", thread_id=thread.id, container=container.short_id)

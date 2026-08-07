@@ -1,6 +1,6 @@
 """Responder: a PR comment lands → the ORIGINATING run answers.
 
-The comment author needs no Zagent identity — attribution was settled when the
+The comment author needs no Collegium identity — attribution was settled when the
 run was created; the engine therefore skips owner resolution for handler-routed
 events. Routing: pr_links.ado_pr_id → run. An active thread gets a nudge (graceful
 interrupt + inject); a finished thread is CONTINUED — a responder thread spawned
@@ -17,7 +17,7 @@ from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.services.runs import TERMINAL_STAGES
-from zagent_contracts.triggers import TriggerEvent
+from collegium_contracts.triggers import TriggerEvent
 
 log = get_logger(service="responder")
 

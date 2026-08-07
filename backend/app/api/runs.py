@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from zagent_contracts import ActionKind, IntentSource, UserIntent
+from collegium_contracts import ActionKind, IntentSource, UserIntent
 
 from app.core.deps import current_user
 from app.db.base import get_session
@@ -335,7 +335,7 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                 # run socket or the user's bubble only appears after a reload.
                 if user_event is not None:
                     try:
-                        from zagent_contracts import StepEvent, StepKind
+                        from collegium_contracts import StepEvent, StepKind
                         await request.app.state.relay.publish_step(run_id, StepEvent(
                             run_id=user_event["run_id"], thread_id=user_event["thread_id"],
                             seq=user_event["seq"], kind=StepKind.MESSAGE,

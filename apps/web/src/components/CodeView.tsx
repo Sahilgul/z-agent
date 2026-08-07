@@ -24,7 +24,7 @@ import { FileIcon, fileKindFromLang, fileKindFromPath, type FileKind } from "./u
  *  async-light build keeps prism + these grammars out of the main chunk.
  *
  *  v2.4 split: syntax speaks VS Code (vscDarkPlus token colors stay — devs'
- *  muscle memory), chrome speaks z-agent (jack surface + hairline frame +
+ *  muscle memory), chrome speaks Collegium (jack surface + hairline frame +
  *  slim icon header). The block sits *in* the theme instead of floating as
  *  a foreign card. */
 const LANGUAGES: Record<string, unknown> = {

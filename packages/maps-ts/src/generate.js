@@ -25,7 +25,7 @@ const IGNORED_DIRS = new Set([
   "node_modules", ".git", ".hg", ".svn",
   ".venv", "venv", "env",
   "dist", "build", "out", "coverage", ".next",
-  ".zagent", "__pycache__",
+  ".collegium", "__pycache__",
   ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox",
 ]);
 
@@ -308,7 +308,7 @@ function nowIso() {
 }
 
 /** Write map.json + map.md under <repoPath>/<outDir>. Returns [jsonPath, mdPath]. */
-export function writeMap(repoMap, repoPath, outDir = ".zagent") {
+export function writeMap(repoMap, repoPath, outDir = ".collegium") {
   const repoRoot = resolve(repoPath);
   const out = join(repoRoot, outDir);
   mkdirSync(out, { recursive: true });

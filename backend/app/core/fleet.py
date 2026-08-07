@@ -15,11 +15,11 @@ from app.core.config import get_settings
 
 def _load_loader_module(config_dir: Path) -> ModuleType:
     loader_path = config_dir / "loader.py"
-    spec = importlib.util.spec_from_file_location("zagent_fleet_loader", loader_path)
+    spec = importlib.util.spec_from_file_location("collegium_fleet_loader", loader_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"fleet-config loader not found at {loader_path}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("zagent_fleet_loader", module)
+    sys.modules.setdefault("collegium_fleet_loader", module)
     spec.loader.exec_module(module)
     return module
 

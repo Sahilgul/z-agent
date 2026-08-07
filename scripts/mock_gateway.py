@@ -18,7 +18,7 @@ available. Serves BOTH faces of the gateway contract:
       reply on the follow-up — enough to exercise the tools node live.
 
 Run (host):   python scripts/mock_gateway.py --port 4000
-Run (docker): docker run --network zagent_thread --network-alias gateway \
+Run (docker): docker run --network collegium_thread --network-alias gateway \
                 -p 4099:4000 -v "$PWD/scripts/mock_gateway.py:/app/mock_gateway.py:ro" \
                 python:3.12-slim python /app/mock_gateway.py
 """

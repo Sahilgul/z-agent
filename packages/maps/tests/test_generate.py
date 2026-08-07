@@ -1,4 +1,4 @@
-"""Tests for the Python repo-map generator (zagent_maps.generate)."""
+"""Tests for the Python repo-map generator (collegium_maps.generate)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from zagent_maps import to_dict
-from zagent_maps.generate import main as gen_main
-from zagent_maps.generate import (
+from collegium_maps import to_dict
+from collegium_maps.generate import main as gen_main
+from collegium_maps.generate import (
     GenerateReport,
     _collect_local_imports,
     _is_test_file,
@@ -27,7 +27,7 @@ from zagent_maps.generate import (
     rel_posix,
     write_map,
 )
-from zagent_maps.grammar import RepoMap
+from collegium_maps.grammar import RepoMap
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "python_repo"
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "expected" / "python_repo_map.json"
@@ -229,7 +229,7 @@ def test_analyze_file_extracts_public_symbols_only(tmp_path):
 def test_write_map_writes_json_and_md(tmp_path):
     (tmp_path / "main.py").write_text("def main():\n    pass\n", encoding="utf-8")
     repo_map, _ = generate(str(tmp_path), generated_at=PINNED_AT)
-    jp, mp = write_map(repo_map, str(tmp_path), ".zagent")
+    jp, mp = write_map(repo_map, str(tmp_path), ".collegium")
     assert jp.exists() and mp.exists()
     data = json.loads(jp.read_text(encoding="utf-8"))
     assert data["repo"] == tmp_path.name
@@ -240,9 +240,9 @@ def test_write_map_writes_json_and_md(tmp_path):
 def test_write_map_creates_out_dir(tmp_path):
     (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
     repo_map, _ = generate(str(tmp_path), generated_at=PINNED_AT)
-    jp, _ = write_map(repo_map, str(tmp_path), ".zagent")
+    jp, _ = write_map(repo_map, str(tmp_path), ".collegium")
     assert jp.parent.exists()
-    assert jp.parent.name == ".zagent"
+    assert jp.parent.name == ".collegium"
 
 
 # ---------------------------------------------------------------------------
@@ -253,8 +253,8 @@ def test_generate_cli_writes_files(tmp_path, monkeypatch, capsys):
     (tmp_path / "main.py").write_text("def main():\n    pass\n", encoding="utf-8")
     rc = gen_main([str(tmp_path), "--report"])
     assert rc == 0
-    assert (tmp_path / ".zagent" / "map.json").exists()
-    assert (tmp_path / ".zagent" / "map.md").exists()
+    assert (tmp_path / ".collegium" / "map.json").exists()
+    assert (tmp_path / ".collegium" / "map.md").exists()
     err = capsys.readouterr().err
     assert "files_scanned" in err
 

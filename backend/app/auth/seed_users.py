@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from zagent_contracts import StepKind
+from collegium_contracts import StepKind
 
 from app.core.config import get_settings
 from app.db.base import get_session
@@ -107,7 +107,7 @@ def seed() -> None:
             # invalid salt -> 500). Use None so the login route's
             # `pin_hash is None` guard returns a clean 401 (and verify_pin now
             # also guards against malformed hashes).
-            session.add(User(username="system", display_name="Zagent system",
+            session.add(User(username="system", display_name="Collegium system",
                              role="member", status="active",
                              pin_hash=None))
             session.commit()
@@ -116,7 +116,7 @@ def seed() -> None:
         # seed creates the configured admin ACTIVE so a fresh clone can log in
         # without the add_user CLI. No-op once the user exists. Defaults are
         # empty (C-14) so production never silently seeds an active admin with
-        # a known PIN — local dev opts in via ZAGENT_BOOTSTRAP_ADMIN_*
+        # a known PIN — local dev opts in via COLLEGIUM_BOOTSTRAP_ADMIN_*
         # (both username AND pin must be set; hash_pin still validates 4-6 digits).
         settings = get_settings()
         admin_name = settings.bootstrap_admin_username
@@ -235,11 +235,11 @@ def _seed_demo_run(session) -> None:
 def _seed_welcome_thread(session) -> None:
     """Welcome idea-thread fixture: 4 member comments, so the Ideas exit is
     demoable solo."""
-    if session.query(IdeaThread).filter_by(title="Welcome to Zagent — what should the fleet learn first?").one_or_none():
+    if session.query(IdeaThread).filter_by(title="Welcome to Collegium — what should the fleet learn first?").one_or_none():
         return
     system = session.query(User).filter_by(username="system").one()
     thread = IdeaThread(
-        title="Welcome to Zagent — what should the fleet learn first?",
+        title="Welcome to Collegium — what should the fleet learn first?",
         body=("This is the team's shared Ideas space. Open threads for feature thoughts, "
               "product direction, architecture concerns. Ask Counsel for the 11th-member "
               "opinion; the Lead summarizes all voices on demand."),
@@ -266,17 +266,17 @@ def _seed_triggers(session) -> None:
     autonomous flows live in ROWS — a new state is config, not a deploy."""
     from app.db.models.trigger import Trigger
     defaults = [
-        # New → zagent-plan auto-starts a Plan run attributed to whoever moved it.
+        # New → collegium-plan auto-starts a Plan run attributed to whoever moved it.
         Trigger(name="ado-state-plan", source="ado_webhook",
-                filter_json={"event_type": "work_item.updated", "state": "zagent-plan"},
+                filter_json={"event_type": "work_item.updated", "state": "collegium-plan"},
                 mode="plan", autonomy="gated", owner_resolution="changed_by",
                 rate_limit_per_hour=20),
-        # New → zagent-dev auto-starts a Development run, same attribution.
+        # New → collegium-dev auto-starts a Development run, same attribution.
         Trigger(name="ado-state-dev", source="ado_webhook",
-                filter_json={"event_type": "work_item.updated", "state": "zagent-dev"},
+                filter_json={"event_type": "work_item.updated", "state": "collegium-dev"},
                 mode="development", autonomy="gated", owner_resolution="changed_by",
                 rate_limit_per_hour=20),
-        # Guardian: CI failure on a Zagent PR → gated fix run (circuit breaker
+        # Guardian: CI failure on a Collegium PR → gated fix run (circuit breaker
         # in services/guardian.py — code, never prompt).
         Trigger(name="guardian-ci-failure", source="ado_webhook",
                 filter_json={"event_type": "build.failed"},

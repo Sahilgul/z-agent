@@ -1,7 +1,7 @@
 [project]
-name = "zagent-maps"
+name = "collegium-maps"
 version = "0.1.0"
-description = "Zagent repo-map generator + citation linter (layer 1 of the context system). Shared map grammar, Python generator for Python repos."
+description = "Collegium repo-map generator + citation linter (layer 1 of the context system). Shared map grammar, Python generator for Python repos."
 requires-python = ">=3.12,<3.13"
 dependencies = []
 
@@ -10,16 +10,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/zagent_maps"]
+packages = ["src/collegium_maps"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["tests/fixtures"]
-addopts = "--cov=zagent_maps --cov-report=term-missing --cov-fail-under=90"
+addopts = "--cov=collegium_maps --cov-report=term-missing --cov-fail-under=90"
 
 [tool.coverage.run]
-source = ["zagent_maps"]
+source = ["collegium_maps"]
 omit = ["*/__main__.py"]
 
 [tool.coverage.report]

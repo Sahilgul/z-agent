@@ -91,7 +91,7 @@ def current_user(request: Request, session: Session = Depends(db_session)) -> Us
     instead of opening a second session via get_session(). Expunge the user
     before returning so downstream routes see a detached instance (matching
     the old behavior where current_user's session was closed in finally)."""
-    token = request.cookies.get("zagent_token")
+    token = request.cookies.get("collegium_token")
     if not token:
         raise HTTPException(status_code=401, detail="not authenticated")
     try:

@@ -33,7 +33,7 @@ def write_handoff(workspace: Path, run_id: str, thread_id: str, summary: str,
     return handoff
 
 
-def git_checkpoint(workspace: Path, message: str = "zagent checkpoint") -> str | None:
+def git_checkpoint(workspace: Path, message: str = "collegium checkpoint") -> str | None:
     """Commit WIP inside the disposable stamp so a replacement thread re-stamps
     with context — the stamp is disposable, but checkpoints ride pushed branches
     for survivors."""

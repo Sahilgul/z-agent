@@ -32,7 +32,7 @@ thread = s.query(IdeaThread).first()
 print("welcome thread:", thread.title, "| comments:", s.query(IdeaComment).filter_by(thread_id=thread.id).count())
 
 from app.services.runs import compute_available_actions  # noqa: E402
-from zagent_contracts import RunStage  # noqa: E402
+from collegium_contracts import RunStage  # noqa: E402
 demo.stage = RunStage.INTERRUPTED.value
 print("interrupted actions:", compute_available_actions(demo))
 s.close()

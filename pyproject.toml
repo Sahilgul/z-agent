@@ -1,7 +1,7 @@
 [project]
-name = "zagent"
+name = "collegium"
 version = "0.1.0"
-description = "Zagent — ADO-native autonomous engineering platform (uv workspace root)"
+description = "Collegium — ADO-native autonomous engineering platform (uv workspace root)"
 requires-python = ">=3.12,<3.13"
 
 [tool.uv.workspace]
@@ -13,5 +13,5 @@ members = [
 ]
 
 [tool.uv.sources]
-zagent-contracts = { workspace = true }
-zagent-maps = { workspace = true }
+collegium-contracts = { workspace = true }
+collegium-maps = { workspace = true }

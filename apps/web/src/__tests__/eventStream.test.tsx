@@ -155,4 +155,30 @@ describe("EventStream", () => {
     await waitFor(() => expect(container.querySelector("pre code .token")).not.toBeNull());
     expect(container.textContent).toContain("const");
   });
+
+  it("never renders a --- inside a message as a visible rule", () => {
+    const { container } = render(
+      <EventStream
+        events={[ev(0, "message", "parts", { text: "part one\n\n---\n\npart two", role: "agent" })]}
+        deltas={[]}
+      />,
+    );
+    expect(container.querySelector("hr")).not.toBeInTheDocument();
+    expect(screen.getByText(/part one/)).toBeInTheDocument();
+    expect(screen.getByText(/part two/)).toBeInTheDocument();
+  });
+
+  it("marks the seam between turns, never the opening turn", () => {
+    render(
+      <EventStream
+        events={[
+          ev(0, "message", "first ask", { text: "one", role: "user" }),
+          ev(1, "message", "reply", { text: "two", role: "agent" }),
+          ev(2, "message", "second ask", { text: "three", role: "user" }),
+        ]}
+        deltas={[]}
+      />,
+    );
+    expect(screen.getAllByTestId("turn-divider")).toHaveLength(1);
+  });
 });

@@ -1,7 +1,7 @@
-"""Canonical map grammar for Zagent's repo-map (layer 1 of the context system).
+"""Canonical map grammar for Collegium's repo-map (layer 1 of the context system).
 
 This module is the SINGLE source of truth for the shape of a ``map.json`` document.
-Both generators — the Python generator in :mod:`zagent_maps.generate` (analyzes
+Both generators — the Python generator in :mod:`collegium_maps.generate` (analyzes
 Python repos via :mod:`ast`) and the TypeScript generator in ``packages/maps-ts``
 (analyzes TS/JS repos via regex/token heuristics) — MUST emit a document that
 conforms to this grammar with byte-identical key order and sorting for equivalent

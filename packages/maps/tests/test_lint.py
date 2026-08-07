@@ -1,4 +1,4 @@
-"""Tests for the citation linter (zagent_maps.lint)."""
+"""Tests for the citation linter (collegium_maps.lint)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from zagent_maps.lint import (
+from collegium_maps.lint import (
     LintReport,
     lint,
     lint_citation,

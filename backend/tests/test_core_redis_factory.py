@@ -5,7 +5,7 @@ import json
 
 import fakeredis
 import redis.asyncio as real_redis
-from zagent_contracts import StepEvent, StepKind
+from collegium_contracts import StepEvent, StepKind
 
 from app.core.config import get_settings
 from app.core.redis_factory import in_memory, make_redis
@@ -16,7 +16,7 @@ from app.db.models.run import Run
 
 
 def test_memory_scheme_returns_shared_fakeredis(monkeypatch):
-    monkeypatch.setenv("ZAGENT_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
     get_settings.cache_clear()
     try:
         a = make_redis()
@@ -30,7 +30,7 @@ def test_memory_scheme_returns_shared_fakeredis(monkeypatch):
 
 
 async def test_memory_clients_share_the_bus(monkeypatch):
-    monkeypatch.setenv("ZAGENT_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
     get_settings.cache_clear()
     try:
         pub = make_redis()
@@ -51,7 +51,7 @@ async def test_memory_clients_share_the_bus(monkeypatch):
 
 
 def test_real_scheme_returns_redis_client(monkeypatch):
-    monkeypatch.setenv("ZAGENT_REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("COLLEGIUM_REDIS_URL", "redis://localhost:6379/0")
     get_settings.cache_clear()
     try:
         client = make_redis()
@@ -65,7 +65,7 @@ async def test_memory_ingest_loop_consumes_without_freezing(session, make_user, 
     """Regression: fakeredis blocking reads froze the dev server's one asyncio
     loop (monitor stuck at 'loading run…'). The in-memory path must poll AND
     still deliver events."""
-    monkeypatch.setenv("ZAGENT_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
     get_settings.cache_clear()
     try:
         assert in_memory() is True
@@ -102,7 +102,7 @@ async def test_memory_ingest_loop_consumes_without_freezing(session, make_user, 
 
 
 async def test_memory_relay_delta_poll_delivers(monkeypatch):
-    monkeypatch.setenv("ZAGENT_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
     get_settings.cache_clear()
     try:
         from app.events.relay import Relay
@@ -133,8 +133,8 @@ def test_seed_bootstraps_active_admin_once(session, monkeypatch):
     # C-14: the bootstrap admin is opt-in (no shipped default). Configure
     # username + pin, then seed — a production deploy with empty defaults
     # never silently seeds an active admin with a known PIN.
-    monkeypatch.setenv("ZAGENT_BOOTSTRAP_ADMIN_USERNAME", "sahil")
-    monkeypatch.setenv("ZAGENT_BOOTSTRAP_ADMIN_PIN", "4545")
+    monkeypatch.setenv("COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME", "sahil")
+    monkeypatch.setenv("COLLEGIUM_BOOTSTRAP_ADMIN_PIN", "4545")
     get_settings.cache_clear()
     try:
         seed()

@@ -4,15 +4,15 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: zagent-redis
-  labels: { app: zagent-redis }
+  name: collegium-redis
+  labels: { app: collegium-redis }
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: zagent-redis }
+    matchLabels: { app: collegium-redis }
   template:
     metadata:
-      labels: { app: zagent-redis }
+      labels: { app: collegium-redis }
     spec:
       containers:
         - name: redis
@@ -27,12 +27,12 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: zagent-redis-data
+            claimName: collegium-redis-data
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: zagent-redis-data
+  name: collegium-redis-data
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -41,7 +41,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: zagent-redis
+  name: collegium-redis
 spec:
-  selector: { app: zagent-redis }
+  selector: { app: collegium-redis }
   ports: [{ port: 6379 }]

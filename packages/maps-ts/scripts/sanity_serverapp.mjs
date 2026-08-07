@@ -1,5 +1,5 @@
 // Sanity check: run the TS generator against a real repo checkout.
-// Does NOT write .zagent/ into the repo — writes map.json/map.md to a temp
+// Does NOT write .collegium/ into the repo — writes map.json/map.md to a temp
 // dir and prints module count, top-5 hot files, and crash count.
 // Point SANITY_REPO at any local checkout (default: the golden tree layout).
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -13,7 +13,7 @@ const REPO = process.env.SANITY_REPO || "./golden/repos/ServerApp";
 
 function main() {
   const { map, report } = generate(REPO);
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-sanity-ts-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-sanity-ts-"));
   writeFileSync(join(tmp, "ServerApp_map.json"), JSON.stringify(toDict(map), null, 2) + "\n", "utf8");
   writeFileSync(join(tmp, "ServerApp_map.md"), renderMarkdown(map), "utf8");
 

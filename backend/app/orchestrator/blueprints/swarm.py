@@ -22,7 +22,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from zagent_contracts import Decomposition, RunStage
+from collegium_contracts import Decomposition, RunStage
 
 from app.core.config import get_settings
 from app.core.logging import get_logger

@@ -307,8 +307,11 @@ export function SessionsScreen() {
         </div>
       )}
 
+      {/* No hairline above the composer: the stream's scroll-fade-b mask
+          dissolves text into the gap instead — a soft Cursor-style boundary,
+          one less hard line competing for the reader's eye. */}
       <section
-        className="flex-none border-t border-hairline bg-bg-panel"
+        className="flex-none bg-bg-panel"
         aria-label={current ? "message the lead" : "new run"}
       >
         {current && <ApprovalQueue runId={current.id} />}

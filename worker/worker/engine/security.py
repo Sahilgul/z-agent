@@ -101,7 +101,7 @@ class QuarantineError(RuntimeError):
 
 def quarantine_path(workspace: Path) -> Path:
     """The read-only quarantine directory inside the workspace stamp."""
-    q = workspace / ".zagent" / "quarantine"
+    q = workspace / ".collegium" / "quarantine"
     q.mkdir(parents=True, exist_ok=True)
     return q
 

@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { parseCitation, lint, lintCitation, renderReport } from "../src/lint.js";
 
 function smallRepo() {
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-ts-lint-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-ts-lint-"));
   writeFileSync(join(tmp, "mod.ts"),
     "/** Mod. */\nexport class C {\n  run(): void {}\n}\nexport function f(a: number, b: number): number {\n  return a + b;\n}\n",
     "utf8");

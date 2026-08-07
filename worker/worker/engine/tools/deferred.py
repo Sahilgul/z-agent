@@ -167,13 +167,13 @@ async def call_deferred_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _web_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search provider via the gateway: POST ZAGENT_SEARCH_ENDPOINT.
+    """Search provider via the gateway: POST COLLEGIUM_SEARCH_ENDPOINT.
     Unconfigured endpoint is a typed error, never a crash."""
-    endpoint = os.environ.get("ZAGENT_SEARCH_ENDPOINT", "").strip()
+    endpoint = os.environ.get("COLLEGIUM_SEARCH_ENDPOINT", "").strip()
     if not endpoint:
         return {"kind": "error", "ok": False,
                 "output": "error: web_search provider not configured "
-                          "(set ZAGENT_SEARCH_ENDPOINT on the gateway)",
+                          "(set COLLEGIUM_SEARCH_ENDPOINT on the gateway)",
                 "tool": "web_search", "args": args}
     query = str(args.get("query", "")).strip()
     if not query:

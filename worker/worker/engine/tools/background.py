@@ -32,7 +32,7 @@ _KILL_GRACE_S = 5.0
 
 def _jobs_dir() -> Path:
     ws = Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
-    d = ws / ".zagent" / "terminal"
+    d = ws / ".collegium" / "terminal"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

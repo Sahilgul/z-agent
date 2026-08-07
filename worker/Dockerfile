@@ -1,7 +1,7 @@
 # Worker image: custom LangGraph engine (default) + legacy Claude Agent SDK
 # fallback (ENGINE=sdk, kept through the RE soak) + Claude CLI + rg + git.
 # Build context = REPO ROOT (needs packages/):
-#   docker build -f worker/Dockerfile -t zagent-worker:0.2.0 .
+#   docker build -f worker/Dockerfile -t collegium-worker:0.2.0 .
 FROM python:3.12-slim
 
 RUN apt-get update \

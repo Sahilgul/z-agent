@@ -160,7 +160,7 @@ def test_thread_env_writable_includes_fleet_pat(session, make_user):
     mgr = sb.SandboxManager()
     env = mgr.thread_env(run, thread, "task", "persona", "acceptEdits", writable=True)
     assert env["FLEET_PAT"] == sb.get_settings().fleet_pat
-    assert env["ZAGENT_CREDENTIAL_SCOPE"] == "fleet"
+    assert env["COLLEGIUM_CREDENTIAL_SCOPE"] == "fleet"
     assert env["PERMISSION_MODE"] == "acceptEdits"
 
 

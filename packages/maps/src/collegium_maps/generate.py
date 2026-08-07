@@ -2,7 +2,7 @@
 
 This is the Python half of the shared-grammar generator pair. It scans a repo,
 parses every ``.py`` file with :mod:`ast`, and emits a
-:class:`zagent_maps.grammar.RepoMap` conforming to the canonical grammar. The
+:class:`collegium_maps.grammar.RepoMap` conforming to the canonical grammar. The
 TypeScript half lives in ``packages/maps-ts`` and emits the same shape for
 TS/JS repos.
 
@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from zagent_maps.grammar import (
+from collegium_maps.grammar import (
     EDGE_IMPORT,
     LANGUAGE_PYTHON,
     HotFile,
@@ -46,7 +46,7 @@ IGNORED_DIRS: frozenset[str] = frozenset({
     ".git", ".hg", ".svn",
     ".venv", "venv", "env",
     "node_modules", "__pycache__",
-    ".zagent",
+    ".collegium",
     "build", "dist", "out", "coverage", ".next",
     ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox",
     "site-packages",
@@ -427,7 +427,7 @@ def _now_iso() -> str:
 
 
 def write_map(repo_map: RepoMap, repo_path: str | os.PathLike[str],
-              out_dir: str | os.PathLike[str] = ".zagent") -> tuple[Path, Path]:
+              out_dir: str | os.PathLike[str] = ".collegium") -> tuple[Path, Path]:
     """Write ``map.json`` and ``map.md`` under ``<repo_path>/<out_dir>``.
 
     Creates the output directory if needed. Returns the two written paths.
@@ -446,11 +446,11 @@ def write_map(repo_map: RepoMap, repo_path: str | os.PathLike[str],
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry: ``python -m zagent_maps.generate <repo_path> [--out .zagent]``."""
-    parser = argparse.ArgumentParser(prog="zagent-maps-generate", description=__doc__)
+    """CLI entry: ``python -m collegium_maps.generate <repo_path> [--out .collegium]``."""
+    parser = argparse.ArgumentParser(prog="collegium-maps-generate", description=__doc__)
     parser.add_argument("repo_path", help="Path to the Python repo to map.")
-    parser.add_argument("--out", default=".zagent",
-                        help="Output dir name under the repo (default: .zagent).")
+    parser.add_argument("--out", default=".collegium",
+                        help="Output dir name under the repo (default: .collegium).")
     parser.add_argument("--report", action="store_true",
                         help="Print the generate report JSON to stderr.")
     args = parser.parse_args(argv)

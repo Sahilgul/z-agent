@@ -1,4 +1,4 @@
-# zagent console — design contract
+# collegium console — design contract
 
 **Archetype: Stripe x Linear, committed.** Every surface is one of four archetypes — *list*, *live*, *dashboard*, *overlay* — and each commits fully: Stripe owns the data (tight rows, right-aligned numerics, sticky headers, filter chips, pagination that feels server-side), Linear owns the chrome (a slim rail around a card-on-stage main area, hairline borders, one accent move per surface, zero decorative noise). The patch-bay soul survives as *instrumentation*: LEDs that mean something, mono micro-labels in caps, the dot-grid stage. Fraunces appears at most once per screen, and never below 22px. If a surface can't justify an ornament, the ornament is deleted.
 
@@ -40,7 +40,7 @@ v2.3's warm charcoal + muted sage read as "vintage" / "color damaged in sunshine
    - Soft tints auto-derive via the existing `color-mix` tokens.
 3. **Restrained shine**: new `--shadow-glow: 0 0 14px color-mix(in srgb, var(--green-bright) 32%, transparent)`, applied to the primary button + hover only. Glow budget: **two elements per screen max** (primary button + live LEDs). More = gaming-RGB, less = expensive. No gradients — the existing glow exception in the LED rule is the only other allowed glow.
 4. **Markdown is prose, not titled cards.** Headings drop Fraunces (which is reserved for screen titles per the Type section) and use the UI face at 16/15/13.5px; sections separate by rhythm, not by looking like boxed sections. Tables lose vertical borders, zebra striping, and the boxed header fill — horizontal hairlines only, header stays mono-caps `--ink-faint` with a bottom rule. Inline code blends (`bg-module` + `green-bright` text) instead of a dark chip. Edge margins normalized so bubbles have clean top/bottom.
-5. **Code-surface split: syntax speaks VS Code, chrome speaks z-agent.** `vscDarkPlus` token colors stay as-is (devs' muscle memory; they were tuned on `#1e1e1e`, so on deeper jack they read slightly brighter — acceptable). The block surface becomes `--jack` + hairline frame, with a slim VS Code-style header: file-type icon (new `FileIcon` set — TS blue, JS yellow, JSON orange, Python blue/yellow, shell green…) + filename or language label in mono micro `--ink-faint`. The terminal frame loses its macOS traffic-light dots (off-palette ornament; "if a surface can't justify an ornament, the ornament is deleted") and gains the same slim header.
+5. **Code-surface split: syntax speaks VS Code, chrome speaks Collegium.** `vscDarkPlus` token colors stay as-is (devs' muscle memory; they were tuned on `#1e1e1e`, so on deeper jack they read slightly brighter — acceptable). The block surface becomes `--jack` + hairline frame, with a slim VS Code-style header: file-type icon (new `FileIcon` set — TS blue, JS yellow, JSON orange, Python blue/yellow, shell green…) + filename or language label in mono micro `--ink-faint`. The terminal frame loses its macOS traffic-light dots (off-palette ornament; "if a surface can't justify an ornament, the ornament is deleted") and gains the same slim header.
 6. **Mermaid diagrams render for real.** A ` ```mermaid ` fence renders as a themed SVG (lazy-loaded via `React.lazy` + `Suspense` so the ~300KB chunk never touches startup or non-diagram sessions; `securityLevel: "strict"` for untrusted agent content; graceful fallback to a code block + "diagram failed to parse" note on parse error). Three-stage UX: skeleton-sweep shimmer while the chunk loads → partial source as code while streaming → themed SVG when complete.
 
 ## v2.5 — Public landing: brochure brightness on console geometry
@@ -95,7 +95,7 @@ Scale (px): 10.5 / 11 / 12 / 13.5 / 15 / 17 / 22 / 26. Weights: 400 and 600 only
 
 ```
 ┌────────────┬──────────────────────────────────────────┐
-│ ● zagent   │  screen title (Fraunces)        actions  │
+│ ● collegium   │  screen title (Fraunces)        actions  │
 │            │  ──────────────────────────────────────  │
 │ OPERATE    │                                          │
 │  ▸ inbox   │            canvas (stage)                │

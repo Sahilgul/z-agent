@@ -1,4 +1,4 @@
-"""Guardian: CI failure on a Zagent PR → a gated fix run, under
+"""Guardian: CI failure on a Collegium PR → a gated fix run, under
 a circuit breaker that is CODE, never prompt (the liver rule — a breaker the
 agent could talk its way past is not a breaker).
 
@@ -19,7 +19,7 @@ from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.trigger import TriggerEventLog
 from app.services import identity
-from zagent_contracts.triggers import TriggerEvent
+from collegium_contracts.triggers import TriggerEvent
 
 log = get_logger(service="guardian")
 

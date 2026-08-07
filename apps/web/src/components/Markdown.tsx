@@ -7,6 +7,10 @@ import { Mermaid } from "./Mermaid";
 /** GFM markdown in Patch Bay ink — plans, notebooks, Lead messages.
  *  Typography rules live in the `.md` component layer of theme/index.css. */
 const COMPONENTS: Components = {
+  // Cursor-style: a `---` inside a message is a pause, not a rule. A visible
+  // line made one answer read as several separate answers, so the marker
+  // renders as pure breathing room — never as a drawn rule.
+  hr: () => <div aria-hidden="true" className="h-2.5" />,
   // A many-column table is the one payload that legitimately exceeds the
   // bubble. The stream pane clips its horizontal axis (so a wide payload can
   // never drag the app sideways), which means an unwrapped table would be cut

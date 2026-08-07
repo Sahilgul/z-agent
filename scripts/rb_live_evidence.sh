@@ -4,7 +4,7 @@
 # engine, asserting StepEvents reach the console feed endpoint.
 #
 # Prerequisites: docker, the worker image built
-#   docker build -f worker/Dockerfile -t zagent-worker:0.2.0 .
+#   docker build -f worker/Dockerfile -t collegium-worker:0.2.0 .
 # and the repo venv (.venv) with backend deps.
 #
 # Usage: scripts/rb_live_evidence.sh [--keep]   (--keep leaves the stack up)
@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="${ROOT}/.venv/bin/python"
 DATA="/tmp/rb-evidence"
-NET="zagent_thread"
+NET="collegium_thread"
 PG_PORT="${RA_PG_PORT:-55432}"
 KEEP="${1:-}"
 
@@ -29,7 +29,7 @@ docker network inspect "${NET}" >/dev/null 2>&1 || docker network create "${NET}
 docker rm -f rb-redis rb-gateway rb-evidence-pg >/dev/null 2>&1 || true
 docker run -d --name rb-redis --network "${NET}" --network-alias redis -p 6380:6379 redis:7-alpine >/dev/null
 docker run -d --name rb-evidence-pg --network "${NET}" --network-alias pg \
-  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=zagent -p "${PG_PORT}:5432" \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=collegium -p "${PG_PORT}:5432" \
   postgres:16-alpine >/dev/null
 docker run -d --name rb-gateway --network "${NET}" --network-alias gateway -p 4099:4000 \
   -v "${ROOT}/scripts/mock_gateway.py:/app/mock_gateway.py:ro" \
@@ -44,28 +44,28 @@ for _ in $(seq 1 30); do curl -sf http://localhost:4099/health/liveliness >/dev/
 
 # --- backend ------------------------------------------------------------------
 mkdir -p "${DATA}"/{golden/repos,sessions,workspaces,transcripts,evidence,playbooks}
-export ZAGENT_DB_URL="sqlite:///${DATA}/zagent.db" \
-  ZAGENT_REDIS_URL="redis://localhost:6380/0" \
-  ZAGENT_GATEWAY_URL="http://localhost:4099" \
-  ZAGENT_LITELLM_MASTER_KEY="sk-mock-master" \
-  ZAGENT_WORKER_IMAGE="zagent-worker:0.2.0" \
-  ZAGENT_WORKER_NETWORK="${NET}" \
-  ZAGENT_ENGINE_DATABASE_URL="postgresql://postgres:postgres@pg:5432/zagent" \
-  ZAGENT_GOLDEN_DIR="${DATA}/golden/repos" \
-  ZAGENT_SESSIONS_DIR="${DATA}/sessions" \
-  ZAGENT_WORKSPACES_DIR="${DATA}/workspaces" \
-  ZAGENT_TRANSCRIPTS_DIR="${DATA}/transcripts" \
-  ZAGENT_EVIDENCE_DIR="${DATA}/evidence" \
-  ZAGENT_PLAYBOOKS_DIR="${DATA}/playbooks"
+export COLLEGIUM_DB_URL="sqlite:///${DATA}/collegium.db" \
+  COLLEGIUM_REDIS_URL="redis://localhost:6380/0" \
+  COLLEGIUM_GATEWAY_URL="http://localhost:4099" \
+  COLLEGIUM_LITELLM_MASTER_KEY="sk-mock-master" \
+  COLLEGIUM_WORKER_IMAGE="collegium-worker:0.2.0" \
+  COLLEGIUM_WORKER_NETWORK="${NET}" \
+  COLLEGIUM_ENGINE_DATABASE_URL="postgresql://postgres:postgres@pg:5432/collegium" \
+  COLLEGIUM_GOLDEN_DIR="${DATA}/golden/repos" \
+  COLLEGIUM_SESSIONS_DIR="${DATA}/sessions" \
+  COLLEGIUM_WORKSPACES_DIR="${DATA}/workspaces" \
+  COLLEGIUM_TRANSCRIPTS_DIR="${DATA}/transcripts" \
+  COLLEGIUM_EVIDENCE_DIR="${DATA}/evidence" \
+  COLLEGIUM_PLAYBOOKS_DIR="${DATA}/playbooks"
 
 cd "${ROOT}/backend"
-rm -f "${DATA}/zagent.db"*
+rm -f "${DATA}/collegium.db"*
 "${PY}" -m alembic upgrade head >/dev/null
 "${PY}" -m app.auth.seed_users >/dev/null
 "${PY}" - <<'PYEOF'
 import sqlite3
 from datetime import datetime, timezone
-conn = sqlite3.connect('/tmp/rb-evidence/zagent.db')
+conn = sqlite3.connect('/tmp/rb-evidence/collegium.db')
 conn.execute(
     "INSERT INTO repos (name, remote_url, integration_branch, status, status_detail, created_at)"
     " VALUES ('ServerApp', '', 'main', 'ready-no-map', '', ?)",
@@ -106,12 +106,12 @@ assert 'status' in kinds and any('turn complete' in t for t in titles), 'no turn
 print(f'RB LIVE EVIDENCE OK: {len(events)} StepEvents in the console feed (kinds: {sorted(set(kinds))})')
 "
 
-CONTAINER=$(docker ps -a --filter name=zagent-thread --format '{{.Names}}' | head -1)
+CONTAINER=$(docker ps -a --filter name=collegium-thread --format '{{.Names}}' | head -1)
 docker logs "${CONTAINER}" 2>&1 | grep -m1 "ENGINE=custom" \
   && echo "RB BOOT EVIDENCE OK: worker container booted the engine runner"
 docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 
-docker exec rb-evidence-pg psql -U postgres -d zagent -tAc \
+docker exec rb-evidence-pg psql -U postgres -d collegium -tAc \
   "SELECT count(*) FROM checkpoints" | { read -r n; [ "${n}" -gt 0 ] \
   && echo "RB CHECKPOINTER EVIDENCE OK: ${n} checkpoint rows in Postgres"; }
 

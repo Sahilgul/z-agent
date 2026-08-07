@@ -11,7 +11,7 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.base import get_session
 from app.db.models.thread import Thread

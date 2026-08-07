@@ -4,7 +4,7 @@ Per repo: clone into golden -> checkout origin/<integrationBranch> -> register
 (already done by seed_repos.py) -> profile stub. Golden is FETCH-ONLY from this
 moment on; workspaces stamp self-contained clones from it.
 
-Run (env: FETCH_PAT, ZAGENT_ADO_ORG/PROJECT, ZAGENT_GOLDEN_DIR):
+Run (env: FETCH_PAT, COLLEGIUM_ADO_ORG/PROJECT, COLLEGIUM_GOLDEN_DIR):
   python golden_seed.py [--only ServerApp]
 """
 
@@ -20,17 +20,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fleet-config"))
 from loader import load_repos  # noqa: E402
 
-GOLDEN = Path(os.environ.get("ZAGENT_GOLDEN_DIR", "./golden/repos"))
-ORG = os.environ.get("ZAGENT_ADO_ORG") or os.environ.get("ADO_ORG", "")
-PROJECT = os.environ.get("ZAGENT_ADO_PROJECT") or os.environ.get("ADO_PROJECT", "")
+GOLDEN = Path(os.environ.get("COLLEGIUM_GOLDEN_DIR", "./golden/repos"))
+ORG = os.environ.get("COLLEGIUM_ADO_ORG") or os.environ.get("ADO_ORG", "")
+PROJECT = os.environ.get("COLLEGIUM_ADO_PROJECT") or os.environ.get("ADO_PROJECT", "")
 PAT = os.environ.get("FETCH_PAT", "")
 
-HELPER = Path(__file__).resolve().parent / "git-credential-zagent"
+HELPER = Path(__file__).resolve().parent / "git-credential-collegium"
 
 
 def git(*args: str, cwd: Path | None = None) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True,
-                   env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "ZAGENT_CREDENTIAL_SCOPE": "fetch"})
+                   env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "COLLEGIUM_CREDENTIAL_SCOPE": "fetch"})
 
 
 def seed_repo(name: str, branch: str) -> None:

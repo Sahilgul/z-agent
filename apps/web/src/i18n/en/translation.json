@@ -32,7 +32,7 @@
     "errRequired": "required",
     "errUsernameMin": "at least 2 characters",
     "errPinLen": "pin must be 4-6 digits",
-    "footerOrg": "© Zagent Harness AI"
+    "footerOrg": "© Collegium Labs"
   },
   "empty": {
     "inbox": "no runs yet — describe the first one below",
@@ -59,9 +59,9 @@
   },
   "landing": {
     "eyebrow": "autonomous engineering console",
-    "h1a": "Route the",
-    "h1b": "fleet.",
-    "sub": "zagent turns a pile of repositories into a crew of agents you can actually supervise. Describe the work once — the rack plans it, swarms it, and opens the PR. Every destructive step waits for your green light.",
+    "h1a": "Collegium — a legion of swarm agents,",
+    "h1b": "moving as one.",
+    "sub": "Collegium turns a pile of repositories into a crew of agents you can actually supervise. Describe the work once — the rack plans it, swarms it, and opens the PR. Every destructive step waits for your green light.",
     "ctaSignin": "sign in",
     "ctaConsole": "open console",
     "ctaTour": "tour the rack ↓",
@@ -92,6 +92,6 @@
     "statConsole": "console to watch it all",
     "finalH2": "Plug in.",
     "finalSub": "the rack is warm — your repos are already waiting.",
-    "footerTag": "route the fleet"
+    "footerTag": "a legion of swarm agents, moving as one"
   }
 }

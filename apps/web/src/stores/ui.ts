@@ -11,7 +11,7 @@ export type Overlay =
 
 /** Closing a tab hides it from the strip — it never deletes the run, which
  *  stays reachable from history. Persisted so the strip survives a reload. */
-const CLOSED_KEY = "zagent.closed-tabs";
+const CLOSED_KEY = "collegium.closed-tabs";
 
 function loadClosed(): string[] {
   try {

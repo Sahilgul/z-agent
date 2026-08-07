@@ -33,7 +33,7 @@ from app.db.models.run import Run
 from app.db.models.trigger import Trigger, TriggerEventLog, TriggerEventVerdict
 from app.services import identity
 from app.services.runs import TERMINAL_STAGES
-from zagent_contracts.triggers import TriggerEvent, TriggerSource
+from collegium_contracts.triggers import TriggerEvent, TriggerSource
 
 log = get_logger(service="triggers")
 
@@ -111,7 +111,7 @@ def normalize_ado_build(body: dict) -> TriggerEvent:
 
 def normalize_ado_pr_comment(body: dict) -> TriggerEvent:
     """ADO PR thread/comment payload -> TriggerEvent for the Responder.
-    Dedupe on (pr_id, comment_id); the comment author needs no Zagent identity."""
+    Dedupe on (pr_id, comment_id); the comment author needs no Collegium identity."""
     resource = body.get("resource") or {}
     comment = resource.get("comment") or resource
     pr = resource.get("pullRequest") or {}
@@ -173,7 +173,7 @@ def _event_handlers():
 # -------------------------------------------------------------------- engine
 def _matches(trigger: Trigger, event: TriggerEvent) -> bool:
     """Row filters own the vocabulary: every key in filter_json must equal the
-    event's field — event_type plus any payload keys (e.g. state=zagent-plan)."""
+    event's field — event_type plus any payload keys (e.g. state=collegium-plan)."""
     f = trigger.filter_json or {}
     if "event_type" in f and f["event_type"] != event.event_type:
         return False

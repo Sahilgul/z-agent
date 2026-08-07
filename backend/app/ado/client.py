@@ -3,7 +3,7 @@
 TWO PATs: FETCH_PAT (Code:Read, golden fetcher ONLY) and FLEET_PAT (Code:R&W,
 service account, injected into workers at container start). A PAT NEVER lands in
 remote URLs, .git/config, events, or logs — git auth rides the credential helper
-(scripts/git-credential-zagent) / http.extraHeader from env.
+(scripts/git-credential-collegium) / http.extraHeader from env.
 
 Identity binding: names are labels, never keys. resolve_identity maps an
 ADO email -> descriptor via the Graph API and FAILS LOUDLY on 0 or 2+ matches
@@ -188,7 +188,7 @@ class AdoClient:
 
     async def complete_pull_request(self, repo_id: str, pr_id: int, merge_commit_message: str = "") -> dict:
         """Merge ceremony lock: the human's approval lives in
-        Zagent's evidence trail; completion rides FLEET_PAT (service account
+        Collegium's evidence trail; completion rides FLEET_PAT (service account
         granted bypass-policies-on-complete). Fallback: deep-link to ADO native."""
         async with self._client() as c:
             r = await c.patch(

@@ -1,6 +1,6 @@
 """Identifier contract — the one-way door (decided before any rename locks in).
 
-The z-agent harness has FOUR identifier layers. They are NOT interchangeable;
+The Collegium harness has FOUR identifier layers. They are NOT interchangeable;
 each has a specific scope, lifetime, and persistence surface. Getting this
 wrong propagates everywhere (checkpoints, events, approvals, budget), so it
 is fixed here, once.

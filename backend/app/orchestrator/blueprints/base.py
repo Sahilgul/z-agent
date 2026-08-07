@@ -13,7 +13,7 @@ import abc
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.models.run import Run
 from app.services.runs import transition

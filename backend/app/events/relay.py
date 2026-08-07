@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from zagent_contracts import StepEvent
+from collegium_contracts import StepEvent
 
 from app.core.redis_factory import in_memory, make_redis
 

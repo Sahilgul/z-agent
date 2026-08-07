@@ -41,7 +41,7 @@ _REMEMBER_MAX_AGE = 60 * 60 * 24 * 14
 
 def _set_cookie(response: Response, token: str, remember: bool) -> None:
     response.set_cookie(
-        "zagent_token", token, httponly=True, samesite="lax",
+        "collegium_token", token, httponly=True, samesite="lax",
         secure=False,  # plain HTTP; flip once TLS terminates ahead
         max_age=_REMEMBER_MAX_AGE if remember else None,
     )
@@ -113,7 +113,7 @@ def first_login(body: FirstLoginBody, response: Response):
 
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie("zagent_token")
+    response.delete_cookie("collegium_token")
     return {"ok": True}
 
 

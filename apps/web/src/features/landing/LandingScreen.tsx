@@ -175,7 +175,7 @@ export function LandingScreen() {
           <span className="font-display text-[19px] font-semibold leading-none text-ok-bright" aria-hidden="true">
             ⌁
           </span>
-          <span className="font-mono text-[13.5px] font-semibold tracking-[0.03em]">zagent</span>
+          <span className="font-mono text-[13.5px] font-semibold tracking-[0.03em]">collegium</span>
           <span className="led" aria-hidden="true" />
           <span className="text-micro ml-s1 text-ink-ghost max-[700px]:hidden">v2.5</span>
           <nav className="ml-auto flex items-center gap-s3" aria-label="landing">

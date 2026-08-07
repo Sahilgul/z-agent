@@ -104,7 +104,7 @@ def test_normalize_pr_created():
 
 
 def test_pr_task_text_is_a_review_brief():
-    from zagent_contracts.triggers import TriggerEvent, TriggerSource
+    from collegium_contracts.triggers import TriggerEvent, TriggerSource
     ev = TriggerEvent(source=TriggerSource.ADO_WEBHOOK, external_id="88", revision=0,
                       event_type="pr.created",
                       payload={"pr_id": 88, "repo": "ServerApp", "title": "add billing"})

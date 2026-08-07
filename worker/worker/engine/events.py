@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
-from zagent_contracts import StepEvent, StepKind
+from collegium_contracts import StepEvent, StepKind
 
 from worker.engine.security import redact, redact_dict
 

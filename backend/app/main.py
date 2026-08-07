@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Zagent", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Collegium", version="0.1.0", lifespan=lifespan)
 
     from app.api import approvals, auth, bench, byo_pat, campaigns, hydration, ideas, knowledge, threads, modes, proposals, push, repos, runs, sessions, team, webhooks
     from app.ws.events import router as ws_router
@@ -97,7 +97,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "service": "zagent-backend"}
+        return {"status": "ok", "service": "collegium-backend"}
 
     return app
 

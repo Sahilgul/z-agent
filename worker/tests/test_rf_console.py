@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
-from zagent_contracts import StepKind
+from collegium_contracts import StepKind
 
 from worker.engine.events import EventEmitter
 from worker.engine.goal_mode import GoalStage

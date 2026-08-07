@@ -57,7 +57,7 @@ test("repo name is repo basename", () => {
 });
 
 test("syntax/binary file recorded as crash, not thrown", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-ts-crash-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-ts-crash-"));
   mkdirSync(join(tmp, "src"), { recursive: true });
   writeFileSync(join(tmp, "src", "good.ts"), "export function f(): number { return 1; }\n");
   // binary content with a NUL byte triggers the unreadable path
@@ -68,7 +68,7 @@ test("syntax/binary file recorded as crash, not thrown", () => {
 });
 
 test("empty repo produces empty map", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-ts-empty-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-ts-empty-"));
   const { map, report } = generate(tmp, PINNED_AT);
   assert.deepEqual(map.modules, []);
   assert.deepEqual(map.symbols, []);
@@ -80,7 +80,7 @@ test("empty repo produces empty map", () => {
 });
 
 test("iterSourceFiles skips node_modules and dist", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-ts-ignore-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-ts-ignore-"));
   mkdirSync(join(tmp, "node_modules"), { recursive: true });
   writeFileSync(join(tmp, "node_modules", "skip.ts"), "export const x = 1;\n");
   mkdirSync(join(tmp, "dist"));
@@ -92,11 +92,11 @@ test("iterSourceFiles skips node_modules and dist", () => {
 });
 
 test("writeMap writes json and md and creates out dir", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-ts-write-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-ts-write-"));
   mkdirSync(join(tmp, "src"));
   writeFileSync(join(tmp, "src", "index.ts"), "/** entry. */\nexport function main(): void {}\n");
   const { map } = generate(tmp, PINNED_AT);
-  const [jp, mp] = writeMap(map, tmp, ".zagent");
+  const [jp, mp] = writeMap(map, tmp, ".collegium");
   assert.ok(existsSync(jp));
   assert.ok(existsSync(mp));
   const data = readJson(jp);
@@ -106,7 +106,7 @@ test("writeMap writes json and md and creates out dir", () => {
 });
 
 test("cli generate writes files (smoke)", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "zagent-ts-cli-"));
+  const tmp = mkdtempSync(join(tmpdir(), "collegium-ts-cli-"));
   mkdirSync(join(tmp, "src"));
   writeFileSync(join(tmp, "src", "index.ts"), "/** entry. */\nexport function main(): void {}\n");
   const cli = join(here, "..", "src", "cli.js");

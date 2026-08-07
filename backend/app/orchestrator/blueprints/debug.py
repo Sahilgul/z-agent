@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.base import get_session
 from app.db.models.event import Event
@@ -162,7 +162,7 @@ class DebugBlueprint(Blueprint):
         proposal = self._parse_json(ctx.artifacts.get("proposal_text") or "")
         if proposal is None:
             raise RuntimeError("debug proposal did not produce parseable Plan JSON")
-        from zagent_contracts import Plan as PlanContract
+        from collegium_contracts import Plan as PlanContract
         plan_contract = PlanContract.model_validate(proposal)
         structured = dict(proposal)
         structured["diagnosis"] = ctx.artifacts.get("diagnosis", "")

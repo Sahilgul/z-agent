@@ -59,7 +59,7 @@ from claude_agent_sdk import (
     ResultMessage,
     ToolUseBlock,
 )
-from zagent_contracts import Notebook, Plan, StepEvent, StepKind
+from collegium_contracts import Notebook, Plan, StepEvent, StepKind
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from worker.normalize import Normalizer

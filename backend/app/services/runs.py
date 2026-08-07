@@ -4,7 +4,7 @@ orchestrator, rendered as-is by the UI. Pure Python — NO FastAPI imports.
 
 from __future__ import annotations
 
-from zagent_contracts import ActionKind, RunStage
+from collegium_contracts import ActionKind, RunStage
 
 from app.db.models.run import Run
 

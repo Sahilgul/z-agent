@@ -34,7 +34,7 @@ def fetch_one(repo: Repo, golden_dir) -> tuple[bool, str]:
     fetch = subprocess.run(
         ["git", "-C", str(path), "fetch", "--quiet", "origin"],
         capture_output=True, text=True, timeout=300,
-        env={"GIT_TERMINAL_PROMPT": "0", "ZAGENT_CREDENTIAL_SCOPE": "fetch", **_env()},
+        env={"GIT_TERMINAL_PROMPT": "0", "COLLEGIUM_CREDENTIAL_SCOPE": "fetch", **_env()},
     )
     if fetch.returncode != 0:
         return False, fetch.stderr.strip()[:300]

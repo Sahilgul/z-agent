@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover
     TextBlock = ThinkingBlock = ToolResultBlock = None  # type: ignore[assignment,misc]
     ToolUseBlock = UserMessage = None  # type: ignore[assignment,misc]
 
-from zagent_contracts import StepEvent, StepKind, TypingDelta
+from collegium_contracts import StepEvent, StepKind, TypingDelta
 
 TOOL_KIND_MAP = {
     "Bash": StepKind.COMMAND,

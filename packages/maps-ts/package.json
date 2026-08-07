@@ -1,10 +1,10 @@
 {
-  "name": "zagent-maps-ts",
+  "name": "collegium-maps-ts",
   "version": "0.1.0",
-  "description": "Zagent repo-map generator (TypeScript half) — shared grammar with zagent-maps (Python). Analyzes TS/JS repos via regex/token heuristics. No build step, no runtime deps.",
+  "description": "Collegium repo-map generator (TypeScript half) — shared grammar with collegium-maps (Python). Analyzes TS/JS repos via regex/token heuristics. No build step, no runtime deps.",
   "type": "module",
   "bin": {
-    "zagent-maps-ts": "src/cli.js"
+    "collegium-maps-ts": "src/cli.js"
   },
   "scripts": {
     "test": "node --test tests/"

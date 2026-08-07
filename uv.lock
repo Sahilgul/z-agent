@@ -4,11 +4,11 @@ requires-python = "==3.12.*"
 
 [manifest]
 members = [
-    "zagent",
-    "zagent-backend",
-    "zagent-contracts",
-    "zagent-maps",
-    "zagent-worker",
+    "collegium",
+    "collegium-backend",
+    "collegium-contracts",
+    "collegium-maps",
+    "collegium-worker",
 ]
 
 [[package]]
@@ -1430,12 +1430,12 @@ wheels = [
 ]
 
 [[package]]
-name = "zagent"
+name = "collegium"
 version = "0.1.0"
 source = { virtual = "." }
 
 [[package]]
-name = "zagent-backend"
+name = "collegium-backend"
 version = "0.1.0"
 source = { editable = "backend" }
 dependencies = [
@@ -1455,7 +1455,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "structlog" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "zagent-contracts" },
+    { name = "collegium-contracts" },
 ]
 
 [package.optional-dependencies]
@@ -1488,12 +1488,12 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-    { name = "zagent-contracts", editable = "packages/contracts" },
+    { name = "collegium-contracts", editable = "packages/contracts" },
 ]
 provides-extras = ["dev"]
 
 [[package]]
-name = "zagent-contracts"
+name = "collegium-contracts"
 version = "0.1.0"
 source = { editable = "packages/contracts" }
 dependencies = [
@@ -1504,12 +1504,12 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2.9,<3" }]
 
 [[package]]
-name = "zagent-maps"
+name = "collegium-maps"
 version = "0.1.0"
 source = { editable = "packages/maps" }
 
 [[package]]
-name = "zagent-worker"
+name = "collegium-worker"
 version = "0.1.0"
 source = { editable = "worker" }
 dependencies = [
@@ -1523,7 +1523,7 @@ dependencies = [
     { name = "langgraph-prebuilt" },
     { name = "redis" },
     { name = "websockets" },
-    { name = "zagent-contracts" },
+    { name = "collegium-contracts" },
 ]
 
 [package.optional-dependencies]
@@ -1554,7 +1554,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "websockets", specifier = ">=13,<16" },
-    { name = "zagent-contracts", editable = "packages/contracts" },
+    { name = "collegium-contracts", editable = "packages/contracts" },
 ]
 provides-extras = ["cas", "dev"]
 

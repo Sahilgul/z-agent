@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.db.models.event import Event
 from app.db.models.thread import Thread
@@ -28,6 +28,44 @@ def test_replay_events_orders_by_thread_seq(session, make_user):
     assert [e["seq"] for e in out] == [1, 2, 3]
     assert out[0]["kind"] == "thinking"
     assert out[0]["detail"] == {"k": "v"}
+
+
+def test_replay_events_merged_interleaves_thread_generations_by_time(session, make_user):
+    """Reloaded chats must not cluster by thread. Thread generations (mode
+    switch, mention expansion, kill-replace) are separate Thread rows with
+    independent seq counters, and (thread_id, seq) ordering rendered each
+    generation as one UUID-sorted block — messages sent earlier appeared after
+    later ones. Reproduces the exact reported scramble: t3's messages were sent
+    BETWEEN t1's and t2's, but UUID order (t1 < t2 < t3) used to put them last."""
+    u = make_user("chrono")
+    run = Run(id="run-chrono", created_by=u.id, mode="ask", stage="completed")
+    session.add(run)
+    t1 = Thread(id="aaaa-1", run_id=run.id, persona="lead", status="replaced")
+    t2 = Thread(id="bbbb-2", run_id=run.id, persona="lead", status="replaced")
+    t3 = Thread(id="cccc-3", run_id=run.id, persona="lead", status="completed")
+    session.add_all([t1, t2, t3])
+    base = datetime(2026, 8, 6, 22, 53, 7, tzinfo=timezone.utc)
+
+    def ev(thread_id, seq, at_seconds, title):
+        session.add(Event(run_id=run.id, thread_id=thread_id, seq=seq, type="message",
+                          title=title, ts=base + timedelta(seconds=at_seconds)))
+
+    ev("aaaa-1", 0, 0, "test message 1")
+    ev("aaaa-1", 1, 8, "reply 1")
+    ev("cccc-3", 0, 17, "test message 2")
+    ev("cccc-3", 1, 25, "test message 3")
+    ev("bbbb-2", 0, 32, "test message 4")
+    ev("bbbb-2", 1, 38, "reply 4")
+    session.commit()
+
+    out = sessions.replay_events(run.id, u.id)
+    assert [e["title"] for e in out] == [
+        "test message 1", "reply 1", "test message 2",
+        "test message 3", "test message 4", "reply 4",
+    ]
+    # A lane-filtered view keeps strict per-thread seq order (unchanged).
+    lane = sessions.replay_events(run.id, u.id, thread_id="cccc-3")
+    assert [e["title"] for e in lane] == ["test message 2", "test message 3"]
     assert "ts" in out[0] and out[0]["sdk_message_uuid"] is None
 
 

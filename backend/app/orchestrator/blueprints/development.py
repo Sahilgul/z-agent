@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from zagent_contracts import RunStage
+from collegium_contracts import RunStage
 
 from app.db.base import get_session
 from app.db.models.event import Event

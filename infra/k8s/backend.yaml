@@ -1,35 +1,35 @@
-# Zagent backend on AKS (production hardening).
+# Collegium backend on AKS (production hardening).
 # Secrets come from Key Vault via the CSI driver (BYO-PAT + gateway keys +
 # VAPID) — never from ConfigMaps, never baked into the image.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: zagent-backend
+  name: collegium-backend
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: zagent-backend
-  labels: { app: zagent-backend }
+  name: collegium-backend
+  labels: { app: collegium-backend }
 spec:
   replicas: 2
   selector:
-    matchLabels: { app: zagent-backend }
+    matchLabels: { app: collegium-backend }
   template:
     metadata:
-      labels: { app: zagent-backend }
+      labels: { app: collegium-backend }
     spec:
-      serviceAccountName: zagent-backend
+      serviceAccountName: collegium-backend
       containers:
         - name: backend
-          image: zagentacr.azurecr.io/zagent-backend:IMAGE_TAG
+          image: collegiumacr.azurecr.io/collegium-backend:IMAGE_TAG
           ports: [{ containerPort: 8000 }]
           env:
-            - name: ZAGENT_DB_URL
-              valueFrom: { secretKeyRef: { name: zagent-secrets, key: db-url } }
-            - name: ZAGENT_REDIS_URL
-              value: redis://zagent-redis:6379/0
-            - name: ZAGENT_ENV
+            - name: COLLEGIUM_DB_URL
+              valueFrom: { secretKeyRef: { name: collegium-secrets, key: db-url } }
+            - name: COLLEGIUM_REDIS_URL
+              value: redis://collegium-redis:6379/0
+            - name: COLLEGIUM_ENV
               value: production
           readinessProbe:
             httpGet: { path: /health, port: 8000 }
@@ -44,7 +44,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: zagent-backend
+  name: collegium-backend
 spec:
-  selector: { app: zagent-backend }
+  selector: { app: collegium-backend }
   ports: [{ port: 80, targetPort: 8000 }]

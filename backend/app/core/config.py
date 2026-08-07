@@ -17,11 +17,11 @@ _INSECURE_PAT_KEYS = frozenset({"", "dev-only-byo-pat-key"})
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ZAGENT_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="COLLEGIUM_", env_file=".env", extra="ignore")
 
-    db_url: str = "sqlite:///./data/zagent.db"
+    db_url: str = "sqlite:///./data/collegium.db"
     # "memory://0" = in-process fakeredis (local dev without Docker/Redis).
-    # Every real deployment sets ZAGENT_REDIS_URL explicitly (k8s backend.yaml).
+    # Every real deployment sets COLLEGIUM_REDIS_URL explicitly (k8s backend.yaml).
     redis_url: str = "memory://0"
 
     gateway_url: str = "http://localhost:4000"
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # URLs as seen FROM WORKER CONTAINERS (compose network / host.docker.internal)
     worker_redis_url: str = "redis://redis:6379/0"
     worker_gateway_url: str = "http://gateway:4000"
-    worker_image: str = "zagent-worker:0.1.0"
+    worker_image: str = "collegium-worker:0.1.0"
     # Engine cutover: custom LangGraph engine by default; "sdk"
     # keeps the legacy CAS fallback alive through the RE soak.
     engine_runtime: str = "custom"
@@ -47,21 +47,21 @@ class Settings(BaseSettings):
     engine_database_url: str = ""
     # Egress-locked compose network for thread containers: internal-only,
     # no internet route — threads reach gateway + redis and nothing else.
-    worker_network: str = "zagent_thread"
+    worker_network: str = "collegium_thread"
     # Package-registry egress: allowlisting squid on the thread network.
     # Empty string disables proxy injection (read-only threads).
     package_proxy_url: str = ""
-    pip_cache_volume: str = "zagent_pip-cache"
-    npm_cache_volume: str = "zagent_npm-cache"
+    pip_cache_volume: str = "collegium_pip-cache"
+    npm_cache_volume: str = "collegium_npm-cache"
 
-    jwt_secret: str = ""  # no shipped default — set ZAGENT_JWT_SECRET (C-13)
+    jwt_secret: str = ""  # no shipped default — set COLLEGIUM_JWT_SECRET (C-13)
     jwt_ttl_seconds: int = 60 * 60 * 24 * 14
     admin_usernames: str = "sahil"
     # First-admin bootstrap (chicken-and-egg): seed creates this ACTIVE
     # admin if the username AND pin are configured. Defaults are EMPTY so a
     # production deploy never silently seeds an active admin with a known
-    # PIN — local dev opts in via ZAGENT_BOOTSTRAP_ADMIN_USERNAME /
-    # ZAGENT_BOOTSTRAP_ADMIN_PIN in .env (C-14).
+    # PIN — local dev opts in via COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME /
+    # COLLEGIUM_BOOTSTRAP_ADMIN_PIN in .env (C-14).
     bootstrap_admin_username: str = ""
     bootstrap_admin_pin: str = ""
     # Dev opt-in for the insecure shipped defaults (jwt_secret etc.). False in
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     evidence_dir: Path = Path("./evidence")  # Playwright screenshots + run evidence artifacts
     fleet_config_dir: Path = Path("./fleet-config")
     playbooks_dir: Path = Path("./playbooks")  # SKILL.md playbooks (mode.playbook_ids resolve here)
-    scripts_dir: Path = Path("./scripts")  # git-credential-zagent lives here
+    scripts_dir: Path = Path("./scripts")  # git-credential-collegium lives here
 
     fetch_interval_seconds: int = 300
     session_retention_days: int = 30
@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     # takes over at the VM move. Empty disables BYO-PAT storage.
     # H-44: no shipped default — the old "dev-only-byo-pat-key" let anyone
     # with DB access decrypt every stored PAT. Set
-    # ZAGENT_BYO_PAT_ENCRYPTION_KEY in any real deploy (enforced below).
+    # COLLEGIUM_BYO_PAT_ENCRYPTION_KEY in any real deploy (enforced below).
     byo_pat_encryption_key: str = ""
 
     # Triggers engine: webhook HMAC secret (empty = ingress
@@ -138,7 +138,7 @@ class Settings(BaseSettings):
     # empty = push disabled (sends are skipped, subscriptions still stored).
     vapid_public_key: str = ""
     vapid_private_key: str = ""
-    vapid_subject: str = "mailto:admin@zagentharness.ai"
+    vapid_subject: str = "mailto:admin@collegiumlabs.com"
     # Autonomy promotion: evidence thresholds — completed runs at the
     # level below before the dial unlocks one notch. Failures reset nothing;
     # they just don't count.
@@ -156,24 +156,24 @@ class Settings(BaseSettings):
     def _enforce_secret_defaults(self) -> "Settings":
         # C-13: a shipped/empty jwt_secret lets anyone forge a JWT and bypass
         # PIN auth. Fail fast at startup unless the dev opt-in is set, so a
-        # production deploy that forgot ZAGENT_JWT_SECRET refuses to boot
+        # production deploy that forgot COLLEGIUM_JWT_SECRET refuses to boot
         # rather than silently running with a known secret.
         if not self.dev_insecure_defaults and self.jwt_secret in _INSECURE_JWT_SECRETS:
             raise ValueError(
-                "ZAGENT_JWT_SECRET must be set to a non-default secret "
+                "COLLEGIUM_JWT_SECRET must be set to a non-default secret "
                 "(it is currently empty or the shipped 'dev-only-change-me'). "
-                "Set ZAGENT_JWT_SECRET in the environment/.env, or set "
-                "ZAGENT_DEV_INSECURE_DEFAULTS=1 only for local dev."
+                "Set COLLEGIUM_JWT_SECRET in the environment/.env, or set "
+                "COLLEGIUM_DEV_INSECURE_DEFAULTS=1 only for local dev."
             )
         # H-44: a shipped/empty byo_pat_encryption_key lets anyone with DB
         # access decrypt every stored PAT. Fail fast at startup in any
-        # non-dev deploy that forgot ZAGENT_BYO_PAT_ENCRYPTION_KEY.
+        # non-dev deploy that forgot COLLEGIUM_BYO_PAT_ENCRYPTION_KEY.
         if not self.dev_insecure_defaults and self.byo_pat_encryption_key in _INSECURE_PAT_KEYS:
             raise ValueError(
-                "ZAGENT_BYO_PAT_ENCRYPTION_KEY must be set to a non-default key "
+                "COLLEGIUM_BYO_PAT_ENCRYPTION_KEY must be set to a non-default key "
                 "(it is currently empty or the shipped 'dev-only-byo-pat-key'). "
-                "Set ZAGENT_BYO_PAT_ENCRYPTION_KEY in the environment/.env, or set "
-                "ZAGENT_DEV_INSECURE_DEFAULTS=1 only for local dev."
+                "Set COLLEGIUM_BYO_PAT_ENCRYPTION_KEY in the environment/.env, or set "
+                "COLLEGIUM_DEV_INSECURE_DEFAULTS=1 only for local dev."
             )
         return self
 

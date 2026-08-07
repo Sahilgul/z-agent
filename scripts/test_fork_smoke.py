@@ -49,7 +49,7 @@ async def main() -> int:
 
     from worker.sessions import fork_for_edit_and_resend
 
-    gateway_url = _env("ZAGENT_GATEWAY_URL") if os.getenv("ZAGENT_GATEWAY_URL") else "http://localhost:4000"
+    gateway_url = _env("COLLEGIUM_GATEWAY_URL") if os.getenv("COLLEGIUM_GATEWAY_URL") else "http://localhost:4000"
     key = _env("SPIKE_GATEWAY_KEY")
 
     session_root = ROOT / "data" / "sessions" / "fork-smoke" / str(uuid.uuid4())

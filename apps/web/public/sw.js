@@ -1,6 +1,6 @@
-/* Zagent service worker — app-shell cache only. API + WS traffic is ALWAYS
+/* Collegium service worker — app-shell cache only. API + WS traffic is ALWAYS
    network (a stale run state is worse than no run state). */
-const SHELL = "zagent-shell-v2";
+const SHELL = "collegium-shell-v2";
 const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -32,7 +32,7 @@ self.addEventListener("fetch", (e) => {
 /* Push: the payload carries a deep link to the specific action
    card — a tap lands on the approval, not the inbox. */
 self.addEventListener("push", (e) => {
-  let data = { title: "zagent", body: "", url: "/" };
+  let data = { title: "Collegium", body: "", url: "/" };
   try {
     if (e.data) data = { ...data, ...e.data.json() };
   } catch { /* keep defaults */ }
@@ -41,7 +41,7 @@ self.addEventListener("push", (e) => {
       body: data.body,
       icon: "/icon.svg",
       data: { url: data.url },
-      tag: "zagent-ask",
+      tag: "collegium-ask",
       renotify: true,
     })
   );

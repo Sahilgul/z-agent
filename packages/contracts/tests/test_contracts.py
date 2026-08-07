@@ -1,4 +1,4 @@
-from zagent_contracts import (
+from collegium_contracts import (
     IRREVERSIBLE_INTENTS,
     ActionKind,
     Decomposition,

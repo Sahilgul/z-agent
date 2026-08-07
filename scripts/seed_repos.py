@@ -4,7 +4,7 @@ For each fleet-config repo: resolve integrationBranch AGAINST THE REMOTE (branch
 list fetched, never free-typed), then upsert the `repos` row. The DB row is the
 LIVE registry after this seed; repos.json is the bootstrap seed only.
 
-Run (backend cwd, env: ZAGENT_DB_URL, FETCH_PAT, ZAGENT_ADO_ORG/PROJECT):
+Run (backend cwd, env: COLLEGIUM_DB_URL, FETCH_PAT, COLLEGIUM_ADO_ORG/PROJECT):
   python ../scripts/seed_repos.py
 """
 

@@ -11,7 +11,7 @@ from app.db.models.repo import Repo
 from app.db.models.run import Run
 from app.db.models.trigger import Trigger, TriggerEventLog
 from app.services import guardian, responder, triggers
-from zagent_contracts.triggers import TriggerEvent, TriggerSource
+from collegium_contracts.triggers import TriggerEvent, TriggerSource
 
 
 class FakeThreadMgr:
@@ -196,7 +196,7 @@ async def test_responder_ignores_terminal_run(session, make_user):
 
 
 async def test_responder_skips_owner_resolution(session, make_user):
-    """The comment author needs NO Zagent identity — a reviewer with an unbound
+    """The comment author needs NO Collegium identity — a reviewer with an unbound
     descriptor still gets answered (attribution settled at run creation)."""
     _trigger_row(session, "responder-pr-comment", "pr.comment")
     u = make_user()

@@ -44,7 +44,7 @@ const RECAP = ev(4, "status", "◆ recap: stage plan", {
 });
 const APPROVAL_CARD = ev(5, "approval", "approval: terminal_exec", {
   kind: "approval_card", action_id: "ap-tc1", approval_id: "ap-tc1",
-  tool: "terminal_exec", args: { command: "git push origin zagent/x" },
+  tool: "terminal_exec", args: { command: "git push origin collegium/x" },
   destructive: true, always_allowable: false,
 });
 const APPROVAL_DECISION = ev(6, "approval", "approval edited_allow", {
@@ -105,7 +105,7 @@ describe("EventStream — card parity from live StepEvents", () => {
     expect(cards[0].getAttribute("data-action-id")).toBe("ap-tc1");
     expect(cards[1].getAttribute("data-action-id")).toBe("ap-tc1");
     // VERBATIM args, never paraphrased.
-    expect(cards[0].textContent).toContain("git push origin zagent/x");
+    expect(cards[0].textContent).toContain("git push origin collegium/x");
     expect(cards[0].textContent).toContain("destructive");
     expect(cards[1].textContent).toContain("edited_allow");
     expect(cards[1].textContent).toContain("edited");
@@ -114,10 +114,24 @@ describe("EventStream — card parity from live StepEvents", () => {
   it("approval card shows the clean command, not the raw JSON wire dump", () => {
     render(<EventStream events={[APPROVAL_CARD]} deltas={[]} />);
     const cmd = screen.getByTestId("approval-command");
-    expect(cmd.textContent).toContain("git push origin zagent/x");
+    expect(cmd.textContent).toContain("git push origin collegium/x");
     // the compact {"command": ...} serialization is gone from the card
     expect(screen.getByTestId("approval-card").textContent).not.toContain('{"command"');
     // and a shell command gets the terminal chrome
+    expect(screen.getByTestId("terminal-frame")).toBeInTheDocument();
+  });
+
+  it("approval card renders the cmd alias as a command, not raw JSON", () => {
+    // Models habitually call terminal_exec with cmd= (other harnesses' key);
+    // pre-normalization transcripts persist it. The card must still render
+    // the terminal treatment, never the wire dump.
+    const aliased = ev(7, "approval", "approval: terminal_exec", {
+      kind: "approval_card", action_id: "ap-tc2", approval_id: "ap-tc2",
+      tool: "terminal_exec", args: { cmd: "pwd && ls -la", timeout_ms: 30000 },
+    });
+    render(<EventStream events={[aliased]} deltas={[]} />);
+    expect(screen.getByTestId("approval-command").textContent).toContain("pwd && ls -la");
+    expect(screen.getByTestId("approval-card").textContent).not.toContain('"cmd"');
     expect(screen.getByTestId("terminal-frame")).toBeInTheDocument();
   });
 });

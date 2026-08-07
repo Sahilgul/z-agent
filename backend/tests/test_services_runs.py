@@ -1,4 +1,4 @@
-from zagent_contracts import ActionKind, RunStage
+from collegium_contracts import ActionKind, RunStage
 
 from app.db.models.run import Run
 from app.services.runs import (

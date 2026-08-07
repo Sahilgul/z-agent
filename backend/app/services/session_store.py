@@ -30,7 +30,7 @@ class _BlobClient:
         settings = get_settings()
         self._container = (BlobServiceClient
                            .from_connection_string(settings.session_store_connection)
-                           .get_container_client("zagent-sessions"))
+                           .get_container_client("collegium-sessions"))
 
     def put(self, key: str, data: bytes) -> None:
         self._container.upload_blob(key, data, overwrite=True)

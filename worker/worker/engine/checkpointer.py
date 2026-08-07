@@ -197,7 +197,7 @@ def open_checkpointer(*, use_postgres: bool | None = None,
     if not use_postgres:
         import sys
         print(
-            "z-agent engine: WARNING — checkpointer is MemorySaver (in-memory). "
+            "Collegium engine: WARNING — checkpointer is MemorySaver (in-memory). "
             "Set DATABASE_URL for the Postgres checkpointer; state and pending "
             "approvals do NOT survive a restart without it.",
             file=sys.stderr,

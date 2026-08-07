@@ -83,7 +83,7 @@ async def _fetch_markdown(url: str) -> str:
 
     async with httpx.AsyncClient(
         timeout=30.0, follow_redirects=True,
-        headers={"User-Agent": "zagent-web_fetch/1.0 (readability-lite)"},
+        headers={"User-Agent": "collegium-web_fetch/1.0 (readability-lite)"},
     ) as client:
         resp = await client.get(url)
         resp.raise_for_status()

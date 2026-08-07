@@ -1,6 +1,6 @@
 // CLI entrypoint for the TS repo-map generator + citation linter.
 //
-//   node packages/maps-ts/src/cli.js <repo_path> [--out .zagent] [--report]
+//   node packages/maps-ts/src/cli.js <repo_path> [--out .collegium] [--report]
 //   node packages/maps-ts/src/cli.js lint <repo_path> <citations.json> [--json]
 
 import { readFileSync } from "node:fs";
@@ -20,7 +20,7 @@ function loadCitationsFile(path) {
 function main(argv) {
   argv = argv || process.argv.slice(2);
   if (argv.length === 0) {
-    console.error("usage: cli.js <repo_path> [--out .zagent] [--report]");
+    console.error("usage: cli.js <repo_path> [--out .collegium] [--report]");
     console.error("       cli.js lint <repo_path> <citations.json> [--json]");
     return 2;
   }
@@ -46,7 +46,7 @@ function main(argv) {
   // generate (default)
   const rest = argv;
   const repoPath = rest[0];
-  let outDir = ".zagent";
+  let outDir = ".collegium";
   const outIdx = rest.indexOf("--out");
   if (outIdx !== -1 && rest[outIdx + 1]) outDir = rest[outIdx + 1];
   const wantReport = rest.includes("--report");

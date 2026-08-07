@@ -12,7 +12,7 @@ Use when a thread's task is a user story that must land as a pull request.
    not done until its check ran green THIS session.
 5. Take a `git_snapshot` and review the diff for scope creep or unrelated
    changes before any git mutation.
-6. Git mutations go through the shell with approval: branch `zagent/...`,
+6. Git mutations go through the shell with approval: branch `collegium/...`,
    focused commits, never push to main/master/development directly.
 7. Open the PR with the story's acceptance criteria in the body and the
    verification evidence listed. Report the PR link to the thread.

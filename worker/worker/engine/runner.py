@@ -54,11 +54,11 @@ from worker.forwarder import Forwarder
 
 
 def _permissions_from_env() -> list[dict[str, Any]]:
-    """Team/repo permission rulesets: JSON list in ZAGENT_PERMISSIONS,
+    """Team/repo permission rulesets: JSON list in COLLEGIUM_PERMISSIONS,
     e.g. [{"effect":"deny","tool":"terminal_exec","args":{"command":"git push *"}}].
     Malformed config fails closed to an empty ruleset (capability map only)."""
     import json
-    raw = os.environ.get("ZAGENT_PERMISSIONS", "").strip()
+    raw = os.environ.get("COLLEGIUM_PERMISSIONS", "").strip()
     if not raw:
         return []
     try:
@@ -236,7 +236,7 @@ class EngineRunner:
 
     async def run(self) -> int:
         if self.canary:
-            from zagent_contracts import StepKind
+            from collegium_contracts import StepKind
             await self.forwarder.publish_events([self.emitter._next(
                 StepKind.STATUS, "canary: read-only thread on the custom engine",
                 {"kind": "warning", "canary": True}, self.task_id, None,
@@ -306,7 +306,7 @@ class EngineRunner:
             drained = self._spawn_registry.drain(self.thread_id)
             if drained:
                 try:
-                    from zagent_contracts import StepKind
+                    from collegium_contracts import StepKind
                     await self.forwarder.publish_events([self.emitter._next(
                         StepKind.STATUS,
                         f"cascade drain: {len(drained)} spawn(s) stopped",
@@ -446,7 +446,7 @@ class EngineRunner:
                     try:
                         self.mode = Mode(msg.mode)
                         # Mode transitions are audited via a durable event.
-                        from zagent_contracts import StepKind
+                        from collegium_contracts import StepKind
                         await self.forwarder.publish_events([self.emitter._next(
                             StepKind.STATUS,
                             f"mode → {self.mode.value}",
@@ -497,7 +497,7 @@ class EngineRunner:
                             run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
 
     async def _emit_engine_error(self, error: str) -> None:
-        from zagent_contracts import StepKind
+        from collegium_contracts import StepKind
         # Route through _next so seq is allocated monotonically — reading
         # emitter._seq without advancing it made the NEXT event reuse the
         # same seq, so consumers deduping on seq dropped legitimate events.
