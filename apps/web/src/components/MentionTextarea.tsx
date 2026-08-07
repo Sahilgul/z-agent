@@ -62,6 +62,10 @@ export function MentionTextarea({
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const [token, setToken] = useState<{ start: number; end: number; query: string } | null>(null);
   const [active, setActive] = useState(0); // highlighted index in the dropdown
+  // The last query text resync saw — Arrow keys resync without changing the
+  // query, so resetting `active` unconditionally snapped the highlight back
+  // to the top on every ArrowDown keyUP (keydown moved it, keyup undid it).
+  const lastQuery = useRef<string | null>(null);
 
   const { data: repos = [] } = useQuery({
     queryKey: qk.repos,
@@ -95,7 +99,11 @@ export function MentionTextarea({
     if (!el) return;
     const t = tokenAtCaret(el.value, el.selectionStart ?? 0);
     setToken(t);
-    if (t) setActive(0);
+    const q = t?.query ?? null;
+    if (q !== lastQuery.current) {
+      lastQuery.current = q;
+      if (t) setActive(0); // new query text = fresh list, highlight the first
+    }
   }
 
   // Close the dropdown when the textarea loses focus (click-outside-friendly).

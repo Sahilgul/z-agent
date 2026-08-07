@@ -127,6 +127,19 @@ describe("MentionTextarea", () => {
     expect(options[0]).toHaveAttribute("aria-selected", "true");
   });
 
+  it("ArrowDown keyUP must not snap the highlight back to the top", async () => {
+    // Real browsers fire keyup after keydown; resync() runs on keyup and used
+    // to reset active=0 unconditionally — the highlight moved on keydown and
+    // snapped back on keyup, so ArrowDown appeared to do nothing.
+    const { textarea } = setup(undefined, "@");
+    await screen.findByRole("listbox");
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyUp(textarea, { key: "ArrowDown" });
+    const options = screen.getAllByRole("option");
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).toHaveAttribute("aria-selected", "false");
+  });
+
   it("click selects the repo", async () => {
     const { textarea } = setup(undefined, "@client");
     await screen.findByRole("listbox");
