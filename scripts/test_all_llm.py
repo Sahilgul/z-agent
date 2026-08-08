@@ -96,7 +96,11 @@ def call(base: str, key: str, model: str, extra: dict | None,
     body: dict = {"model": model, "max_tokens": MAX_TOKENS,
                   "messages": [{"role": "user", "content": PROMPT}]}
     if extra:
-        body.update(extra)  # exactly what the worker's extra_body puts on the wire
+        # DIRECT mode: top-level reasoning_effort (Foundry accepts it).
+        # GATEWAY mode: callers wrap it as {"extra_body": {...}} — the
+        # worker's actual wire format, since LiteLLM silently drops
+        # top-level reasoning_effort on non-o-series openai/ routes.
+        body.update(extra)
     req = urllib.request.Request(
         base.rstrip("/") + "/chat/completions",
         data=json.dumps(body).encode(),
@@ -198,12 +202,20 @@ def main() -> int:
             print(f"\n=== {alias} === SKIPPED (endpoint env vars unset)")
             failures.append(f"{alias}: no endpoint")
             continue
+        # GATEWAY mode must exercise the worker's PRODUCTION wire format:
+        # the SDK flattens one extra_body level and LiteLLM forwards the
+        # inner key, while a TOP-LEVEL reasoning_effort is silently dropped
+        # by drop_params on these openai/ routes — a top-level probe would
+        # "pass" every cell without ever testing the passthrough.
+        def wire(extra: dict) -> dict:
+            return {"extra_body": extra} if args.gateway else extra
+
         rows: list[tuple[str, dict | None, bool]] = [("default", None, False)]
         # "off" is always probed as reasoning_effort=none: for
         # always-thinking models a 4xx CONFIRMS the registry guard
         # (expected=True), a 200 means the flag can relax.
-        rows.append(("off", {"reasoning_effort": "none"}, not off_allowed))
-        rows += [(e, {"reasoning_effort": e}, False) for e in efforts]
+        rows.append(("off", wire({"reasoning_effort": "none"}), not off_allowed))
+        rows += [(e, wire({"reasoning_effort": e}), False) for e in efforts]
 
         print(f"\n=== {alias}  ({model}) ===")
         for label, extra, expect_400 in rows:

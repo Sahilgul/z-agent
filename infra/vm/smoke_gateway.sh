@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 source .env
 
 NET="${GATEWAY_NETWORK:-collegium_internal}"
-MODEL="${GATEWAY_MODEL:-kimi-foundry}"
+MODEL="${GATEWAY_MODEL:-kimi-k2.6}"
 CURL_IMAGE="curlimages/curl:8.11.1"
 MSG='{"role":"user","content":"say ok"}'
 
