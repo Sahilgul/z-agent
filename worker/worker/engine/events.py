@@ -120,8 +120,14 @@ class EventEmitter:
             task_id, None,
         )
 
-    def from_assistant(self, msg: AIMessage, task_id: str | None) -> list[StepEvent]:
-        """Turn an AIMessage into StepEvents (thinking/text + pending tool uses)."""
+    def from_assistant(self, msg: AIMessage, task_id: str | None,
+                       metrics: dict[str, Any] | None = None) -> list[StepEvent]:
+        """Turn an AIMessage into StepEvents (thinking/text + pending tool uses).
+
+        ``metrics`` (TTFT/latency/token split from the LLM call) rides the
+        MESSAGE event's payload — the frontend renders it as the bubble
+        footer. Thinking/tool events don't carry it: the numbers describe
+        the whole turn, and the bubble is where the turn's prose lands."""
         events: list[StepEvent] = []
         sdk_uuid = getattr(msg, "id", None) or (getattr(msg, "usage_metadata", None) and None)
         content = msg.content if isinstance(msg.content, list) else [msg.content] if msg.content else []
@@ -149,12 +155,15 @@ class EventEmitter:
                     text = redact(str(block.get("text", "")))
                     events.append(self._next(
                         StepKind.MESSAGE, text.splitlines()[0][:120] if text else "message",
-                        {"text": text}, task_id, sdk_uuid,
+                        {"text": text, **({"metrics": metrics} if metrics else {})},
+                        task_id, sdk_uuid,
                     ))
             elif isinstance(block, str) and block.strip():
                 text = redact(block)
                 events.append(self._next(
-                    StepKind.MESSAGE, text.splitlines()[0][:120], {"text": text}, task_id, sdk_uuid,
+                    StepKind.MESSAGE, text.splitlines()[0][:120],
+                    {"text": text, **({"metrics": metrics} if metrics else {})},
+                    task_id, sdk_uuid,
                 ))
 
         for tc in (msg.tool_calls or []):

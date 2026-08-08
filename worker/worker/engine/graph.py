@@ -260,6 +260,28 @@ def _normalize_tool_call_args(message: AIMessage) -> None:
                 args[canonical] = args.pop(alias)
 
 
+def _turn_metrics(ai_message: AIMessage, llm_started: float,
+                  first_chunk_at: float | None) -> dict[str, Any]:
+    """Per-turn telemetry for the bubble footer (TTFT / latency / token split).
+
+    Timings are worker-measured (monotonic); token counts come from the
+    provider's usage chunk — the same numbers the LiteLLM playground shows.
+    None timings mean the stream never produced a chunk (error turn); the
+    frontend hides missing fields individually."""
+    latency_s = time.monotonic() - llm_started
+    usage = getattr(ai_message, "usage_metadata", None) or {}
+    in_details = usage.get("input_token_details") or {}
+    out_details = usage.get("output_token_details") or {}
+    return {
+        "ttft_s": round(first_chunk_at - llm_started, 2) if first_chunk_at else None,
+        "latency_s": round(latency_s, 2),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "reasoning_tokens": out_details.get("reasoning"),
+        "cached_tokens": in_details.get("cache_read"),
+    }
+
+
 async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, Any]:
     """Call the LLM with mode-bound tools; stream deltas; collect the AIMessage;
     account usage into the budget; fire budget reminders."""
@@ -280,6 +302,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     ai_message: AIMessage | None = None
     metrics = get_registry(config)
     llm_started = time.monotonic()
+    first_chunk_at: float | None = None  # TTFT: request -> first streamed chunk
     try:
         # Gateway retry wraps the stream START (construction + first chunk);
         # once the first chunk arrives, partial deltas may have been emitted,
@@ -287,6 +310,8 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         async for chunk in with_gateway_retry_aiter(
             lambda: _aiter(llm, messages), max_retries=2,
         ):
+            if first_chunk_at is None:
+                first_chunk_at = time.monotonic()
             # Reasoning models stream chain-of-thought in the non-standard
             # ``reasoning_content`` field (preserved into additional_kwargs by
             # ChatOpenAIReasoning). Emit it as a THINKING delta so the frontend
@@ -334,7 +359,9 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         if _usage_now.get("input_tokens"):
             metrics.increment("input_tokens", float(_usage_now["input_tokens"]))
 
-    events = emitter.from_assistant(ai_message, task_id)
+    events = emitter.from_assistant(
+        ai_message, task_id,
+        metrics=_turn_metrics(ai_message, llm_started, first_chunk_at))
     await _publish_events(config, events)
 
     # Budget accounting: usage -> cost -> budget.used; the gateway

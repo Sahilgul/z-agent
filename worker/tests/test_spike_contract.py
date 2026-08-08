@@ -109,65 +109,65 @@ def _passing_model_results() -> dict:
 
 
 def test_gate_passes_when_two_models_pass_all() -> None:
-    results = {"kimi-foundry": _passing_model_results(), "qwen-foundry": _passing_model_results()}
+    results = {"kimi-k2.6": _passing_model_results(), "qwen-foundry": _passing_model_results()}
     g = evaluate_gate(results)
     assert g["gate_passed"] is True
-    assert set(g["passing_models"]) == {"kimi-foundry", "qwen-foundry"}
+    assert set(g["passing_models"]) == {"kimi-k2.6", "qwen-foundry"}
 
 
 def test_gate_fails_when_only_one_model_passes() -> None:
-    results = {"kimi-foundry": _passing_model_results(), "qwen-foundry": {
+    results = {"kimi-k2.6": _passing_model_results(), "qwen-foundry": {
         **_passing_model_results(), "cache": {"caching_survives": False}
     }}
     g = evaluate_gate(results)
     assert g["gate_passed"] is False
-    assert g["passing_models"] == ["kimi-foundry"]
+    assert g["passing_models"] == ["kimi-k2.6"]
 
 
 def test_gate_fails_when_tool_fidelity_below_threshold() -> None:
     r = _passing_model_results()
     r["ask"]["tool_call_success_rate"] = 0.80  # below 0.95
-    results = {"kimi-foundry": r, "qwen-foundry": _passing_model_results()}
+    results = {"kimi-k2.6": r, "qwen-foundry": _passing_model_results()}
     g = evaluate_gate(results)
     assert g["gate_passed"] is False
-    assert g["model_verdicts"]["kimi-foundry"]["a"] is False
+    assert g["model_verdicts"]["kimi-k2.6"]["a"] is False
 
 
 def test_gate_fails_when_soak_turns_not_met() -> None:
     r = _passing_model_results()
     r["soak"]["soak_turns_met"] = False
-    results = {"kimi-foundry": r, "qwen-foundry": _passing_model_results()}
+    results = {"kimi-k2.6": r, "qwen-foundry": _passing_model_results()}
     g = evaluate_gate(results)
-    assert g["model_verdicts"]["kimi-foundry"]["e"] is False
+    assert g["model_verdicts"]["kimi-k2.6"]["e"] is False
     assert g["gate_passed"] is False
 
 
 def test_gate_fails_when_interrupt_resume_broken() -> None:
     r = _passing_model_results()
     r["interrupt"]["interrupt_resume_works"] = False
-    results = {"kimi-foundry": r, "qwen-foundry": _passing_model_results()}
+    results = {"kimi-k2.6": r, "qwen-foundry": _passing_model_results()}
     g = evaluate_gate(results)
-    assert g["model_verdicts"]["kimi-foundry"]["g"] is False
+    assert g["model_verdicts"]["kimi-k2.6"]["g"] is False
     assert g["gate_passed"] is False
 
 
 # ----------------------------------------------------------- matrix rendering
 
 def test_render_matrix_replaces_all_placeholders() -> None:
-    results = {"kimi-foundry": _passing_model_results(), "qwen-foundry": _passing_model_results()}
+    results = {"kimi-k2.6": _passing_model_results(), "qwen-foundry": _passing_model_results()}
     g = evaluate_gate(results)
     rendered = render_matrix(results, g)
     assert "{{GENERATED_AT}}" not in rendered
     assert "{{RESULTS_JSON}}" not in rendered
     assert "Verdicts" in rendered
-    assert "kimi-foundry" in rendered
+    assert "kimi-k2.6" in rendered
     assert "Gate passed:** True" in rendered
 
 
 def test_render_matrix_includes_results_json() -> None:
-    results = {"kimi-foundry": _passing_model_results()}
+    results = {"kimi-k2.6": _passing_model_results()}
     g = evaluate_gate(results)
     rendered = render_matrix(results, g)
     # The results JSON is embedded — parse it back out of the fenced block.
-    assert "kimi-foundry" in rendered
+    assert "kimi-k2.6" in rendered
     assert "schema_validity_rate" in rendered

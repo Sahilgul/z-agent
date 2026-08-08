@@ -67,7 +67,7 @@ def _resume_config(thread_id: str = "resume-t") -> dict[str, Any]:
     return {
         "configurable": {
             "thread_id": thread_id,
-            "model": "kimi-foundry",
+            "model": "kimi-k2.6",
             "emitter": EventEmitter("run-1", thread_id),
             "approval_broker": None,
             "compactor": Compactor(),
@@ -381,7 +381,7 @@ async def test_agent_node_mid_stream_llm_failure_emits_partial_delta_then_errors
         deltas.append(delta.text)
 
     config = {"configurable": {
-        "model": "kimi-foundry",
+        "model": "kimi-k2.6",
         "emitter": EventEmitter("run-1", "t-1"),
         "delta_sink": delta_sink,
         "thread_id": "t-1",

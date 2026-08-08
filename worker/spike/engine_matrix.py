@@ -14,7 +14,7 @@ except where the check needs the interrupt itself.
 
 Usage:
   python -m spike.engine_matrix all --golden /golden/repos \
-      --models kimi-foundry,qwen-foundry
+      --models kimi-k2.6,qwen-foundry
 
 Env: LITELLM_BASE_URL, LITELLM_API_KEY (gateway); DATABASE_URL optional
 (Postgres checkpointer — set it: the gate must certify the production saver).
@@ -362,7 +362,7 @@ async def main() -> int:
     parser.add_argument("--golden", default=os.environ.get("GOLDEN_DIR", "/golden/repos"))
     parser.add_argument("--repo", default="ServerApp")
     parser.add_argument("--branch", default="main")
-    parser.add_argument("--models", default=os.environ.get("SPIKE_MODELS", "kimi-foundry"))
+    parser.add_argument("--models", default=os.environ.get("SPIKE_MODELS", "kimi-k2.6"))
     args = parser.parse_args()
 
     for var in ("LITELLM_BASE_URL", "LITELLM_API_KEY"):

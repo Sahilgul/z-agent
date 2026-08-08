@@ -40,48 +40,56 @@ class ModelCapabilities:
         # takes the thinking toggle only). Mirrors the backend registry —
         # make_llm validates against it and refuses unknown efforts.
         self.reasoning_efforts = reasoning_efforts
-        # False = thinking is ALWAYS on (Kimi K3): "off" would 400 the call.
+        # False = the deployment rejects reasoning_effort="none" (thinking
+        # always on): "off" would 400 the call.
         self.supports_thinking_off = supports_thinking_off
 
 
 # Registry keyed by gateway model alias. Add entries as models are validated.
 # Unknown aliases get the conservative default.
 _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
-    # K2.6 has FIXED parameters — passing temperature/top_p/n/presence_penalty
-    # with non-default values makes Azure Foundry return 400. supports_temperature
-    # = False so make_llm omits the param entirely (don't rely on drop_params).
-    "kimi-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=200000, supports_temperature=False,
-        # Live-probed through the gateway (2026-08-08): Foundry's K2.6 accepts
-        # low/high/max and emits reasoning_content at every level.
-        reasoning_efforts=("low", "high", "max"),
+    # K2.6 was once fixed-parameter (400 on non-default temperature) — probed
+    # through the gateway 2026-08-08: temperature 0.0–2.0 and top_p are all
+    # accepted now, so the fleet takes temperature uniformly.
+    "kimi-k2.6": ModelCapabilities(
+        # Vision probed through the gateway 2026-08-08: correctly read a
+        # two-color test image. GLM 400s on image input; both DeepSeeks
+        # return 200 but HALLUCINATE (Pro: "teal/orange" on red/blue; Flash:
+        # "no image visible") — blind, so images route through kimi-k2.6.
+        vision=True, reasoning=True, max_tokens=200000,
+        # Probed DIRECT against Foundry's /openai/v1 surface (2026-08-08):
+        # the enum is none/minimal/low/medium/high — no "max", no "thinking"
+        # object (both 400/422). K2.6 rejects "minimal"; "none" = thinking
+        # off (reasoning_content comes back empty).
+        reasoning_efforts=("low", "medium", "high"),
     ),
-    "kimi3-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=200000, supports_temperature=False,
-        reasoning_efforts=("low", "high", "max"),
-        # K3 always thinks (Moonshot docs, 2026-08): no disabled state exists,
-        # and sending thinking.type=disabled 400s. Same fixed-param family as
-        # K2.6, so temperature stays omitted until probed otherwise.
-        supports_thinking_off=False,
+    "kimi-k3": ModelCapabilities(
+        vision=True, reasoning=True, max_tokens=200000,
+        # Probed direct (2026-08-08, FW-Kimi-K3 on its own endpoint): the
+        # ONLY fleet model that takes "max"; rejects "minimal"; "none"
+        # works (thinking off) despite first-party Moonshot docs claiming
+        # K3 always thinks.
+        reasoning_efforts=("low", "medium", "high", "max"),
     ),
     "qwen-foundry": ModelCapabilities(vision=False, reasoning=False, max_tokens=8192),
     # Compare fleet (Azure AI Foundry, same /openai/v1 surface as Kimi).
     # reasoning=True selects the ChatOpenAIReasoning subclass, which only ADDS
     # preservation of reasoning_content — the request payload is unchanged, so
     # it's the safe default for models whose thinking emission is unverified.
-    # Efforts per provider docs (2026-08): GLM maps low/medium→high so only the
-    # real two are offered; V4 Pro treats low as high; V4 Flash has all three.
-    "glm-foundry": ModelCapabilities(
+    # GLM: same enum as Kimi (no minimal), thinks by default. DeepSeek V4:
+    # full enum INCLUDING minimal, and does NOT think by default — pass an
+    # effort to get reasoning_content out of it.
+    "glm-5.2": ModelCapabilities(
         vision=False, reasoning=True, max_tokens=200000,
-        reasoning_efforts=("high", "max"),
+        reasoning_efforts=("low", "medium", "high"),
     ),
-    "deepseek-pro-foundry": ModelCapabilities(
+    "deepseek-v4-pro": ModelCapabilities(
         vision=False, reasoning=True, max_tokens=200000,
-        reasoning_efforts=("high", "max"),
+        reasoning_efforts=("minimal", "low", "medium", "high"),
     ),
-    "deepseek-flash-foundry": ModelCapabilities(
+    "deepseek-v4-flash": ModelCapabilities(
         vision=False, reasoning=True, max_tokens=200000,
-        reasoning_efforts=("low", "high", "max"),
+        reasoning_efforts=("minimal", "low", "medium", "high"),
     ),
 }
 
@@ -299,13 +307,13 @@ def _retry_after(exc: Exception) -> float | None:
 # hit only when a worker runs outside the sandbox env. Kept in sync with
 # backend/app/core/models.py (Azure AI Foundry listings, 2026-08).
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "kimi-foundry": (0.95, 4.00),
+    "kimi-k2.6": (0.95, 4.00),
     # K3 seeded at the Fireworks/Moonshot first-party rate — NOT yet confirmed
     # against the Foundry listing; fix here + registry + config.yaml together.
-    "kimi3-foundry": (3.00, 15.00),
-    "glm-foundry": (1.54, 4.84),
-    "deepseek-pro-foundry": (1.74, 3.48),
-    "deepseek-flash-foundry": (0.19, 0.51),
+    "kimi-k3": (3.30, 16.50),
+    "glm-5.2": (1.54, 4.84),
+    "deepseek-v4-pro": (1.74, 3.48),
+    "deepseek-v4-flash": (0.19, 0.51),
     "qwen-foundry": (1.0, 3.0),
 }
 _DEFAULT_PRICING = (2.0, 6.0)
@@ -357,7 +365,10 @@ def make_llm(
     model: str,
     *,
     streaming: bool = True,
-    temperature: float = 0.0,
+    # 0.1, not 0.0: near-deterministic for agent work, but a hair of
+    # sampling avoids the degenerate repetition loops some deployments
+    # fall into at exactly-zero temperature.
+    temperature: float = 0.1,
     tools: list | None = None,
     reasoning: str | None = None,
 ) -> ChatOpenAI:
@@ -366,10 +377,23 @@ def make_llm(
     Fail-closed: if the gateway env is unset, raise (never substitute a model).
 
     ``reasoning`` is the composer's per-lane choice: "off" disables thinking,
-    an effort string ("low"/"high"/"max") enables thinking at that effort, and
-    None sends NO override — the request stays byte-identical to pre-feature
-    traffic (provider default: thinking on). Both params ride extra_body so
-    LiteLLM forwards them verbatim (its drop_params never sees them).
+    an effort string enables thinking at that effort, and None sends NO
+    override — the request stays byte-identical to pre-feature traffic
+    (provider default). On the wire it's ``reasoning_effort`` with the enum
+    Foundry's serving layer validates (none/minimal/low/medium/high, plus
+    "max" on K3 only); "off" maps to "none". There is NO "thinking" object
+    on this surface (400 unrecognized_request_argument).
+
+    Why the double-nested extra_body (verified against a local LiteLLM
+    1.95.0 proxy + live Foundry, 2026-08-08): LiteLLM only forwards
+    top-level ``reasoning_effort`` for model names its o-series/GPT-5
+    transforms recognize — for every other openai/ route the base transform
+    lacks the param and drop_params silently DELETES it (thinking stays on,
+    DeepSeek never thinks). A nested ``extra_body`` object in the request is
+    the proxy's sanctioned passthrough: its contents merge into the provider
+    call unfiltered. But the OpenAI SDK FLATTENS ChatOpenAI's extra_body one
+    level onto the wire — so we nest twice: the outer layer is flattened by
+    the SDK, the inner arrives literal, and LiteLLM forwards its contents.
     """
     base_url = os.environ.get("LITELLM_BASE_URL")
     api_key = os.environ.get("LITELLM_API_KEY")
@@ -396,8 +420,9 @@ def make_llm(
         "timeout": 600,
         "max_retries": 0,  # we handle retries ourselves (with_gateway_retry)
     }
-    # K2.6 and other fixed-param models 400 on non-default temperature — omit
-    # the param entirely instead of relying on the gateway's drop_params.
+    # Fixed-param deployments (none in the current fleet — probed 2026-08-08)
+    # 400 on non-default temperature: omit the param entirely for those
+    # instead of relying on the gateway's drop_params.
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
     # max_tokens is deliberately NOT sent: omitting it lets the deployment
@@ -409,16 +434,13 @@ def make_llm(
             raise RuntimeError(
                 f"model '{model}' always thinks — 'off' would 400 "
                 "(fail-closed, no silent clamp)")
-        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        kwargs["extra_body"] = {"extra_body": {"reasoning_effort": "none"}}
     elif reasoning:
         if reasoning not in caps.reasoning_efforts:
             raise RuntimeError(
                 f"model '{model}' takes reasoning {sorted(caps.reasoning_efforts)} "
                 f"or 'off' — not '{reasoning}' (fail-closed, no silent clamp)")
-        kwargs["extra_body"] = {
-            "thinking": {"type": "enabled"},
-            "reasoning_effort": reasoning,
-        }
+        kwargs["extra_body"] = {"extra_body": {"reasoning_effort": reasoning}}
     # Reasoning models (Kimi-K2, DeepSeek-R1, …) return a non-standard
     # ``reasoning_content`` field that stock ChatOpenAI silently drops
     # (langchain-ai/langchain#37960). Use the subclass that preserves it so

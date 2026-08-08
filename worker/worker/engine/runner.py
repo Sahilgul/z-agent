@@ -85,7 +85,7 @@ class EngineRunner:
         self.task_prompt = os.environ["TASK_PROMPT"]
         self.mode = Mode(os.environ.get("MODE", "ask"))
         self.autonomy = Autonomy(os.environ.get("AUTONOMY", "supervised"))
-        self.model = os.environ.get("MODEL", "kimi-foundry")
+        self.model = os.environ.get("MODEL", "kimi-k2.6")
         # Composer reasoning choice for this lane ("off" or an effort like
         # "max"). Empty = provider default — make_llm sends no override.
         self.reasoning_effort = os.environ.get("REASONING_EFFORT", "").strip() or None
@@ -151,6 +151,47 @@ class EngineRunner:
 
     # ------------------------------------------------------------ state/config
 
+    _IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg",
+                   ".jpeg": "image/jpeg", ".webp": "image/webp",
+                   ".gif": "image/gif"}
+
+    def _with_images(self, content: str) -> str | list[dict]:
+        """Attachments -> multimodal first message for vision lanes.
+
+        The backend stages files into the session volume and sets IMAGES_DIR
+        ONLY for vision-capable lanes (blind lanes get the Kimi pre-pass
+        description in the prompt text instead). The image blocks live in the
+        FIRST HumanMessage, so they ride the message history and are present
+        at every subsequent LLM call of the turn — "image+text at each step"
+        falls out of the checkpoint, no per-call re-injection.
+        """
+        images_dir = os.environ.get("IMAGES_DIR", "").strip()
+        if not images_dir:
+            return content
+        from worker.engine.llm import get_capabilities
+        if not get_capabilities(self.model).vision:
+            # Backend contract says this can't happen (IMAGES_DIR is only set
+            # for vision lanes). Fail safe as text-only rather than 400 the
+            # whole turn on a model that can't see.
+            log.warning("IMAGES_DIR set for blind model %s — ignoring attachments",
+                        self.model)
+            return content
+        import base64
+        root = Path(images_dir)
+        blocks: list[dict] = [{"type": "text", "text": content}]
+        for path in sorted(root.iterdir()) if root.is_dir() else []:
+            mime = self._IMAGE_MIME.get(path.suffix.lower())
+            if mime is None:
+                continue
+            b64 = base64.b64encode(path.read_bytes()).decode()
+            blocks.append({"type": "image_url",
+                           "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        if len(blocks) == 1:
+            log.warning("IMAGES_DIR %s had no readable images", images_dir)
+            return content
+        log.info("first message carries %d image(s)", len(blocks) - 1)
+        return blocks
+
     def _initial_state(self) -> EngineState:
         # C2: PERSONA_PROMPT (persona + playbook + knowledge block, composed
         # backend-side) is injected as part of the INITIAL USER MESSAGE —
@@ -162,7 +203,8 @@ class EngineRunner:
         if persona:
             content += f"<persona>\n{persona}\n</persona>\n\n"
         content += f"Workspace root: {self.workspace}\n\n{self.task_prompt}"
-        user_msg = tag_message(HumanMessage(content=content), "user")
+        user_msg = tag_message(
+            HumanMessage(content=self._with_images(content)), "user")
         return {
             "run_id": self.run_id,
             "thread_id": self.thread_id,

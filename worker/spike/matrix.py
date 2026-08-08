@@ -5,7 +5,7 @@ renders results into DECISION_MATRIX.md. The gate passes ONLY if ≥2 models
 pass ALL checks; thresholds are fixed pre-run in DECISION_MATRIX.md.
 
 Usage:
-  python -m spike.matrix all       --golden /golden/repos --models kimi-foundry,qwen-foundry
+  python -m spike.matrix all       --golden /golden/repos --models kimi-k2.6,qwen-foundry
   python -m spike.matrix ask        --golden /golden/repos --repo ServerApp --branch main
   python -m spike.matrix structured
   python -m spike.matrix soak      --golden /golden/repos
@@ -16,7 +16,7 @@ Env:
   LITELLM_BASE_URL   gateway OpenAI-compatible endpoint (e.g. http://gateway:4000/v1)
   LITELLM_API_KEY    gateway master or virtual key
   SPIKE_RESULTS_DIR  default ./spike-results
-  SPIKE_MODELS       comma-separated gateway model aliases (default kimi-foundry)
+  SPIKE_MODELS       comma-separated gateway model aliases (default kimi-k2.6)
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from spike.checks import (
 from spike.interrupt_graph import run_interrupt_check
 
 RESULTS_DIR = Path(os.environ.get("SPIKE_RESULTS_DIR", "./spike-results"))
-DEFAULT_MODELS = [m.strip() for m in os.environ.get("SPIKE_MODELS", "kimi-foundry").split(",") if m.strip()]
+DEFAULT_MODELS = [m.strip() for m in os.environ.get("SPIKE_MODELS", "kimi-k2.6").split(",") if m.strip()]
 
 
 async def run_matrix(command: str, golden: Path, repo: str, branch: str, models: list[str]) -> dict[str, Any]:

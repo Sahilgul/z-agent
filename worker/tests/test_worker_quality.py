@@ -68,7 +68,7 @@ def test_cached_tokens_priced_at_discount(monkeypatch):
     monkeypatch.setenv("MODEL_PRICE_OUT_PER_MTOK", "6.0")
     usage = {"input_tokens": 1_000_000, "output_tokens": 0,
              "input_token_details": {"cache_read": 800_000}}
-    cost = llm.estimate_cost("kimi-foundry", usage)
+    cost = llm.estimate_cost("kimi-k2.6", usage)
     # 200k uncached * 2.0 + 800k cached * 2.0 * 0.1 = 0.40 + 0.16 = 0.56
     assert cost == pytest.approx(0.56)
 

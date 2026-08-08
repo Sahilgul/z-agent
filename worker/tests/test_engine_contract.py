@@ -307,10 +307,12 @@ def test_tag_message_sets_origin():
 
 
 def test_model_capabilities_registry():
-    assert get_capabilities("kimi-foundry").reasoning is True
+    assert get_capabilities("kimi-k2.6").reasoning is True
     assert get_capabilities("qwen-foundry").reasoning is False
-    # K2.6 has fixed parameters — temperature must not be sent.
-    assert get_capabilities("kimi-foundry").supports_temperature is False
+    # The whole fleet takes temperature (probed through the gateway
+    # 2026-08-08: Kimi K2.6/K3 accept 0.0-2.0 + top_p — the old fixed-param
+    # 400s are gone from this surface).
+    assert get_capabilities("kimi-k2.6").supports_temperature is True
     assert get_capabilities("qwen-foundry").supports_temperature is True
     # Unknown model gets the conservative default
     assert get_capabilities("unknown").supports_tools is True
@@ -353,6 +355,45 @@ def test_from_assistant_reasoning_content_redacted():
     assert "REDACTED" in thinking.detail["text"]
 
 
+def test_from_assistant_attaches_turn_metrics_to_message():
+    """The bubble footer's telemetry (TTFT/latency/token split, measured in
+    agent_node) rides the MESSAGE event payload; a turn without metrics
+    (older workers, non-LLM paths) omits the key entirely so the frontend
+    hides the footer."""
+    em = EventEmitter("run-1", "thread-1")
+    metrics = {"ttft_s": 7.72, "latency_s": 9.18, "input_tokens": 89,
+               "output_tokens": 94, "reasoning_tokens": 72, "cached_tokens": 37}
+    events = em.from_assistant(AIMessage(content="the answer"), "task-1",
+                               metrics=metrics)
+    msg = [e for e in events if e.kind == StepKind.MESSAGE][0]
+    assert msg.detail["metrics"] == metrics
+
+    events = em.from_assistant(AIMessage(content="plain"), "task-1")
+    assert "metrics" not in events[0].detail
+
+
+def test_turn_metrics_splits_usage_and_timings():
+    from worker.engine.graph import _turn_metrics
+
+    ai = AIMessage(content="x", usage_metadata={
+        "input_tokens": 89, "output_tokens": 94, "total_tokens": 183,
+        "input_token_details": {"cache_read": 37},
+        "output_token_details": {"reasoning": 72},
+    })
+    m = _turn_metrics(ai, llm_started=100.0, first_chunk_at=107.72)
+    assert m["ttft_s"] == 7.72
+    assert m["latency_s"] is not None  # wall-clock at call time
+    assert m["input_tokens"] == 89
+    assert m["output_tokens"] == 94
+    assert m["reasoning_tokens"] == 72
+    assert m["cached_tokens"] == 37
+
+    # Error turn: no chunk ever arrived -> no TTFT, fields absent -> None.
+    m = _turn_metrics(AIMessage(content="x"), llm_started=100.0, first_chunk_at=None)
+    assert m["ttft_s"] is None
+    assert m["input_tokens"] is None
+
+
 def test_from_assistant_no_reasoning_content_no_thinking_event():
     """A plain AIMessage without reasoning_content must not produce a spurious
     empty THINKING event — the thinking path is opt-in on the field's presence."""
@@ -375,7 +416,7 @@ def test_make_llm_uses_reasoning_subclass_for_reasoning_models():
     from worker.engine.llm import ChatOpenAIReasoning, make_llm
 
     with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
-        reasoning_llm = make_llm("kimi-foundry", streaming=False)
+        reasoning_llm = make_llm("kimi-k2.6", streaming=False)
         plain_llm = make_llm("qwen-foundry", streaming=False)
     assert isinstance(reasoning_llm, ChatOpenAIReasoning)
     assert isinstance(plain_llm, ChatOpenAI)
@@ -383,39 +424,52 @@ def test_make_llm_uses_reasoning_subclass_for_reasoning_models():
 
 
 def test_make_llm_omits_temperature_for_fixed_param_models():
-    """K2.6 has fixed parameters — passing a non-default temperature makes
-    Azure Foundry 400. make_llm must omit the param entirely for models flagged
-    supports_temperature=False, and include it for models that accept it."""
+    """A model flagged supports_temperature=False must not get the param
+    (fixed-parameter deployments 400 on it). The whole CURRENT fleet accepts
+    temperature (probed through the gateway 2026-08-08: Kimi K2.6/K3 take
+    0.0-2.0 and top_p), so the flag is exercised with a synthetic entry."""
+    import os
+    from unittest.mock import patch
+
+    import worker.engine.llm as llm_mod
+    from worker.engine.llm import ModelCapabilities, make_llm
+
+    llm_mod._CAPABILITY_REGISTRY["fixed-params"] = ModelCapabilities(
+        supports_temperature=False)
+    try:
+        with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+            fixed = make_llm("fixed-params", streaming=False, temperature=0.0)
+            kimi = make_llm("kimi-k2.6", streaming=False, temperature=0.0)
+        # Fixed-param: temperature must NOT be set (ChatOpenAI defaults to
+        # 0.7 when unset)
+        assert fixed.temperature != 0.0
+        # Fleet models: temperature IS set to the requested value
+        assert kimi.temperature == 0.0
+    finally:
+        del llm_mod._CAPABILITY_REGISTRY["fixed-params"]
+
+
+def test_make_llm_reasoning_maps_to_reasoning_effort():
+    """The composer's reasoning choice becomes reasoning_effort on the wire
+    (Foundry's enum: none/minimal/low/medium/high — there is NO "thinking"
+    object on that surface): "off" maps to "none", an effort passes through,
+    and None sends NO override (byte-identical to pre-feature traffic).
+    It rides a DOUBLE-NESTED extra_body: LiteLLM drops top-level
+    reasoning_effort for non-o-series models, and the OpenAI SDK flattens
+    one extra_body level — nesting twice lands a literal extra_body key on
+    the wire, which the proxy forwards unfiltered (verified against a local
+    LiteLLM 1.95.0 proxy + live Foundry, 2026-08-08)."""
     import os
     from unittest.mock import patch
 
     from worker.engine.llm import make_llm
 
     with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
-        kimi_llm = make_llm("kimi-foundry", streaming=False, temperature=0.0)
-        qwen_llm = make_llm("qwen-foundry", streaming=False, temperature=0.0)
-    # K2.6: temperature must NOT be set (ChatOpenAI defaults to 0.7 when unset)
-    assert kimi_llm.temperature != 0.0
-    # Qwen: temperature IS set to the requested value
-    assert qwen_llm.temperature == 0.0
-
-
-def test_make_llm_reasoning_maps_to_extra_body():
-    """The composer's reasoning choice becomes extra_body: "off" disables
-    thinking, an effort enables it with reasoning_effort, and None sends NO
-    override (byte-identical to pre-feature traffic — provider default)."""
-    import os
-    from unittest.mock import patch
-
-    from worker.engine.llm import make_llm
-
-    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
-        off = make_llm("kimi-foundry", streaming=False, reasoning="off")
-        effort = make_llm("glm-foundry", streaming=False, reasoning="max")
-        default = make_llm("glm-foundry", streaming=False)
-    assert off.extra_body == {"thinking": {"type": "disabled"}}
-    assert effort.extra_body == {
-        "thinking": {"type": "enabled"}, "reasoning_effort": "max"}
+        off = make_llm("kimi-k2.6", streaming=False, reasoning="off")
+        effort = make_llm("glm-5.2", streaming=False, reasoning="high")
+        default = make_llm("glm-5.2", streaming=False)
+    assert off.extra_body == {"extra_body": {"reasoning_effort": "none"}}
+    assert effort.extra_body == {"extra_body": {"reasoning_effort": "high"}}
     assert default.extra_body is None
 
 
@@ -430,28 +484,51 @@ def test_make_llm_reasoning_rejects_effort_the_model_lacks():
     from worker.engine.llm import make_llm
 
     with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
-        with pytest.raises(RuntimeError, match="not 'xhigh'"):
-            make_llm("kimi-foundry", streaming=False, reasoning="xhigh")
-        with pytest.raises(RuntimeError, match="not 'low'"):
-            make_llm("glm-foundry", streaming=False, reasoning="low")
+        with pytest.raises(RuntimeError, match="not 'max'"):
+            make_llm("kimi-k2.6", streaming=False, reasoning="max")
+        with pytest.raises(RuntimeError, match="not 'minimal'"):
+            make_llm("glm-5.2", streaming=False, reasoning="minimal")
 
 
 def test_make_llm_reasoning_off_rejected_for_always_thinking_models():
-    """Kimi K3 has no disabled-thinking state — sending it would 400 the call.
-    Fail-closed at the model edge; efforts still work."""
+    """No current fleet model rejects "none" (K3 accepted it in the
+    2026-08-08 probe), but the fail-closed guard stays for future
+    always-thinking deployments — exercise it with a synthetic entry."""
     import os
     from unittest.mock import patch
 
     import pytest
 
+    from worker.engine import llm as llm_mod
+    from worker.engine.llm import ModelCapabilities, make_llm
+
+    llm_mod._CAPABILITY_REGISTRY["always-thinks"] = ModelCapabilities(
+        vision=False, reasoning=True, max_tokens=8192,
+        reasoning_efforts=("low",), supports_thinking_off=False)
+    try:
+        with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+            with pytest.raises(RuntimeError, match="always thinks"):
+                make_llm("always-thinks", streaming=False, reasoning="off")
+            ok = make_llm("always-thinks", streaming=False, reasoning="low")
+        assert ok.extra_body == {"extra_body": {"reasoning_effort": "low"}}
+    finally:
+        del llm_mod._CAPABILITY_REGISTRY["always-thinks"]
+
+
+def test_make_llm_kimi3_takes_max_and_off():
+    """K3 (FW-Kimi-K3, probed direct 2026-08-08 on its own endpoint) is the
+    one fleet model that takes "max", and — unlike first-party Moonshot docs
+    claim — accepts "none" (thinking off)."""
+    import os
+    from unittest.mock import patch
+
     from worker.engine.llm import make_llm
 
     with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
-        with pytest.raises(RuntimeError, match="always thinks"):
-            make_llm("kimi3-foundry", streaming=False, reasoning="off")
-        k3 = make_llm("kimi3-foundry", streaming=False, reasoning="low")
-    assert k3.extra_body == {
-        "thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+        k3_max = make_llm("kimi-k3", streaming=False, reasoning="max")
+        k3_off = make_llm("kimi-k3", streaming=False, reasoning="off")
+    assert k3_max.extra_body == {"extra_body": {"reasoning_effort": "max"}}
+    assert k3_off.extra_body == {"extra_body": {"reasoning_effort": "none"}}
 
 
 def test_tool_arg_aliases_normalized_at_model_edge():

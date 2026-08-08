@@ -114,7 +114,7 @@ def _config(collector: EventCollector, *, saver_thread: str = "t-1",
     return {
         "configurable": {
             "thread_id": saver_thread,
-            "model": "kimi-foundry",
+            "model": "kimi-k2.6",
             "emitter": EventEmitter("run-1", "t-1"),
             "approval_broker": FakeBroker(),
             "compactor": compactor or Compactor(),
