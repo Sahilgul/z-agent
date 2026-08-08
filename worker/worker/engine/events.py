@@ -62,6 +62,7 @@ class EventEmitter:
 
     def _next(self, kind: StepKind, title: str, detail: dict[str, Any],
               task_id: str | None, sdk_uuid: str | None) -> StepEvent:
+        import uuid
         event = StepEvent(
             run_id=self.run_id,
             thread_id=self.thread_id,
@@ -72,6 +73,10 @@ class EventEmitter:
             title=title,
             detail=detail,
             sdk_message_uuid=sdk_uuid,
+            # W-B6: one uuid per emission. The backend dedupes on it and
+            # assigns the authoritative seq — this emitter's seq is now a
+            # hint for pre-W-B6 backends only.
+            event_uid=str(uuid.uuid4()),
         )
         self._seq += 1
         self._persist_seq()
@@ -155,11 +160,12 @@ class EventEmitter:
         for tc in (msg.tool_calls or []):
             name = tc.get("name", "")
             args = tc.get("args", {}) or {}
+            # W-H10: stage the pairing info but emit NOTHING here — the
+            # tools node publishes ONE complete event per call at step end
+            # (input + output + ok). The call-time partial event was the
+            # tool-call double-render: a "{tool, input}" ghost card followed
+            # by the real result card.
             self._pending_tools[tc.get("id", "")] = {"name": name, "args": args, "uuid": sdk_uuid}
-            events.append(self._next(
-                _tool_kind(name), _tool_title(name, args),
-                {"tool": name, "input": redact_dict(args)}, task_id, sdk_uuid,
-            ))
 
         return events
 
@@ -201,10 +207,15 @@ class EventEmitter:
 
 
 def _tool_kind(name: str) -> StepKind:
+    """W-H10: THE one map — graph.py used to carry its own copy that knew
+    file_edit/file_write while this one didn't, so the same call was kinded
+    differently depending on which emission path produced it."""
     if name.startswith("mcp__"):
         return StepKind.MCP_CALL
     return {
         "file_read": StepKind.FILE_READ,
+        "file_edit": StepKind.FILE_EDIT,
+        "file_write": StepKind.FILE_EDIT,
         "file_search": StepKind.COMMAND,
         "file_glob": StepKind.COMMAND,
         "terminal_exec": StepKind.COMMAND,

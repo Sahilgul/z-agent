@@ -54,11 +54,13 @@ def test_emitter_pairs_tool_use_with_result():
         content="",
         tool_calls=[{"id": "tc-1", "name": "file_read", "args": {"file_path": "x.py"}}],
     )
+    # W-H10: no call-time partial event — staging only. The ONE complete
+    # event per tool call is emitted at step end (from_tool_result / the
+    # tools node), so the feed never renders a ghost "{tool, input}" card
+    # followed by the real result card.
     events = em.from_assistant(ai, "task-1")
-    assert len(events) == 1
-    assert events[0].kind == StepKind.FILE_READ
-    assert events[0].detail["tool"] == "file_read"
-    assert events[0].context_id == "thread-1::worker-1"
+    assert events == []
+    assert em._pending_tools["tc-1"]["name"] == "file_read"
 
     tm = ToolMessage(content="file contents", tool_call_id="tc-1", name="file_read")
     result_event = em.from_tool_result(tm, "task-1")
@@ -79,6 +81,26 @@ def test_emitter_redacts_tool_output():
     event = em.from_tool_result(tm, "task-1")
     assert "REDACTED" in event.detail["output"]
     assert "sk-1234567890" not in event.detail["output"]
+
+
+def test_tool_kind_map_is_unified_across_emission_paths():
+    """W-H10: graph.py and events.py used to carry separate _tool_kind maps;
+    file_edit/file_write were FILE_EDIT on one path and COMMAND on the
+    other. There is ONE canonical map now."""
+    from worker.engine import graph
+    from worker.engine.events import _tool_kind
+    assert graph._tool_kind is _tool_kind
+    assert _tool_kind("file_edit") == StepKind.FILE_EDIT
+    assert _tool_kind("file_write") == StepKind.FILE_EDIT
+
+
+def test_emitter_stamps_event_uid():
+    """W-B6: every emission carries a uuid4 the backend dedupes on."""
+    em = EventEmitter("run-1", "thread-1")
+    e1 = em._next(StepKind.MESSAGE, "a", {"text": "a"}, "task-1", None)
+    e2 = em._next(StepKind.MESSAGE, "b", {"text": "b"}, "task-1", None)
+    assert e1.event_uid and e2.event_uid
+    assert e1.event_uid != e2.event_uid
 
 
 def test_emitter_turn_boundary_event():

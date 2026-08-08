@@ -70,6 +70,16 @@ class StepEvent(BaseModel):
         default=None,
         description="SDK transcript UUID; null = non-message / pre-instrumentation",
     )
+    # W-B6 (additive, stays v1): a uuid4 stamped ONCE at emission. The
+    # backend's ingest dedupes on (run_id, event_uid) and assigns the
+    # authoritative seq from the DB counter under the thread row lock — the
+    # worker's own seq file becomes a hint, never the source of truth, so a
+    # backend-originated user message can no longer silently eat one worker
+    # event per turn. NULL = pre-W-B6 worker or backend-originated row.
+    event_uid: str | None = Field(
+        default=None,
+        description="Idempotency key stamped at emission (uuid4); null = pre-W-B6 producer",
+    )
 
     def effective_context_id(self) -> str:
         """Resolve context_id, defaulting to thread_id for top-level threads."""

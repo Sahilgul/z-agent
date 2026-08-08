@@ -28,7 +28,13 @@ except ImportError:  # pragma: no cover
     TextBlock = ThinkingBlock = ToolResultBlock = None  # type: ignore[assignment,misc]
     ToolUseBlock = UserMessage = None  # type: ignore[assignment,misc]
 
+import uuid as _uuid
+
 from collegium_contracts import StepEvent, StepKind, TypingDelta
+
+# W-H12: the flag-gated SDK path must redact EXACTLY like the custom engine
+# (D5 parity) — events carry only redacted text, whatever produced them.
+from worker.engine.security import redact, redact_dict
 
 TOOL_KIND_MAP = {
     "Bash": StepKind.COMMAND,
@@ -92,6 +98,8 @@ class Normalizer:
             title=title,
             detail=detail,
             sdk_message_uuid=uuid,
+            # W-B6: same emission-uid contract as the custom engine's emitter.
+            event_uid=str(_uuid.uuid4()),
         )
         self._seq += 1
         return event
@@ -105,33 +113,36 @@ class Normalizer:
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, ThinkingBlock):
-                    deltas.append(self._delta(StepKind.THINKING, block.thinking))
+                    thinking = redact(str(block.thinking))
+                    deltas.append(self._delta(StepKind.THINKING, thinking))
                     events.append(self._next(
                         StepKind.THINKING, "thinking…",
-                        {"text": block.thinking}, uuid,
+                        {"text": thinking}, uuid,
                     ))
                 elif isinstance(block, TextBlock):
-                    deltas.append(self._delta(StepKind.MESSAGE, block.text))
+                    text = redact(str(block.text))
+                    deltas.append(self._delta(StepKind.MESSAGE, text))
                     events.append(self._next(
-                        StepKind.MESSAGE, block.text.splitlines()[0][:120] if block.text else "message",
-                        {"text": block.text}, uuid,
+                        StepKind.MESSAGE, text.splitlines()[0][:120] if text else "message",
+                        {"text": text}, uuid,
                     ))
                 elif isinstance(block, ToolUseBlock):
                     self._pending_tools[block.id] = {
                         "name": block.name,
-                        "input": block.input,
+                        "input": redact_dict(block.input or {}),
                         "uuid": uuid,
                     }
-                    deltas.append(self._delta(_tool_kind(block.name), _tool_title(block.name, block.input)))
+                    deltas.append(self._delta(_tool_kind(block.name), _tool_title(block.name, block.input or {})))
 
         elif isinstance(msg, UserMessage):
             if isinstance(msg.content, str):
                 # A plain-string user message (the common user-prompt shape)
                 # must reach the transcript — `else []` silently dropped it.
-                if msg.content.strip():
+                text = redact(msg.content)
+                if text.strip():
                     events.append(self._next(
-                        StepKind.MESSAGE, msg.content.splitlines()[0][:120],
-                        {"text": msg.content}, uuid,
+                        StepKind.MESSAGE, text.splitlines()[0][:120],
+                        {"text": text}, uuid,
                     ))
                 content = []
             else:
@@ -173,7 +184,7 @@ class Normalizer:
         if pending is None:
             return self._next(
                 StepKind.STATUS, "tool result (unpaired)",
-                {"content": _result_text(block), "is_error": bool(block.is_error)}, uuid,
+                {"content": redact(_result_text(block)), "is_error": bool(block.is_error)}, uuid,
             )
         kind = _tool_kind(pending["name"])
         title = _tool_title(pending["name"], pending["input"])
@@ -184,7 +195,7 @@ class Normalizer:
             {
                 "tool": pending["name"],
                 "input": pending["input"],
-                "output": _result_text(block),
+                "output": redact(_result_text(block)),
                 "ok": not bool(block.is_error),
             },
             pending["uuid"] or uuid,

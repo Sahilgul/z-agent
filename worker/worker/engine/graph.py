@@ -44,7 +44,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.types import interrupt
 
 from worker.engine.compaction import Compactor
-from worker.engine.events import EventEmitter
+from worker.engine.events import EventEmitter, _tool_kind
 from worker.engine.goal_mode import (
     ADVANCE_ON_TURN_END,
     STAGE_ENVELOPES,
@@ -797,17 +797,8 @@ def _warning_event(emitter: EventEmitter, task_id: str | None, warning: str, det
     )
 
 
-def _tool_kind(name: str) -> StepKind:
-    if name.startswith("mcp__"):
-        return StepKind.MCP_CALL
-    return {
-        "file_read": StepKind.FILE_READ,
-        "file_edit": StepKind.FILE_EDIT,
-        "file_write": StepKind.FILE_EDIT,
-        "file_search": StepKind.COMMAND,
-        "file_glob": StepKind.COMMAND,
-        "terminal_exec": StepKind.COMMAND,
-    }.get(name, StepKind.COMMAND)
+# W-H10: _tool_kind is imported from worker.engine.events — one canonical
+# map for both emission paths (call staging and step-end complete event).
 
 
 def _tool_title(name: str, args: dict[str, Any]) -> str:
