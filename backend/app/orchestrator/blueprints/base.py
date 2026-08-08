@@ -54,6 +54,19 @@ def lane_override(ctx: BlueprintContext) -> tuple[str | None, str | None]:
     return None, reasoning_map.get(default)
 
 
+def media_args(ctx: BlueprintContext) -> dict:
+    """The run's image attachments as spawn kwargs: {"images", "image_notes"}.
+
+    Blueprints splat this into thread_manager.spawn alongside the model
+    override; spawn does the vision/blind routing (native image staging for
+    Kimi lanes, description-in-prompt for the rest). Empty dict when the run
+    has no attachments."""
+    paths = ctx.artifacts.get("image_paths")
+    if not paths:
+        return {}
+    return {"images": paths, "image_notes": ctx.artifacts.get("image_notes")}
+
+
 class Blueprint(abc.ABC):
     """ONE FILE PER MODE. Nodes run in order; a node raising marks the run failed
     (resumable via the session volume)."""

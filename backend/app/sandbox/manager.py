@@ -201,6 +201,14 @@ class SandboxManager:
         reasoning = (thread.spawn_context or {}).get("reasoning")
         if reasoning:
             env["REASONING_EFFORT"] = reasoning
+        # Vision lanes: attachments were staged into the session volume at
+        # spawn (thread_manager) — the worker builds a multimodal first
+        # message from them. Blind lanes never see this var; their prompt
+        # already carries the Kimi pre-pass description instead.
+        if (thread.spawn_context or {}).get("images"):
+            lane_option = self.settings.model_option(lane_model)
+            if lane_option and lane_option.vision:
+                env["IMAGES_DIR"] = "/session/images"
         if self.settings.engine_canary:
             env["CANARY"] = "1"
         if self.settings.engine_database_url:

@@ -158,7 +158,7 @@ async def test_kill_replace_propagates_preserve_workspace(session, make_user, mo
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo,
                          context_repos, resume_session=False,
                          resume_from_thread_id=None, preserve_workspace=False,
-                         budget_usd=None, model=None, reasoning=None):
+                         budget_usd=None, model=None, reasoning=None, images=None, image_notes=None):
         captured["preserve_workspace"] = preserve_workspace
         return _R()
 

@@ -164,10 +164,10 @@ def test_thread_env_lane_model_and_pricing(session, make_user):
     the reminder pricing is the REGISTRY rate for that model — a compare run
     mixes models whose rates differ by an order of magnitude."""
     run, thread = _make_run_thread(session, make_user)
-    thread.spawn_context = {"model": "deepseek-flash-foundry"}
+    thread.spawn_context = {"model": "deepseek-v4-flash"}
     mgr = sb.SandboxManager()
     env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
-    assert env["MODEL"] == "deepseek-flash-foundry"
+    assert env["MODEL"] == "deepseek-v4-flash"
     assert env["MODEL_PRICE_IN_PER_MTOK"] == "0.19"
     assert env["MODEL_PRICE_OUT_PER_MTOK"] == "0.51"
 
@@ -178,7 +178,7 @@ def test_thread_env_default_model_uses_registry_pricing(session, make_user):
     run, thread = _make_run_thread(session, make_user)
     mgr = sb.SandboxManager()
     env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
-    assert env["MODEL"] == "kimi-foundry"
+    assert env["MODEL"] == "kimi-k2.6"
     assert env["MODEL_PRICE_IN_PER_MTOK"] == "0.95"
     assert env["MODEL_PRICE_OUT_PER_MTOK"] == "4.0"
 
@@ -187,14 +187,34 @@ def test_thread_env_reasoning_effort(session, make_user):
     """The composer's reasoning choice reaches the worker as REASONING_EFFORT;
     no choice → the env var is absent (worker sends no override)."""
     run, thread = _make_run_thread(session, make_user)
-    thread.spawn_context = {"model": "glm-foundry", "reasoning": "max"}
+    thread.spawn_context = {"model": "glm-5.2", "reasoning": "high"}
     mgr = sb.SandboxManager()
     env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
-    assert env["REASONING_EFFORT"] == "max"
+    assert env["REASONING_EFFORT"] == "high"
 
-    thread.spawn_context = {"model": "glm-foundry"}
+    thread.spawn_context = {"model": "glm-5.2"}
     env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
     assert "REASONING_EFFORT" not in env
+
+
+def test_thread_env_images_dir_vision_lanes_only(session, make_user):
+    """IMAGES_DIR is set only when the lane has staged attachments AND its
+    model truly reads images — a blind lane's prompt carries the pre-pass
+    description instead, and handing it an image dir would 400/hallucinate."""
+    run, thread = _make_run_thread(session, make_user)
+    mgr = sb.SandboxManager()
+
+    thread.spawn_context = {"model": "kimi-k2.6", "images": ["/x/image-1.png"]}
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert env["IMAGES_DIR"] == "/session/images"
+
+    thread.spawn_context = {"model": "deepseek-v4-pro", "images": ["/x/image-1.png"]}
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert "IMAGES_DIR" not in env
+
+    thread.spawn_context = {"model": "kimi-k2.6"}  # no attachments
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert "IMAGES_DIR" not in env
 
 
 def test_thread_env_writable_includes_fleet_pat(session, make_user):

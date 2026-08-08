@@ -33,7 +33,7 @@ from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override, media_args
 from app.orchestrator.blueprints.goal import THREAD_MAX_WAIT_S
 from app.orchestrator.blueprints.plan import PlanBlueprint
 from app.services.runs import transition
@@ -138,7 +138,7 @@ class SwarmBlueprint(Blueprint):
             ctx.run, persona="lead", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=ctx.artifacts["context_repos"],
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
-            model=model, reasoning=reasoning,
+            model=model, reasoning=reasoning, **media_args(ctx),
         )
         ctx.artifacts["decompose_thread_id"] = thread.id
         await _await_thread(thread.id)
@@ -172,7 +172,10 @@ class SwarmBlueprint(Blueprint):
              "thread_hint": f"explorer-{i}",
              # The composer's single-model override applies to every slice —
              # a swarm on deepseek-pro is uniformly deepseek-pro.
-             **({"model": model, "reasoning": reasoning} if model else {})}
+             **({"model": model, "reasoning": reasoning} if model else {}),
+             # Attachments ride every slice: vision slices see them natively,
+             # blind slices get the pre-pass description in their prompt.
+             **media_args(ctx)}
             for i, s in enumerate(decomposition.slices)
         ]
         threads = await thread_manager.spawn_many(ctx.run, specs, ctx.artifacts["context_repos"])
@@ -224,7 +227,7 @@ class SwarmBlueprint(Blueprint):
             thread = await thread_manager.spawn(
                 ctx.run, persona="lead", prompt=prompt, persona_prompt=persona_prompt,
                 writable_repo=None, context_repos=ctx.artifacts["context_repos"],
-                model=model, reasoning=reasoning,
+                model=model, reasoning=reasoning, **media_args(ctx),
             )
             ctx.artifacts["synthesis_thread_id"] = thread.id
             await _await_thread(thread.id)

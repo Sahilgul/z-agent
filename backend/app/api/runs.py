@@ -75,6 +75,11 @@ class CreateRunBody(BaseModel):
     # the deployment default; one alias = run-wide override; several = ask-mode
     # compare (one lane per model). Validated in run_manager.create_run.
     models: list[str] | None = None
+    # Image attachments as base64 data URIs (data:image/png;base64,...).
+    # Vision lanes (Kimi) receive them natively; blind lanes receive a Kimi
+    # K2.6 pre-pass description in their prompt. Validated in
+    # run_manager.create_run (count/size/mime) before the run row exists.
+    images: list[str] | None = None
     # Per-model reasoning choice: alias -> "off" or one of the model's
     # reasoning_efforts (GET /models). Absent alias = provider default
     # (thinking on, default effort). Validated in run_manager.create_run.
@@ -113,7 +118,7 @@ async def create_run(body: CreateRunBody, request: Request, user: User = Depends
             source="button", initiated_by=user.id, mode_name=body.mode,
             task=body.task, repo=body.repo, work_item_id=body.work_item_id,
             autonomy=autonomy_dial.clamp(body.autonomy, user.id), fanout=body.fanout,
-            models=body.models, reasoning=body.reasoning,
+            models=body.models, reasoning=body.reasoning, images=body.images,
             idempotency_key=body.idempotency_key,
         )
     except ValueError as exc:

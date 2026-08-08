@@ -18,7 +18,7 @@ from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, media_args
 from app.services.runs import transition
 
 GUIDEBOOK_SEED = Path(__file__).parent / "assets" / "ServerApp.AGENTS.md"
@@ -102,6 +102,7 @@ class AskBlueprint(Blueprint):
                 resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
                 model=model,
                 reasoning=reasoning_map.get(model or get_settings().gateway_model),
+                **media_args(ctx),
             )
             ctx.artifacts["thread_id"] = thread.id
             ctx.artifacts["thread_ids"] = [thread.id]
@@ -122,7 +123,7 @@ class AskBlueprint(Blueprint):
                 ctx.run, persona=option.label if option else alias,
                 prompt=task, persona_prompt=persona_prompt,
                 writable_repo=None, context_repos=context, model=alias,
-                reasoning=reasoning_map.get(alias),
+                reasoning=reasoning_map.get(alias), **media_args(ctx),
             )
 
         results = await asyncio.gather(

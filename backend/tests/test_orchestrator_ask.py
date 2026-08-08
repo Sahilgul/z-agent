@@ -288,7 +288,7 @@ async def test_investigate_multi_model_spawns_one_lane_per_model(session, make_u
     ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
                           "task": "compare",
-                          "models": ["kimi-foundry", "glm-foundry"]})
+                          "models": ["kimi-k2.6", "glm-5.2"]})
 
     awaited: list[str] = []
 
@@ -297,9 +297,9 @@ async def test_investigate_multi_model_spawns_one_lane_per_model(session, make_u
     monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
 
     await bp._investigate(ctx)
-    assert [s["model"] for s in lm.spawned] == ["kimi-foundry", "glm-foundry"]
+    assert [s["model"] for s in lm.spawned] == ["kimi-k2.6", "glm-5.2"]
     # Lanes are told apart by persona = registry label; prompt is identical.
-    assert [s["persona"] for s in lm.spawned] == ["kimi k2.6", "glm 5.2"]
+    assert [s["persona"] for s in lm.spawned] == ["Kimi K2.6", "GLM 5.2"]
     assert {s["prompt"] for s in lm.spawned} == {"compare"}
     assert ctx.artifacts["thread_ids"] == ["lane-1", "lane-2"]
     assert ctx.artifacts["thread_id"] == "lane-1"  # legacy single-lane readers
@@ -318,8 +318,8 @@ async def test_investigate_multi_model_passes_per_lane_reasoning(session, make_u
     ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
                           "task": "compare",
-                          "models": ["kimi-foundry", "glm-foundry"],
-                          "reasoning": {"glm-foundry": "max", "kimi-foundry": "off"}})
+                          "models": ["kimi-k2.6", "glm-5.2"],
+                          "reasoning": {"glm-5.2": "high", "kimi-k2.6": "off"}})
 
     async def fake_await(self, thread_id, poll_seconds=2.0):
         return None
@@ -327,7 +327,7 @@ async def test_investigate_multi_model_passes_per_lane_reasoning(session, make_u
 
     await bp._investigate(ctx)
     by_model = {s["model"]: s["reasoning"] for s in lm.spawned}
-    assert by_model == {"kimi-foundry": "off", "glm-foundry": "max"}
+    assert by_model == {"kimi-k2.6": "off", "glm-5.2": "high"}
 
 
 async def test_investigate_single_model_reasoning_targets_default(session, make_user, monkeypatch):
@@ -341,7 +341,7 @@ async def test_investigate_single_model_reasoning_targets_default(session, make_
     bp = AskBlueprint()
     ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
-                          "task": "q", "reasoning": {"kimi-foundry": "off"}})
+                          "task": "q", "reasoning": {"kimi-k2.6": "off"}})
 
     async def fake_await(self, thread_id, poll_seconds=2.0):
         return None
@@ -364,12 +364,12 @@ async def test_investigate_multi_model_partial_failure_keeps_survivors(session, 
         async def publish_note(self, run_id, text): self.notes.append(text)
 
     relay = _Relay()
-    lm = _MultiFakeLaneManager(fail_on={"glm-foundry"})
+    lm = _MultiFakeLaneManager(fail_on={"glm-5.2"})
     bp = AskBlueprint()
     ctx = _ctx(run, services={"thread_manager": lm, "relay": relay},
                artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
                           "task": "compare",
-                          "models": ["kimi-foundry", "glm-foundry"]})
+                          "models": ["kimi-k2.6", "glm-5.2"]})
 
     async def fake_await(self, thread_id, poll_seconds=2.0):
         return None
@@ -387,12 +387,12 @@ async def test_investigate_multi_model_all_fail_raises(session, make_user, monke
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="compare")
     session.add(run); session.commit()
 
-    lm = _MultiFakeLaneManager(fail_on={"kimi-foundry", "glm-foundry"})
+    lm = _MultiFakeLaneManager(fail_on={"kimi-k2.6", "glm-5.2"})
     bp = AskBlueprint()
     ctx = _ctx(run, services={"thread_manager": lm},
                artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
                           "task": "compare",
-                          "models": ["kimi-foundry", "glm-foundry"]})
+                          "models": ["kimi-k2.6", "glm-5.2"]})
     from app.orchestrator.thread_manager import ThreadSpawnError
     with pytest.raises(ThreadSpawnError):
         await bp._investigate(ctx)
@@ -405,8 +405,8 @@ async def test_complete_multi_lane_partial_failure(session, make_user):
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
     session.add_all([
         run,
-        Thread(id="l1", run_id="r1", persona="kimi k2.6", status="completed"),
-        Thread(id="l2", run_id="r1", persona="glm 5.2", status="failed"),
+        Thread(id="l1", run_id="r1", persona="Kimi K2.6", status="completed"),
+        Thread(id="l2", run_id="r1", persona="GLM 5.2", status="failed"),
     ])
     session.commit()
     lm = _MultiFakeLaneManager()
@@ -425,8 +425,8 @@ async def test_complete_multi_lane_all_failed_fails_run(session, make_user):
     run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
     session.add_all([
         run,
-        Thread(id="l1", run_id="r1", persona="kimi k2.6", status="failed"),
-        Thread(id="l2", run_id="r1", persona="glm 5.2", status="failed"),
+        Thread(id="l1", run_id="r1", persona="Kimi K2.6", status="failed"),
+        Thread(id="l2", run_id="r1", persona="GLM 5.2", status="failed"),
     ])
     session.commit()
     lm = _MultiFakeLaneManager()

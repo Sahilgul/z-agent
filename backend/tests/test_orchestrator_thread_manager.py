@@ -83,12 +83,12 @@ async def test_spawn_scopes_key_and_context_to_model(session, make_user, monkeyp
     monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
                         lambda *a, **k: "container-xyz")
 
-    thread = await lm.spawn(run, "glm 5.2", "task", "persona", None, [],
-                            model="glm-foundry")
-    assert gw.minted[0][2] == ["glm-foundry"]  # key scoped to the lane's model
+    thread = await lm.spawn(run, "GLM 5.2", "task", "persona", None, [],
+                            model="glm-5.2")
+    assert gw.minted[0][2] == ["glm-5.2"]  # key scoped to the lane's model
     session.expire_all()
     row = session.get(Thread, thread.id)
-    assert row.spawn_context["model"] == "glm-foundry"
+    assert row.spawn_context["model"] == "glm-5.2"
 
 
 async def test_spawn_stores_reasoning_in_context(session, make_user, monkeypatch):
@@ -103,10 +103,10 @@ async def test_spawn_stores_reasoning_in_context(session, make_user, monkeypatch
     monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
                         lambda *a, **k: "container-xyz")
 
-    thread = await lm.spawn(run, "glm 5.2", "task", "persona", None, [],
-                            model="glm-foundry", reasoning="max")
+    thread = await lm.spawn(run, "GLM 5.2", "task", "persona", None, [],
+                            model="glm-5.2", reasoning="high")
     session.expire_all()
-    assert session.get(Thread, thread.id).spawn_context["reasoning"] == "max"
+    assert session.get(Thread, thread.id).spawn_context["reasoning"] == "high"
 
     # No choice → no key at all (the worker sends no override; the request
     # stays byte-identical to pre-feature traffic).
@@ -122,18 +122,27 @@ async def test_spawn_rejects_reasoning_the_model_lacks(session, make_user, monke
 
     with pytest.raises(ThreadSpawnError, match="not 'xhigh'"):
         await lm.spawn(run, "researcher", "task", "persona", None, [],
-                       model="kimi-foundry", reasoning="xhigh")
+                       model="kimi-k2.6", reasoning="xhigh")
     assert session.query(Thread).count() == 0
 
 
-async def test_spawn_rejects_off_for_always_thinking_models(session, make_user):
-    """Kimi K3 has no disabled-thinking state — 'off' would 400 the lane."""
-    run = _make_run(session, make_user)
+async def test_spawn_rejects_off_for_always_thinking_models(session, make_user,
+                                                            monkeypatch):
+    """No current fleet model is always-thinking (K3 took "none" in the
+    2026-08-08 probe), but the spawn-side guard stays for future ones —
+    exercise it with a synthetic registry entry."""
+    from app.core.models import ModelOption
     lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+    fake = ModelOption(alias="always-thinks", label="t", price_in_per_mtok=1,
+                       price_out_per_mtok=2, reasoning_efforts=["low"],
+                       supports_thinking_off=False)
+    monkeypatch.setattr(lm.settings, "available_models",
+                        [*lm.settings.available_models, fake])
+    run = _make_run(session, make_user)
 
     with pytest.raises(ThreadSpawnError, match="always thinks"):
         await lm.spawn(run, "researcher", "task", "persona", None, [],
-                       model="kimi3-foundry", reasoning="off")
+                       model="always-thinks", reasoning="off")
     assert session.query(Thread).count() == 0
 
 
@@ -149,9 +158,72 @@ async def test_spawn_defaults_to_gateway_model(session, make_user, monkeypatch):
                         lambda *a, **k: "container-xyz")
 
     thread = await lm.spawn(run, "researcher", "task", "persona", None, [])
-    assert gw.minted[0][2] == ["kimi-foundry"]
+    assert gw.minted[0][2] == ["kimi-k2.6"]
     session.expire_all()
-    assert session.get(Thread, thread.id).spawn_context["model"] == "kimi-foundry"
+    assert session.get(Thread, thread.id).spawn_context["model"] == "kimi-k2.6"
+
+
+async def test_spawn_blind_lane_embeds_notes_never_stages(session, make_user, monkeypatch):
+    """Blind lane (GLM/DeepSeek): the Kimi pre-pass description is embedded in
+    the prompt TEXT (before the spawn_context snapshot, so kill/replace
+    replays it), and no files are staged — the worker never sees IMAGES_DIR."""
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    captured = {}
+    monkeypatch.setattr(
+        thread_manager.sandbox_manager, "run_thread_container",
+        lambda run, thread, prompt, *a, **k: captured.setdefault("prompt", prompt) or "cid")
+    # Staging must NOT run for a blind lane — explode if it does.
+    import app.sandbox.manager as sm
+    monkeypatch.setattr(sm, "session_subpath",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("staged for blind lane")))
+
+    thread = await lm.spawn(run, "GLM 5.2", "task", "persona", None, [],
+                            model="glm-5.2",
+                            images=["/tmp/attach-1.png"],
+                            image_notes="\n\n<attached-images>red square</attached-images>")
+    assert "<attached-images>red square</attached-images>" in captured["prompt"]
+    session.expire_all()
+    ctx = session.get(Thread, thread.id).spawn_context
+    assert ctx["images"] == ["/tmp/attach-1.png"]  # replayable
+    assert "<attached-images>" in ctx["prompt"]    # embedded pre-snapshot
+
+
+async def test_spawn_vision_lane_stages_images_prompt_untouched(
+        session, make_user, monkeypatch, tmp_path):
+    """Vision lane (Kimi): attachments are copied into the session volume the
+    container mounts, the prompt stays clean (the model sees the image
+    itself), and spawn_context carries the paths for kill/replace restaging."""
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    captured = {}
+    monkeypatch.setattr(
+        thread_manager.sandbox_manager, "run_thread_container",
+        lambda run, thread, prompt, *a, **k: captured.setdefault("prompt", prompt) or "cid")
+
+    src = tmp_path / "image-1.png"
+    src.write_bytes(b"\x89PNG-fake")
+    session_root = tmp_path / "sessions"
+    import app.sandbox.manager as sm
+    monkeypatch.setattr(sm, "session_subpath",
+                        lambda run_id, thread_id: session_root / run_id / thread_id)
+
+    thread = await lm.spawn(run, "Kimi K2.6", "task", "persona", None, [],
+                            model="kimi-k2.6", images=[str(src)],
+                            image_notes="unused-for-vision")
+    staged = session_root / run.id / thread.id / "images" / "image-1.png"
+    assert staged.read_bytes() == b"\x89PNG-fake"
+    assert "unused-for-vision" not in captured["prompt"]  # notes are for blind lanes
+    session.expire_all()
+    assert session.get(Thread, thread.id).spawn_context["images"] == [str(src)]
 
 
 async def test_spawn_unknown_model_refused_before_capacity(session, make_user, monkeypatch):

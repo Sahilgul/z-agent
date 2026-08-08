@@ -79,7 +79,9 @@ class ThreadManager:
                     preserve_workspace: bool = False,
                     budget_usd: float | None = None,
                     model: str | None = None,
-                    reasoning: str | None = None) -> Thread:
+                    reasoning: str | None = None,
+                    images: list[str] | None = None,
+                    image_notes: str | None = None) -> Thread:
         # The lane's model: registry-validated (fail-closed — never substitute),
         # stored in spawn_context so a kill/replace replays it, the virtual key
         # is scoped to it, and thread_env injects it as the worker's MODEL.
@@ -100,6 +102,14 @@ class ThreadManager:
             raise ThreadSpawnError(
                 f"model '{model}' takes reasoning {sorted(option.reasoning_efforts)} "
                 f"or 'off' — not '{reasoning}'")
+        # Image routing (probed 2026-08-08: only Kimi truly sees; GLM 400s,
+        # DeepSeeks hallucinate). Vision lanes get the files staged into the
+        # session volume + IMAGES_DIR env; blind lanes get the Kimi pre-pass
+        # description embedded in the prompt TEXT — embedded BEFORE the
+        # spawn_context snapshot so a kill/replace replay carries it without
+        # a second pre-pass or double-embed.
+        if images and not option.vision and image_notes:
+            prompt += image_notes
         repo_name = writable_repo.name if writable_repo else None
         # Flywheel injection: pinned knowledge + the owner's
         # episodic recall join every thread's persona prompt. Cached per run, so
@@ -140,6 +150,9 @@ class ThreadManager:
                            "mode": run.mode,
                            "model": model,
                            **({"reasoning": reasoning} if reasoning else {}),
+                           # Attachment paths (run _attachments dir) — replayed
+                           # on kill/replace so a vision lane restages them.
+                           **({"images": list(images)} if images else {}),
                            # Mount snapshot: a replacement thread (mode switch or
                            # turn-X @mention expansion) remounts the exact same
                            # repo set, plus any newly-mentioned repos the caller
@@ -193,6 +206,19 @@ class ThreadManager:
         except Exception as exc:  # gateway-down: fail safe before container start
             await self._mark(thread.id, "failed")
             raise ThreadSpawnError(f"gateway key mint failed: {exc}") from exc
+
+        if images and option.vision:
+            # Stage attachments into the session dir the container will
+            # actually mount — the PRIOR thread's when resuming (that volume
+            # is what gets bind-mounted at /session).
+            import shutil
+            from pathlib import Path
+
+            from app.sandbox.manager import session_subpath
+            dest = session_subpath(run.id, resume_from_thread_id or thread.id) / "images"
+            dest.mkdir(parents=True, exist_ok=True)
+            for src in images:
+                shutil.copy2(src, dest / Path(src).name)
 
         permission_mode = permission_mode_for(run.autonomy)
         try:
@@ -300,6 +326,8 @@ class ThreadManager:
                         # spec MAY pin one (future per-slice compare).
                         model=spec.get("model"),
                         reasoning=spec.get("reasoning"),
+                        images=spec.get("images"),
+                        image_notes=spec.get("image_notes"),
                     )
                 except ThreadSpawnError as exc:
                     if "queued" not in str(exc):

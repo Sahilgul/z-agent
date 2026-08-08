@@ -101,6 +101,54 @@ async def test_create_run_unknown_mode_raises(session, make_user):
         await rm.create_run(source="button", initiated_by=u.id, mode_name="ghost", task="x")
 
 
+async def test_create_run_image_only_gets_default_task(session, make_user,
+                                                       monkeypatch, tmp_path):
+    """An image with no text is a legal run: the lane gets an
+    examine-the-images instruction (also the run title), and the pre-pass
+    conditions on it."""
+    import base64
+
+    from app.core.config import get_settings
+    from app.services import vision
+
+    u = make_user("a")
+    _seed_mode(session)
+    rm, _, _, _ = _make_manager()
+    captured = {}
+
+    async def fake_execute(run_id, task, repo, fanout=None, artifacts_extra=None):
+        captured["task"] = task
+        captured["artifacts"] = artifacts_extra
+    monkeypatch.setattr(rm, "_execute", fake_execute)
+    settings = get_settings()
+    settings.sessions_dir = tmp_path
+    monkeypatch.setattr("app.core.config.get_settings", lambda: settings)
+
+    async def fake_describe(images, task=None):
+        captured["prepass_task"] = task
+        return ["a screenshot"]
+    monkeypatch.setattr(vision, "describe_images", fake_describe)
+
+    png = "data:image/png;base64," + base64.b64encode(b"\x89PNG-fake").decode()
+    # A blind lane in the selection is what triggers the pre-pass (the
+    # default kimi-k2.6 lane would see the image natively).
+    run = await rm.create_run(source="button", initiated_by=u.id, mode_name="ask",
+                              task="   ", images=[png], models=["deepseek-v4-pro"])
+    await rm._tasks[run.id]  # _execute is tracked async — let it land
+    assert "image attachment(s)" in run.title        # default task became the title
+    assert captured["task"] == run.title or "image attachment(s)" in captured["task"]
+    assert captured["prepass_task"] == captured["task"]  # pre-pass saw the same task
+    assert captured["artifacts"]["image_paths"]
+
+
+async def test_create_run_empty_task_without_images_rejected(session, make_user):
+    u = make_user("a")
+    _seed_mode(session)
+    rm, _, _, _ = _make_manager()
+    with pytest.raises(ValueError, match="task or at least one image"):
+        await rm.create_run(source="button", initiated_by=u.id, mode_name="ask", task="  ")
+
+
 async def test_create_run_registers_with_approval_service(session, make_user, monkeypatch):
     """Regression: ApprovalService.register_run was never called, so the
     approvals consumer idled on an empty stream set and no Approval row was
@@ -624,7 +672,7 @@ async def test_kill_replace_respawns_with_original_context(session, make_user, m
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
                          preserve_workspace=False, budget_usd=None, model=None,
-                         reasoning=None):
+                         reasoning=None, images=None, image_notes=None):
         captured.update({"persona": persona, "prompt": prompt,
                          "persona_prompt": persona_prompt,
                          "resume_from_thread_id": resume_from_thread_id})
@@ -660,7 +708,7 @@ async def test_kill_replace_passes_resume_from_thread_id(session, make_user, mon
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
                          preserve_workspace=False, budget_usd=None, model=None,
-                         reasoning=None):
+                         reasoning=None, images=None, image_notes=None):
         captured["resume_from_thread_id"] = resume_from_thread_id
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn
@@ -691,7 +739,7 @@ async def test_kill_replace_waits_for_old_container_before_spawn(session, make_u
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
                          preserve_workspace=False, budget_usd=None, model=None,
-                         reasoning=None):
+                         reasoning=None, images=None, image_notes=None):
         order.append("spawn")
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn
@@ -742,7 +790,7 @@ async def test_remount_thread_unions_extra_repos_onto_stored_set(session, make_u
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
                          preserve_workspace=False, budget_usd=None, model=None,
-                         reasoning=None):
+                         reasoning=None, images=None, image_notes=None):
         captured["writable_repo"] = writable_repo
         captured["context_repos"] = context_repos
         captured["resume_from_thread_id"] = resume_from_thread_id
@@ -784,7 +832,7 @@ async def test_remount_thread_dedupes_already_mounted_names(session, make_user, 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
                          preserve_workspace=False, budget_usd=None, model=None,
-                         reasoning=None):
+                         reasoning=None, images=None, image_notes=None):
         captured["context_repos"] = context_repos
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn

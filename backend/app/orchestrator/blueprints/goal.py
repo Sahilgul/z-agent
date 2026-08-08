@@ -48,7 +48,7 @@ from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override, media_args
 from app.orchestrator.blueprints.plan import PLAN_SCHEMA_HINT, PlanBlueprint
 from app.services import delivery, evidence
 from app.services.runs import transition
@@ -222,7 +222,7 @@ class GoalBlueprint(Blueprint):
                 ctx.run, persona="researcher", prompt=prompt, persona_prompt=persona_prompt,
                 writable_repo=None, context_repos=context,
                 resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
-                model=model, reasoning=reasoning,
+                model=model, reasoning=reasoning, **media_args(ctx),
             )
             ctx.artifacts["thread_ids"].append(thread.id)
             await _await_thread(thread.id)
@@ -238,7 +238,8 @@ class GoalBlueprint(Blueprint):
                             f"Your slice: {EXPLORE_ANGLES[i % len(EXPLORE_ANGLES)]}"),
                  "persona_prompt": persona_prompt,
                  "thread_hint": f"explorer-{i}",
-                 **({"model": model, "reasoning": reasoning} if model else {})}
+                 **({"model": model, "reasoning": reasoning} if model else {}),
+                 **media_args(ctx)}
                 for i in range(requested)
             ]
             threads = await thread_manager.spawn_many(ctx.run, specs, context)
@@ -263,7 +264,7 @@ class GoalBlueprint(Blueprint):
         thread = await thread_manager.spawn(
             ctx.run, persona="planner", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=context,
-            model=model, reasoning=reasoning,
+            model=model, reasoning=reasoning, **media_args(ctx),
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         await _await_thread(thread.id)
@@ -296,7 +297,7 @@ class GoalBlueprint(Blueprint):
                 persona_prompt=self._persona(
                     ctx, CRITIC_HINT.format(round_no=round_no, rounds=CRITIQUE_ROUNDS)),
                 writable_repo=None, context_repos=context,
-                model=model, reasoning=reasoning,
+                model=model, reasoning=reasoning, **media_args(ctx),
             )
             ctx.artifacts["thread_ids"].append(critic.id)
             await _await_thread(critic.id)
@@ -312,7 +313,7 @@ class GoalBlueprint(Blueprint):
                 ctx.run, persona="reviser", prompt=reviser_prompt,
                 persona_prompt=self._persona(ctx, REVISER_HINT + PLAN_SCHEMA_HINT),
                 writable_repo=None, context_repos=context,
-                model=model, reasoning=reasoning,
+                model=model, reasoning=reasoning, **media_args(ctx),
             )
             ctx.artifacts["thread_ids"].append(reviser.id)
             await _await_thread(reviser.id)
@@ -382,7 +383,7 @@ class GoalBlueprint(Blueprint):
         thread = await thread_manager.spawn(
             ctx.run, persona="developer", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=writable, context_repos=context,
-            model=model, reasoning=reasoning,
+            model=model, reasoning=reasoning, **media_args(ctx),
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         ctx.artifacts["develop_thread_id"] = thread.id
@@ -486,7 +487,7 @@ class GoalBlueprint(Blueprint):
             persona_prompt=self._persona(ctx, FIXER_HINT.format(branch=branch)),
             writable_repo=writable, context_repos=context,
             preserve_workspace=True,  # re-stamping would wipe the implementation
-            model=model, reasoning=reasoning,
+            model=model, reasoning=reasoning, **media_args(ctx),
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         await _await_thread(thread.id)

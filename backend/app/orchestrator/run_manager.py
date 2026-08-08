@@ -125,15 +125,30 @@ class RunManager:
                          fanout: int | None = None, delivery_id: int | None = None,
                          models: list[str] | None = None,
                          reasoning: dict[str, str] | None = None,
+                         images: list[str] | None = None,
                          idempotency_key: str | None = None) -> Run:
         models = self._validate_models(models, mode_name)
         reasoning = self._validate_reasoning(reasoning, models)
+        # Attachments validated BEFORE the run row exists: a bad upload must
+        # 422 without leaving a queued run behind.
+        if images:
+            from app.services import vision
+            vision.validate_images(images)
         # Deterministic title hydration (THE one place it happens):
         # a generic typed title resolves from the ADO work item so the inbox
         # card reads the ticket's real title, not "42" or an empty string.
         if work_item_id is not None and _title_is_generic(task, work_item_id):
             from app.services import hydration
             task = await hydration.hydrate_title(work_item_id, task) or task
+        if not task.strip():
+            if not images:
+                raise ValueError("task or at least one image is required")
+            # Image-only message: give the lane a real instruction (also the
+            # run title) and let the pre-pass condition on it. Runs AFTER
+            # hydration — a work-item title wins over the fallback.
+            task = ("The user sent image attachment(s) with no text. Examine "
+                    "them carefully and respond helpfully — describe what you "
+                    "see and answer any question the images imply.")
         session = get_session()
         try:
             # POST /runs idempotency: a client retry (double-click, network
@@ -183,11 +198,44 @@ class RunManager:
         artifacts_extra = {
             **({"models": models} if models else {}),
             **({"reasoning": reasoning} if reasoning else {}),
+            **(await self._prepare_images(run.id, images, task, models) if images else {}),
         }
         self._track(run.id, self._execute(
             run.id, task, repo, fanout,
             artifacts_extra=artifacts_extra or None))
         return run
+
+    async def _prepare_images(self, run_id: str, images: list[str], task: str,
+                              models: list[str] | None) -> dict:
+        """Persist attachments run-wide + run the vision pre-pass IF needed.
+
+        Images land in a run-scoped attachments dir (threads copy them into
+        their own session volume at spawn). The Kimi pre-pass description is
+        only for BLIND lanes — when every selected model sees images natively
+        (e.g. an all-Kimi compare), the pre-pass is skipped entirely: no
+        spend, no latency, and no secondhand description a vision lane would
+        never read.
+        """
+        from app.core.config import get_settings
+        from app.services import vision
+        settings = get_settings()
+        parsed = vision.validate_images(images)
+        attach_dir = settings.sessions_dir / run_id / "_attachments"
+        attach_dir.mkdir(parents=True, exist_ok=True)
+        paths: list[str] = []
+        for i, (ext, raw) in enumerate(parsed):
+            p = attach_dir / f"image-{i + 1}.{ext}"
+            p.write_bytes(raw)
+            paths.append(str(p))
+        selected = models or [settings.gateway_model]
+        needs_prepass = any(
+            not (opt and opt.vision)
+            for opt in (settings.model_option(a) for a in selected))
+        if not needs_prepass:
+            return {"image_paths": paths}
+        descriptions = await vision.describe_images(images, task)
+        return {"image_paths": paths,
+                "image_notes": vision.notes_block(descriptions)}
 
     def _validate_models(self, models: list[str] | None, mode_name: str) -> list[str] | None:
         """Composer model selection, checked against the registry BEFORE any
@@ -787,6 +835,10 @@ class RunManager:
             # must never silently switch models mid-conversation.
             model=context.get("model"),
             reasoning=context.get("reasoning"),
+            # Attachments replay: vision lanes restage from these paths.
+            # image_notes is deliberately NOT passed — a blind lane's stored
+            # prompt already has the description embedded (no double-embed).
+            images=context.get("images"),
             # K19: carry the workspace-preservation intent across the replace —
             # the spawn_context stored it, but the replay never read it, so a
             # "keep my uncommitted work" replace still re-stamped fresh.
