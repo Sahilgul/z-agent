@@ -57,6 +57,14 @@ services:
       POSTGRES_DB: litellm
     volumes:
       - gateway-db-data:/var/lib/postgresql/data
+    # The gateway runs Prisma migrations at boot and EXITS on connect failure
+    # (no retry) — without this gate a fresh `up` races Postgres init and the
+    # gateway crash-loops until manually restarted.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     networks: [internal]
     restart: unless-stopped
 
@@ -91,11 +99,22 @@ services:
       AZURE_AI_FOUNDRY_API_KEY_K3: ${AZURE_AI_FOUNDRY_API_KEY_K3:-}
       FOUNDRY_MODEL_DS_PRO: ${FOUNDRY_MODEL_DS_PRO:-openai/DeepSeek-V4-Pro}
       FOUNDRY_MODEL_DS_FLASH: ${FOUNDRY_MODEL_DS_FLASH:-openai/DeepSeek-V4-Flash}
+      # Optional UI login (username/password instead of the master key at /ui).
+      # Compose only INJECTS vars the environment block names — setting these
+      # in .env without these two lines leaves them outside the container.
+      UI_USERNAME: ${UI_USERNAME:-}
+      UI_PASSWORD: ${UI_PASSWORD:-}
       STORE_MODEL_IN_DB: "True"
+    # Published ONLY so an admin's browser can reach the proxy UI (/ui) —
+    # the Usage button opens COLLEGIUM_GATEWAY_UI_URL (default below).
+    # NSG/firewall must allow 4000; the whole proxy is master-key gated.
+    ports:
+      - "4000:4000"
     volumes:
       - ../litellm/config.yaml:/app/config.yaml:ro
     depends_on:
-      - gateway-db
+      gateway-db:
+        condition: service_healthy
     networks:
       - internal
       - egress        # only the gateway may reach Foundry / the internet
@@ -134,11 +153,12 @@ services:
       COLLEGIUM_DB_URL: postgresql+psycopg://collegium:${POSTGRES_PASSWORD}@db:5432/collegium
       COLLEGIUM_REDIS_URL: redis://redis:6379/0
       COLLEGIUM_GATEWAY_URL: http://gateway:4000
+      # The admin Usage button opens this — must be reachable from a BROWSER
+      # (the compose-internal gateway:4000 is not). Set in .env on the VM.
+      COLLEGIUM_GATEWAY_UI_URL: ${COLLEGIUM_GATEWAY_UI_URL:-}
       COLLEGIUM_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       # Worker budget reminders (F4 env injection) track the gateway's real
       # Kimi rates, not the conservative code defaults (2.0/6.0).
-      COLLEGIUM_WORKER_PRICE_IN_PER_MTOK: ${WORKER_PRICE_IN_PER_MTOK:-0.95}
-      COLLEGIUM_WORKER_PRICE_OUT_PER_MTOK: ${WORKER_PRICE_OUT_PER_MTOK:-4.00}
       COLLEGIUM_WORKER_PRICE_IN_PER_MTOK: ${WORKER_PRICE_IN_PER_MTOK:-0.95}
       COLLEGIUM_WORKER_PRICE_OUT_PER_MTOK: ${WORKER_PRICE_OUT_PER_MTOK:-4.00}
       COLLEGIUM_JWT_SECRET: ${COLLEGIUM_JWT_SECRET:?set in .env}

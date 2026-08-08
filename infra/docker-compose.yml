@@ -51,6 +51,9 @@ services:
       AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:?set in .env}
       FOUNDRY_MODEL: ${FOUNDRY_MODEL:?set in .env}
       FOUNDRY_API_BASE: ${FOUNDRY_API_BASE:?set in .env}
+      # Optional UI login (username/password instead of the master key at /ui).
+      UI_USERNAME: ${UI_USERNAME:-}
+      UI_PASSWORD: ${UI_PASSWORD:-}
       STORE_MODEL_IN_DB: "True"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
