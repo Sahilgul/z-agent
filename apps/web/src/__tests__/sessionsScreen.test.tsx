@@ -113,7 +113,7 @@ describe("SessionsScreen composer (W6-M9)", () => {
     const finished: Run = { ...startedRun, id: "r-done", stage: "completed" };
     useRuns.setState({ current: finished, runs: [finished], runsLoaded: true });
     renderSessions();
-    const composer = await screen.findByPlaceholderText(/pick the session back up/i);
+    const composer = await screen.findByPlaceholderText(/message the lead/i);
     expect(composer).not.toBeDisabled();
     fireEvent.change(composer, { target: { value: "one more thing" } });
     fireEvent.keyDown(composer, { key: "Enter" });

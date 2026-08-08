@@ -12,7 +12,6 @@ import { ApprovalQueue } from "../../components/ApprovalQueue";
 import { EventStream } from "../../components/EventStream";
 import { ThreadChips } from "../../components/ThreadChips";
 import { PipelineBar } from "../../components/PipelineBar";
-import { SessionResume } from "../../components/SessionResume";
 import { SessionTabs } from "../../components/SessionTabs";
 import { uuid } from "../../lib/ids";
 import { agentWorking } from "../../lib/runMachine";
@@ -270,22 +269,14 @@ export function SessionsScreen() {
   };
 
   const working = current ? agentWorking(current.stage) : false;
-  // Design philosophy §1: the composer is NEVER locked by stage. Sending on
-  // a completed/failed/abandoned run chains a fresh lane on the prior
-  // session volume (backend SEND_MESSAGE terminal-thread path) — the
-  // conversation resumes where it left off, a day or a month later. A
-  // harness the user can't talk to is a harness in an unrecoverable state.
-  const stage = current?.stage;
+  // Design philosophy §1: the composer is NEVER locked by stage, and its
+  // copy never lectures. Sending on any run just works — the backend nudges
+  // a live lane or chains a fresh one on the prior session volume.
   const submit = () => void (current ? send() : start());
   const placeholder = current
     ? editingResend
       ? "edit the last message, then send — the old turn never runs…"
-      : working
-        ? "nudge the lead — queued for the next turn…"
-        : stage === "completed" || stage === "failed" || stage === "abandoned" ||
-            stage === "interrupted"
-          ? "reply to pick the session back up — a fresh lane resumes the prior context…"
-          : "message the lead…"
+      : "message the lead…"
     : mode === "agent-rnd"
       ? 'investigate across the fleet… ("spawn 5 explorers on ClientApp")'
       : "describe the task…";
@@ -454,14 +445,10 @@ export function SessionsScreen() {
         aria-label={current ? "message the lead" : "new run"}
       >
         {current && <ApprovalQueue runId={current.id} focusCardId={focusCardId} />}
-        {current && (
-          <SessionResume
-            run={current}
-            working={working}
-            onResumed={(runId) => void openRun(runId)}
-            onEdit={startEditResend}
-          />
-        )}
+        {/* No SessionResume card: the composer IS the resume path. A send on
+            any stage chains a fresh lane on the prior session volume
+            (philosophy §1) — a separate "continue session / replay only"
+            banner only restates what typing already does. */}
         {current && (
           <ActionCard
             stage={current.stage}
