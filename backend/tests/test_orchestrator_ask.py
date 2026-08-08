@@ -18,12 +18,40 @@ class _FakeLaneManager:
         self.settled = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_thread_id=None):
+                    resume_session=False, resume_from_thread_id=None, model=None,
+                    reasoning=None):
         self.spawned.append({
             "persona": persona, "prompt": prompt, "persona_prompt": persona_prompt,
             "writable_repo": writable_repo, "context_repos": context_repos,
+            "model": model, "reasoning": reasoning,
         })
         return self._thread
+
+    async def settle_cost(self, thread_id):
+        self.settled.append(thread_id)
+
+
+class _MultiFakeLaneManager:
+    """Compare-mode fake: one distinct thread per spawn, with per-model
+    failure injection for the partial/all-fail fan-out paths."""
+
+    def __init__(self, fail_on=()):
+        self.spawned: list[dict] = []
+        self.settled: list[str] = []
+        self._fail = set(fail_on)
+        self._n = 0
+
+    async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
+                    resume_session=False, resume_from_thread_id=None, model=None,
+                    reasoning=None):
+        self.spawned.append({"persona": persona, "prompt": prompt, "model": model,
+                             "reasoning": reasoning})
+        if model in self._fail:
+            from app.orchestrator.thread_manager import ThreadSpawnError
+            raise ThreadSpawnError(f"container start failed: boom ({model})")
+        self._n += 1
+        return Thread(id=f"lane-{self._n}", run_id=run.id, persona=persona,
+                      status="completed")
 
     async def settle_cost(self, thread_id):
         self.settled.append(thread_id)
@@ -245,6 +273,171 @@ async def test_investigate_no_repo_spawns_general_assistant(session, make_user, 
     assert "general-assistant" in lm.spawned[0]["persona_prompt"]
     assert "No repo is mounted" in lm.spawned[0]["persona_prompt"]
     assert lm.spawned[0]["prompt"] == "hello"
+
+
+# ------------------------------------------------------- multi-model compare
+async def test_investigate_multi_model_spawns_one_lane_per_model(session, make_user, monkeypatch):
+    """Compare mode: the same prompt fans out to one lane per selected model;
+    the persona carries the model label so lanes are distinguishable in the UI."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="compare")
+    session.add(run); session.commit()
+
+    lm = _MultiFakeLaneManager()
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
+                          "task": "compare",
+                          "models": ["kimi-foundry", "glm-foundry"]})
+
+    awaited: list[str] = []
+
+    async def fake_await(self, thread_id, poll_seconds=2.0):
+        awaited.append(thread_id)
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
+
+    await bp._investigate(ctx)
+    assert [s["model"] for s in lm.spawned] == ["kimi-foundry", "glm-foundry"]
+    # Lanes are told apart by persona = registry label; prompt is identical.
+    assert [s["persona"] for s in lm.spawned] == ["kimi k2.6", "glm 5.2"]
+    assert {s["prompt"] for s in lm.spawned} == {"compare"}
+    assert ctx.artifacts["thread_ids"] == ["lane-1", "lane-2"]
+    assert ctx.artifacts["thread_id"] == "lane-1"  # legacy single-lane readers
+    assert sorted(awaited) == ["lane-1", "lane-2"]
+
+
+async def test_investigate_multi_model_passes_per_lane_reasoning(session, make_user, monkeypatch):
+    """The reasoning map is keyed by alias: each lane gets ITS effort, lanes
+    without an entry get None (provider default)."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="compare")
+    session.add(run); session.commit()
+
+    lm = _MultiFakeLaneManager()
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
+                          "task": "compare",
+                          "models": ["kimi-foundry", "glm-foundry"],
+                          "reasoning": {"glm-foundry": "max", "kimi-foundry": "off"}})
+
+    async def fake_await(self, thread_id, poll_seconds=2.0):
+        return None
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
+
+    await bp._investigate(ctx)
+    by_model = {s["model"]: s["reasoning"] for s in lm.spawned}
+    assert by_model == {"kimi-foundry": "off", "glm-foundry": "max"}
+
+
+async def test_investigate_single_model_reasoning_targets_default(session, make_user, monkeypatch):
+    """No selection + reasoning on the default model's row → the single lane
+    gets it (the picker's effective row is the default)."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="q")
+    session.add(run); session.commit()
+
+    lm = _MultiFakeLaneManager()
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
+                          "task": "q", "reasoning": {"kimi-foundry": "off"}})
+
+    async def fake_await(self, thread_id, poll_seconds=2.0):
+        return None
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
+
+    await bp._investigate(ctx)
+    assert lm.spawned[0]["model"] is None  # deployment default
+    assert lm.spawned[0]["reasoning"] == "off"
+
+
+async def test_investigate_multi_model_partial_failure_keeps_survivors(session, make_user, monkeypatch):
+    """A lane that fails to start must not sink the compare — the survivors
+    still answer, and a note says a lane is missing."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="compare")
+    session.add(run); session.commit()
+
+    class _Relay:
+        def __init__(self): self.notes = []
+        async def publish_note(self, run_id, text): self.notes.append(text)
+
+    relay = _Relay()
+    lm = _MultiFakeLaneManager(fail_on={"glm-foundry"})
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm, "relay": relay},
+               artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
+                          "task": "compare",
+                          "models": ["kimi-foundry", "glm-foundry"]})
+
+    async def fake_await(self, thread_id, poll_seconds=2.0):
+        return None
+    monkeypatch.setattr(AskBlueprint, "_await_thread", fake_await)
+
+    await bp._investigate(ctx)  # must not raise
+    assert ctx.artifacts["thread_ids"] == ["lane-1"]
+    assert relay.notes and "1 of 2 model lanes failed" in relay.notes[0]
+
+
+async def test_investigate_multi_model_all_fail_raises(session, make_user, monkeypatch):
+    """Every lane failed to start = the single-model semantics: the blueprint
+    raises and the run fails with the real reason."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="compare")
+    session.add(run); session.commit()
+
+    lm = _MultiFakeLaneManager(fail_on={"kimi-foundry", "glm-foundry"})
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"repo_row": None, "context_repos": [], "guidebook": "",
+                          "task": "compare",
+                          "models": ["kimi-foundry", "glm-foundry"]})
+    from app.orchestrator.thread_manager import ThreadSpawnError
+    with pytest.raises(ThreadSpawnError):
+        await bp._investigate(ctx)
+
+
+async def test_complete_multi_lane_partial_failure(session, make_user):
+    """One dead lane doesn't fail the run while a survivor answered: trajectory
+    + settle cover the survivor, the run completes."""
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
+    session.add_all([
+        run,
+        Thread(id="l1", run_id="r1", persona="kimi k2.6", status="completed"),
+        Thread(id="l2", run_id="r1", persona="glm 5.2", status="failed"),
+    ])
+    session.commit()
+    lm = _MultiFakeLaneManager()
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"thread_ids": ["l1", "l2"]})
+    await bp._complete(ctx)
+    session.expire_all()
+    assert ctx.run.stage != RunStage.FAILED.value
+    assert [t.thread_id for t in session.query(TrajectorySummary).all()] == ["l1"]
+    assert lm.settled == ["l1"]
+
+
+async def test_complete_multi_lane_all_failed_fails_run(session, make_user):
+    u = make_user("alice", role="member", status="active")
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating", title="t")
+    session.add_all([
+        run,
+        Thread(id="l1", run_id="r1", persona="kimi k2.6", status="failed"),
+        Thread(id="l2", run_id="r1", persona="glm 5.2", status="failed"),
+    ])
+    session.commit()
+    lm = _MultiFakeLaneManager()
+    bp = AskBlueprint()
+    ctx = _ctx(run, services={"thread_manager": lm},
+               artifacts={"thread_ids": ["l1", "l2"]})
+    await bp._complete(ctx)
+    assert ctx.run.stage == RunStage.FAILED.value
+    session.expire_all()
+    assert session.query(TrajectorySummary).count() == 0
+    assert lm.settled == []
 
 
 # --------------------------------------------------------------- _complete

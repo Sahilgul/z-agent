@@ -86,6 +86,9 @@ class EngineRunner:
         self.mode = Mode(os.environ.get("MODE", "ask"))
         self.autonomy = Autonomy(os.environ.get("AUTONOMY", "supervised"))
         self.model = os.environ.get("MODEL", "kimi-foundry")
+        # Composer reasoning choice for this lane ("off" or an effort like
+        # "max"). Empty = provider default — make_llm sends no override.
+        self.reasoning_effort = os.environ.get("REASONING_EFFORT", "").strip() or None
         self.budget = Budget(cap=float(os.environ.get("BUDGET_USD", "5.0")))
         self.redis_url = os.environ["REDIS_URL"]
         self.workspace = Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
@@ -194,6 +197,7 @@ class EngineRunner:
             "configurable": {
                 "thread_id": self.context_id,  # LangGraph checkpointer key
                 "model": self.model,
+                "reasoning_effort": self.reasoning_effort,
                 "emitter": self.emitter,
                 "approval_broker": self.broker,
                 "compactor": self.compactor,

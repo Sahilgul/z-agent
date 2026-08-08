@@ -6,6 +6,12 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/*
 
+# Golden clones live on a host bind mount owned by the deploy user while this
+# container runs as root — git refuses them as "dubious ownership" and the
+# golden fetcher fails every pass. Trust system-wide: single-purpose image,
+# and COLLEGIUM_DATA_ROOT is configurable so a scoped path rule could miss.
+RUN git config --system --add safe.directory '*'
+
 WORKDIR /app
 COPY packages/contracts /app/packages/contracts
 COPY backend /app/backend

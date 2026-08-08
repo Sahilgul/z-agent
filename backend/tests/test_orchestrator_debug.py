@@ -27,7 +27,8 @@ class _FakeLaneManager:
         self.spawned = []
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                    resume_session=False, resume_from_thread_id=None):
+                    resume_session=False, resume_from_thread_id=None,
+                    model=None, reasoning=None):
         self.spawned.append({"persona": persona, "prompt": prompt, "writable": writable_repo})
         if self._by_persona is not None:
             return self._by_persona[persona]

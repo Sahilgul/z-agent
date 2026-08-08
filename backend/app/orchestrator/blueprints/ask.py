@@ -88,14 +88,64 @@ class AskBlueprint(Blueprint):
                 "user wants you to look at specific code, they can mention a repo "
                 "with `@RepoName` and you'll get read-only access to it on the next turn."
             )
-        thread = await thread_manager.spawn(
-            ctx.run, persona="researcher", prompt=task, persona_prompt=persona_prompt,
-            writable_repo=None, context_repos=context,
-            resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
-        )
-        ctx.artifacts["thread_id"] = thread.id
-        # Block until the thread's turn ends (idle/completed/failed).
-        await self._await_thread(thread.id)
+        # Model selection (validated at create_run): one alias = the run's
+        # lane uses it; several = compare mode, one lane per model answering
+        # the same prompt in parallel. None = the deployment default.
+        models: list[str] = ctx.artifacts.get("models") or []
+        reasoning_map: dict[str, str] = ctx.artifacts.get("reasoning") or {}
+        if len(models) <= 1:
+            from app.core.config import get_settings
+            model = models[0] if models else None
+            thread = await thread_manager.spawn(
+                ctx.run, persona="researcher", prompt=task, persona_prompt=persona_prompt,
+                writable_repo=None, context_repos=context,
+                resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
+                model=model,
+                reasoning=reasoning_map.get(model or get_settings().gateway_model),
+            )
+            ctx.artifacts["thread_id"] = thread.id
+            ctx.artifacts["thread_ids"] = [thread.id]
+            # Block until the thread's turn ends (idle/completed/failed).
+            await self._await_thread(thread.id)
+            return
+
+        # Compare fan-out: lanes are distinguished by model, so the persona
+        # carries the registry label (chips/lanes show it) — the researcher
+        # ROLE and prompt are identical across lanes; the model is the only
+        # variable under comparison.
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        async def _spawn_lane(alias: str) -> Thread:
+            option = settings.model_option(alias)
+            return await thread_manager.spawn(
+                ctx.run, persona=option.label if option else alias,
+                prompt=task, persona_prompt=persona_prompt,
+                writable_repo=None, context_repos=context, model=alias,
+                reasoning=reasoning_map.get(alias),
+            )
+
+        results = await asyncio.gather(
+            *(_spawn_lane(m) for m in models), return_exceptions=True)
+        lanes = [r for r in results if isinstance(r, Thread)]
+        failures = [r for r in results if isinstance(r, BaseException)]
+        if not lanes:
+            # Every lane failed to start — same semantics as the single-model
+            # path raising: the run fails with the real reason.
+            raise failures[0]
+        if failures:
+            # Partial start: the surviving lanes still answer. Say so in the
+            # stream — a silently missing lane reads as "that model had
+            # nothing to say".
+            relay = ctx.services.get("relay")
+            if relay is not None:
+                await relay.publish_note(
+                    ctx.run.id,
+                    f"{len(failures)} of {len(models)} model lanes failed to start: "
+                    f"{str(failures[0])[:200]}")
+        ctx.artifacts["thread_id"] = lanes[0].id  # legacy single-lane readers
+        ctx.artifacts["thread_ids"] = [t.id for t in lanes]
+        await asyncio.gather(*(self._await_thread(t.id) for t in lanes))
 
     async def _await_thread(self, thread_id: str, poll_seconds: float = 2.0) -> None:
         while True:
@@ -118,33 +168,42 @@ class AskBlueprint(Blueprint):
 
     async def _complete(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
+        # Compare runs carry several lanes; single-model runs carry one (the
+        # legacy thread_id key is kept for pre-fanout callers).
+        thread_ids: list[str] = (
+            ctx.artifacts.get("thread_ids")
+            or ([ctx.artifacts["thread_id"]] if ctx.artifacts.get("thread_id") else []))
+        settle_ids: list[str] = []
         session = get_session()
         try:
             run = ctx.run
-            thread_id = ctx.artifacts.get("thread_id")
-            if thread_id:
-                thread = session.get(Thread, thread_id)
-                if thread and thread.status == "failed":
-                    transition(run, RunStage.FAILED)
-                    session.commit()
-                    # H-39: this node's stage is COMPLETED, so the UI was
-                    # already told "completed"; overriding to FAILED without
-                    # re-publishing left the UI showing "completed" while
-                    # the DB said FAILED. Re-publish the FAILED stage (best-
-                    # effort: the unit test calls _complete without a relay).
-                    relay = ctx.services.get("relay")
-                    if relay is not None:
-                        await relay.publish_run_stage(
-                            run.id, RunStage.FAILED.value, run.available_actions)
-                    return
-                # Trajectory summaries written FROM DAY ONE (distiller history).
+            lanes = {tid: session.get(Thread, tid) for tid in thread_ids}
+            failed = [tid for tid, t in lanes.items() if t is None or t.status == "failed"]
+            survivors = [tid for tid in thread_ids if tid not in failed]
+            if thread_ids and not survivors:
+                # Every lane failed — the run has no answer to show.
+                transition(run, RunStage.FAILED)
+                session.commit()
+                # H-39: this node's stage is COMPLETED, so the UI was
+                # already told "completed"; overriding to FAILED without
+                # re-publishing left the UI showing "completed" while
+                # the DB said FAILED. Re-publish the FAILED stage (best-
+                # effort: the unit test calls _complete without a relay).
+                relay = ctx.services.get("relay")
+                if relay is not None:
+                    await relay.publish_run_stage(
+                        run.id, RunStage.FAILED.value, run.available_actions)
+                return
+            # Trajectory summaries written FROM DAY ONE (distiller history).
+            for tid in survivors:
                 session.add(TrajectorySummary(
-                    run_id=run.id, thread_id=thread_id, user_id=run.created_by,
+                    run_id=run.id, thread_id=tid, user_id=run.created_by,
                     summary=run.auto_summary or f"Ask run on {run.repo or 'repo'}: {run.title[:200]}",
                 ))
             run.finished_at = datetime.now(UTC)
             session.commit()
+            settle_ids = survivors
         finally:
             session.close()
-        if ctx.artifacts.get("thread_id"):
-            await thread_manager.settle_cost(ctx.artifacts["thread_id"])
+        for tid in settle_ids:
+            await thread_manager.settle_cost(tid)

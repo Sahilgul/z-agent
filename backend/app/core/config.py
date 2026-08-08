@@ -7,8 +7,10 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.models import DEFAULT_MODELS, ModelOption
 
 # Known-insecure shipped secrets — rejected in any non-dev deployment.
 _INSECURE_JWT_SECRETS = frozenset({"", "dev-only-change-me"})
@@ -39,6 +41,12 @@ class Settings(BaseSettings):
     # Thread virtual keys are scoped to it, so every caller must use this exact
     # string — asking for anything else is rejected by the gateway.
     gateway_model: str = "kimi-foundry"
+    # The user-selectable model fleet (composer dropdown). Aliases must match
+    # gateway routes; gateway_model must be one of them (it is the default
+    # when a run doesn't choose). Override with COLLEGIUM_AVAILABLE_MODELS
+    # as a JSON array of ModelOption objects.
+    available_models: list[ModelOption] = Field(
+        default_factory=lambda: list(DEFAULT_MODELS))
     # URLs as seen FROM WORKER CONTAINERS (compose network / host.docker.internal)
     worker_redis_url: str = "redis://redis:6379/0"
     worker_gateway_url: str = "http://gateway:4000"
@@ -192,6 +200,11 @@ class Settings(BaseSettings):
     @property
     def admins(self) -> set[str]:
         return {u.strip() for u in self.admin_usernames.split(",") if u.strip()}
+
+    def model_option(self, alias: str) -> ModelOption | None:
+        """Registry lookup by gateway alias. None = not selectable — callers
+        fail closed (never substitute another model)."""
+        return next((m for m in self.available_models if m.alias == alias), None)
 
     @model_validator(mode="after")
     def _enforce_secret_defaults(self) -> Settings:

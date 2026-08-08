@@ -29,10 +29,10 @@ class _FakeGateway:
         self.fail = fail
         self.minted = []
         self.deleted = []
-    async def mint_key(self, alias, max_budget_usd):
+    async def mint_key(self, alias, max_budget_usd, models=None):
         if self.fail:
             raise RuntimeError("gateway down")
-        self.minted.append((alias, max_budget_usd))
+        self.minted.append((alias, max_budget_usd, models))
         return VirtualKey(key="vk-1", alias=alias, max_budget=max_budget_usd)
     async def read_spend_reconciled(self, key):
         return self.spend
@@ -68,6 +68,101 @@ async def test_spawn_creates_thread_and_starts_container(session, make_user, mon
     assert row.status == "running"
     assert row.container_id == "container-xyz"
     assert row.gateway_key == "vk-1"
+
+
+async def test_spawn_scopes_key_and_context_to_model(session, make_user, monkeypatch):
+    """Model selection: the lane's virtual key is scoped to exactly its model,
+    and the choice rides spawn_context so kill/replace replays it."""
+    run = _make_run(session, make_user)
+    gw = _FakeGateway()
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
+                        lambda *a, **k: "container-xyz")
+
+    thread = await lm.spawn(run, "glm 5.2", "task", "persona", None, [],
+                            model="glm-foundry")
+    assert gw.minted[0][2] == ["glm-foundry"]  # key scoped to the lane's model
+    session.expire_all()
+    row = session.get(Thread, thread.id)
+    assert row.spawn_context["model"] == "glm-foundry"
+
+
+async def test_spawn_stores_reasoning_in_context(session, make_user, monkeypatch):
+    """The composer's reasoning choice rides spawn_context so a kill/replace
+    replays it and thread_env injects it as REASONING_EFFORT."""
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
+                        lambda *a, **k: "container-xyz")
+
+    thread = await lm.spawn(run, "glm 5.2", "task", "persona", None, [],
+                            model="glm-foundry", reasoning="max")
+    session.expire_all()
+    assert session.get(Thread, thread.id).spawn_context["reasoning"] == "max"
+
+    # No choice → no key at all (the worker sends no override; the request
+    # stays byte-identical to pre-feature traffic).
+    thread2 = await lm.spawn(run, "researcher", "task", "persona", None, [])
+    session.expire_all()
+    assert "reasoning" not in session.get(Thread, thread2.id).spawn_context
+
+
+async def test_spawn_rejects_reasoning_the_model_lacks(session, make_user, monkeypatch):
+    """Fail-closed at spawn too (kill/replace replays bypass create_run)."""
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+
+    with pytest.raises(ThreadSpawnError, match="not 'max'"):
+        await lm.spawn(run, "researcher", "task", "persona", None, [],
+                       model="kimi-foundry", reasoning="max")
+    assert session.query(Thread).count() == 0
+
+
+async def test_spawn_defaults_to_gateway_model(session, make_user, monkeypatch):
+    run = _make_run(session, make_user)
+    gw = _FakeGateway()
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+
+    async def fake_acquire(repo):
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+    monkeypatch.setattr(thread_manager.sandbox_manager, "run_thread_container",
+                        lambda *a, **k: "container-xyz")
+
+    thread = await lm.spawn(run, "researcher", "task", "persona", None, [])
+    assert gw.minted[0][2] == ["kimi-foundry"]
+    session.expire_all()
+    assert session.get(Thread, thread.id).spawn_context["model"] == "kimi-foundry"
+
+
+async def test_spawn_unknown_model_refused_before_capacity(session, make_user, monkeypatch):
+    """Fail-closed: an unregistered alias never spawns — no thread row, no
+    capacity reservation, no key. The engine never substitutes a model."""
+    run = _make_run(session, make_user)
+    gw = _FakeGateway()
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+
+    acquired = []
+
+    async def fake_acquire(repo):
+        acquired.append(repo)
+        return True, ""
+    monkeypatch.setattr(thread_manager.capacity, "try_acquire", fake_acquire)
+
+    with pytest.raises(ThreadSpawnError, match="not in the registry"):
+        await lm.spawn(run, "researcher", "task", "persona", None, [],
+                       model="gpt-9-turbo")
+    assert acquired == []  # validation precedes the capacity reservation
+    assert gw.minted == []
+    assert session.query(Thread).count() == 0
 
 
 async def test_spawn_capacity_denied_raises(session, make_user, monkeypatch):

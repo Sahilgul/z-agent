@@ -269,7 +269,8 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     delta_sink = config["configurable"].get("delta_sink")
 
     mode = _mode_of(state)
-    llm = make_llm(model, streaming=True, tools=_bound_tools(state, mode))
+    llm = make_llm(model, streaming=True, tools=_bound_tools(state, mode),
+                   reasoning=config["configurable"].get("reasoning_effort"))
     system = _build_system_message()
     messages = [system, *state.get("messages", [])]
     envelope = _build_turn_envelope(state, config)

@@ -38,10 +38,23 @@ export interface Thread {
   budget_usd: number;
   steps: number;
   forked_from_session_id: string | null;
+  /** Gateway alias the lane runs on (spawn_context); null on pre-selection rows. */
+  model?: string | null;
   heartbeat_at: string | null;
   has_container: boolean;
   created_at: string | null;
   finished_at: string | null;
+}
+
+/** One selectable model in the composer dropdown (GET /models). */
+export interface ModelOption {
+  alias: string;
+  label: string;
+  price_in_per_mtok: number;
+  price_out_per_mtok: number;
+  cache_read_per_mtok: number | null;
+  /** reasoning_effort values the model accepts; empty = on/off toggle only. */
+  reasoning_efforts: string[];
 }
 
 export type StepKind =

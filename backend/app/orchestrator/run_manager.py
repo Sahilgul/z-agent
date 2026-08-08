@@ -123,7 +123,11 @@ class RunManager:
                          task: str, repo: str | None = None,
                          work_item_id: int | None = None, autonomy: str | None = None,
                          fanout: int | None = None, delivery_id: int | None = None,
+                         models: list[str] | None = None,
+                         reasoning: dict[str, str] | None = None,
                          idempotency_key: str | None = None) -> Run:
+        models = self._validate_models(models, mode_name)
+        reasoning = self._validate_reasoning(reasoning, models)
         # Deterministic title hydration (THE one place it happens):
         # a generic typed title resolves from the ADO work item so the inbox
         # card reads the ticket's real title, not "42" or an empty string.
@@ -176,8 +180,65 @@ class RunManager:
         if self.spawn_bridge is not None:
             self.spawn_bridge.register_run(run.id)
         await self.relay.publish_run_stage(run.id, run.stage, run.available_actions)
-        self._track(run.id, self._execute(run.id, task, repo, fanout))
+        artifacts_extra = {
+            **({"models": models} if models else {}),
+            **({"reasoning": reasoning} if reasoning else {}),
+        }
+        self._track(run.id, self._execute(
+            run.id, task, repo, fanout,
+            artifacts_extra=artifacts_extra or None))
         return run
+
+    def _validate_models(self, models: list[str] | None, mode_name: str) -> list[str] | None:
+        """Composer model selection, checked against the registry BEFORE any
+        thread spawns: unknown aliases are rejected (the engine never
+        substitutes a model), and multi-model compare is ask-mode only — the
+        blueprint modes have their own multi-thread semantics (plan/develop/
+        swarm), so "same task on N models" only has meaning for ask."""
+        if not models:
+            return None
+        from app.core.config import get_settings
+        settings = get_settings()
+        known = {m.alias for m in settings.available_models}
+        # Dedupe preserving order — a double-selected alias would spawn two
+        # identical lanes billing twice for the same answer.
+        picked = list(dict.fromkeys(models))
+        unknown = [m for m in picked if m not in known]
+        if unknown:
+            raise ValueError(
+                f"unknown model '{unknown[0]}' — pick from {sorted(known)}")
+        if len(picked) > 1 and mode_name != "ask":
+            raise ValueError(
+                f"multi-model compare is ask-mode only — pick one model for "
+                f"mode '{mode_name}'")
+        return picked
+
+    def _validate_reasoning(self, reasoning: dict[str, str] | None,
+                            models: list[str] | None) -> dict[str, str] | None:
+        """Per-model reasoning choice. Keys must be models the run will
+        actually use (the selection, or the deployment default when nothing
+        is selected); values are "off" (thinking disabled) or one of the
+        model's registry reasoning_efforts. Anything else is a client bug or
+        a stale dropdown — reject, never silently clamp."""
+        if not reasoning:
+            return None
+        from app.core.config import get_settings
+        settings = get_settings()
+        allowed_aliases = set(models) if models else {settings.gateway_model}
+        clean: dict[str, str] = {}
+        for alias, effort in reasoning.items():
+            if alias not in allowed_aliases:
+                raise ValueError(
+                    f"reasoning set for '{alias}', which this run doesn't use")
+            option = settings.model_option(alias)
+            if option is None:
+                raise ValueError(f"unknown model '{alias}'")
+            if effort != "off" and effort not in option.reasoning_efforts:
+                raise ValueError(
+                    f"model '{alias}' takes reasoning {sorted(option.reasoning_efforts)} "
+                    f"or 'off' — not '{effort}'")
+            clean[alias] = effort
+        return clean
 
     async def resume_run(self, run_id: str, initiated_by: int) -> Run | None:
         """Continue the SAME run row (H-22): re-stamp from QUEUED, mount the
@@ -718,6 +779,10 @@ class RunManager:
             persona_prompt=context.get("persona_prompt", ""),
             writable_repo=repo, context_repos=context_repos,
             resume_from_thread_id=thread_id,
+            # A replacement keeps the original lane's model — a kill/replace
+            # must never silently switch models mid-conversation.
+            model=context.get("model"),
+            reasoning=context.get("reasoning"),
             # K19: carry the workspace-preservation intent across the replace —
             # the spawn_context stored it, but the replay never read it, so a
             # "keep my uncommitted work" replace still re-stamped fresh.

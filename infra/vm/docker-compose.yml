@@ -74,6 +74,13 @@ services:
       # reads both via os.environ/, so this file stays deployment-agnostic).
       FOUNDRY_MODEL: ${FOUNDRY_MODEL:?set in .env}
       FOUNDRY_API_BASE: ${FOUNDRY_API_BASE:?set in .env}
+      # Compare-fleet deployments on the SAME Foundry resource (they share
+      # FOUNDRY_API_BASE + key). Defaults match this project's deployment
+      # names; override in .env if yours differ. Every var must resolve —
+      # config.yaml references crash LiteLLM at boot when unset.
+      FOUNDRY_MODEL_GLM: ${FOUNDRY_MODEL_GLM:-openai/FW-GLM-5.2}
+      FOUNDRY_MODEL_DS_PRO: ${FOUNDRY_MODEL_DS_PRO:-openai/DeepSeek-V4-Pro}
+      FOUNDRY_MODEL_DS_FLASH: ${FOUNDRY_MODEL_DS_FLASH:-openai/DeepSeek-V4-Flash}
       STORE_MODEL_IN_DB: "True"
     volumes:
       - ../litellm/config.yaml:/app/config.yaml:ro
@@ -118,6 +125,12 @@ services:
       COLLEGIUM_REDIS_URL: redis://redis:6379/0
       COLLEGIUM_GATEWAY_URL: http://gateway:4000
       COLLEGIUM_LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      # Worker budget reminders (F4 env injection) track the gateway's real
+      # Kimi rates, not the conservative code defaults (2.0/6.0).
+      COLLEGIUM_WORKER_PRICE_IN_PER_MTOK: ${WORKER_PRICE_IN_PER_MTOK:-0.95}
+      COLLEGIUM_WORKER_PRICE_OUT_PER_MTOK: ${WORKER_PRICE_OUT_PER_MTOK:-4.00}
+      COLLEGIUM_WORKER_PRICE_IN_PER_MTOK: ${WORKER_PRICE_IN_PER_MTOK:-0.95}
+      COLLEGIUM_WORKER_PRICE_OUT_PER_MTOK: ${WORKER_PRICE_OUT_PER_MTOK:-4.00}
       COLLEGIUM_JWT_SECRET: ${COLLEGIUM_JWT_SECRET:?set in .env}
       COLLEGIUM_ADMIN_USERNAMES: ${COLLEGIUM_ADMIN_USERNAMES:-sahil}
       COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME: ${COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME:-sahil}

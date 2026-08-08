@@ -71,6 +71,14 @@ class CreateRunBody(BaseModel):
     work_item_id: int | None = None
     autonomy: str | None = None
     fanout: int | None = None  # user-requested swarm width (Lead still decomposes)
+    # Composer model selection (gateway aliases from GET /models). None =
+    # the deployment default; one alias = run-wide override; several = ask-mode
+    # compare (one lane per model). Validated in run_manager.create_run.
+    models: list[str] | None = None
+    # Per-model reasoning choice: alias -> "off" or one of the model's
+    # reasoning_efforts (GET /models). Absent alias = provider default
+    # (thinking on, default effort). Validated in run_manager.create_run.
+    reasoning: dict[str, str] | None = None
     # Client dedupe key: a retried POST with the same key returns the
     # original run instead of minting a duplicate.
     idempotency_key: str | None = None
@@ -105,6 +113,7 @@ async def create_run(body: CreateRunBody, request: Request, user: User = Depends
             source="button", initiated_by=user.id, mode_name=body.mode,
             task=body.task, repo=body.repo, work_item_id=body.work_item_id,
             autonomy=autonomy_dial.clamp(body.autonomy, user.id), fanout=body.fanout,
+            models=body.models, reasoning=body.reasoning,
             idempotency_key=body.idempotency_key,
         )
     except ValueError as exc:
@@ -183,6 +192,9 @@ def run_threads(run_id: str, user: User = Depends(current_user)):
             "id": l.id, "persona": l.persona, "repo_scope": l.repo_scope,
             "status": l.status, "cost_usd": l.cost_usd, "budget_usd": l.budget_usd,
             "steps": l.next_seq, "forked_from_session_id": l.forked_from_session_id,
+            # The lane's model rides spawn_context (no column) — compare runs
+            # show it per lane; null on rows spawned before selection existed.
+            "model": (l.spawn_context or {}).get("model"),
             "heartbeat_at": iso_z(l.heartbeat_at),
             "has_container": l.container_id is not None,
             "created_at": iso_z(l.created_at),

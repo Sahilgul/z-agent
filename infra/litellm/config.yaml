@@ -5,9 +5,10 @@
 # model_list entry, zero architecture changes.
 
 model_list:
-  # kimi-foundry is the ONLY name the rest of the system may ask for: lane
-  # virtual keys are scoped to it (gateway/litellm.py mint_key). Renaming this
-  # alias breaks every lane.
+  # These aliases are the ONLY names the rest of the system may ask for: lane
+  # virtual keys are scoped to the thread's own alias (gateway/litellm.py
+  # mint_key), and the backend registry (backend/app/core/models.py) must
+  # list every alias offered in the composer. Renaming an alias breaks lanes.
   - model_name: kimi-foundry
     litellm_params:
       # All three come from infra/vm/.env — nothing deployment-specific is
@@ -16,20 +17,18 @@ model_list:
       model: os.environ/FOUNDRY_MODEL
       api_base: os.environ/FOUNDRY_API_BASE
       api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
-      # Defensive only: drop the Anthropic-only ``thinking`` request param in
-      # case the legacy SDK runtime is ever wired back in. The custom engine
-      # (ChatOpenAI) never sends thinking/reasoning_effort, and reasoning
-      # models emit ``reasoning_content`` in the RESPONSE by default — that is
-      # not a request param and is never dropped here, so thinking tokens flow
-      # through to the worker untouched.
-      additional_drop_params: ["thinking"]
+      # ``thinking`` / ``reasoning_effort`` request params must FLOW: the
+      # composer offers per-model reasoning control and the worker sends them
+      # via extra_body. (An earlier revision dropped ``thinking`` here as
+      # Anthropic-SDK defense — that would silently neuter the control.)
     model_info:
       # EXPLICIT pricing — LiteLLM's registry may not price Kimi and the
       # spend-readback data path depends on correct numbers.
-      # CONFIRM against the Foundry billing page on day 1; these are placeholders.
-      input_cost_per_token: 0.0000006        # $0.60 / 1M input
-      output_cost_per_token: 0.0000025       # $2.50 / 1M output
-      cache_read_input_token_cost: 0.00000015
+      # Confirmed against Microsoft's Kimi K2.6 launch pricing:
+      # $0.95 in / $4.00 out / $0.16 cached-input per 1M.
+      input_cost_per_token: 0.00000095       # $0.95 / 1M input
+      output_cost_per_token: 0.000004        # $4.00 / 1M output
+      cache_read_input_token_cost: 0.00000016  # $0.16 / 1M cached input
       max_tokens: 8192
       mode: chat
       # K2.6 is a reasoning model, but LiteLLM's internal model registry
@@ -41,27 +40,58 @@ model_list:
       # worker's ChatOpenAIReasoning subclass can surface it as StepKind.THINKING.
       supports_reasoning: true
 
-  # Second open model route for the open-models gate (≥2 open models).
-  # The matrix passes ONLY if ≥2 models pass ALL of a–g. Add a Qwen or Llama
-  # variant deployment here; FOUNDRY_MODEL_2 carries the provider prefix +
-  # deployment name, e.g. openai/Qwen2.5-Coder-32B.
-  # NOTE: commented out until a second Foundry deployment exists — with
-  # FOUNDRY_MODEL_2 unset, `model: os.environ/FOUNDRY_MODEL_2` resolves to
-  # None and LiteLLM crashes on boot ("argument of type 'NoneType' is not
-  # iterable" in load_config). Uncomment and fill the _2 env vars to enable.
-  # - model_name: qwen-foundry
-  #   litellm_params:
-  #     model: os.environ/FOUNDRY_MODEL_2
-  #     api_base: os.environ/FOUNDRY_API_BASE_2
-  #     api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY_2
-  #     additional_drop_params: ["thinking"]
-  #   model_info:
-  #     # CONFIRM against the Foundry billing page on day 1; these are placeholders.
-  #     input_cost_per_token: 0.0000004
-  #     output_cost_per_token: 0.0000014
-  #     cache_read_input_token_cost: 0.0000001
-  #     max_tokens: 8192
-  #     mode: chat
+  # The compare-fleet routes: same Foundry resource, same /openai/v1 surface
+  # and key as kimi-foundry — only the deployment name differs. The compose
+  # file ships defaults for FOUNDRY_MODEL_* (an unset os.environ/ ref resolves
+  # to None and crashes LiteLLM at boot, so every route's vars must exist).
+  - model_name: glm-foundry
+    litellm_params:
+      model: os.environ/FOUNDRY_MODEL_GLM      # e.g. openai/FW-GLM-5.2
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+    model_info:
+      # Azure AI Foundry (Fireworks serverless) listing, 2026-08:
+      # $1.54 in / $4.84 out / $0.15 cached-input per 1M.
+      input_cost_per_token: 0.00000154
+      output_cost_per_token: 0.00000484
+      cache_read_input_token_cost: 0.00000015
+      max_tokens: 8192
+      mode: chat
+      # Preserve reasoning_content like kimi-foundry (see above) — GLM
+      # thinking models emit it and stock LiteLLM strips it.
+      supports_reasoning: true
+
+  - model_name: deepseek-pro-foundry
+    litellm_params:
+      model: os.environ/FOUNDRY_MODEL_DS_PRO   # e.g. openai/DeepSeek-V4-Pro
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+    model_info:
+      # Azure AI Foundry DeepSeek listing, 2026-08:
+      # $1.74 in / $3.48 out / $0.145 cached-input per 1M.
+      input_cost_per_token: 0.00000174
+      output_cost_per_token: 0.00000348
+      cache_read_input_token_cost: 0.000000145
+      max_tokens: 8192
+      mode: chat
+      supports_reasoning: true
+
+  - model_name: deepseek-flash-foundry
+    litellm_params:
+      model: os.environ/FOUNDRY_MODEL_DS_FLASH  # e.g. openai/DeepSeek-V4-Flash
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+    model_info:
+      # Azure AI Foundry DeepSeek listing, 2026-08:
+      # $0.19 in / $0.51 out / $0.028 cached-input per 1M.
+      input_cost_per_token: 0.00000019
+      output_cost_per_token: 0.00000051
+      cache_read_input_token_cost: 0.000000028
+      max_tokens: 8192
+      mode: chat
+      # Cheap compare lane; if a Flash variant emits reasoning_content the
+      # flag keeps it flowing instead of stripping it.
+      supports_reasoning: true
 
   # Fallback route, pre-wired: Anthropic Claude hosted on Foundry, same
   # /anthropic/v1 surface. Flip worker env ANTHROPIC_MODEL alias to this when the

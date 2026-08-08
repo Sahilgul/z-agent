@@ -26,6 +26,8 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
+import httpx
+
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import get_session
@@ -75,7 +77,26 @@ class ThreadManager:
                     resume_session: bool = False,
                     resume_from_thread_id: str | None = None,
                     preserve_workspace: bool = False,
-                    budget_usd: float | None = None) -> Thread:
+                    budget_usd: float | None = None,
+                    model: str | None = None,
+                    reasoning: str | None = None) -> Thread:
+        # The lane's model: registry-validated (fail-closed — never substitute),
+        # stored in spawn_context so a kill/replace replays it, the virtual key
+        # is scoped to it, and thread_env injects it as the worker's MODEL.
+        model = model or self.settings.gateway_model
+        option = self.settings.model_option(model)
+        if option is None:
+            raise ThreadSpawnError(
+                f"model '{model}' is not in the registry "
+                "(COLLEGIUM_AVAILABLE_MODELS) — refusing to spawn on an "
+                "unmetered route")
+        # Reasoning choice ("off" or an effort the model takes) — validated
+        # at create_run; re-checked here because spawn is reachable from
+        # kill/replace replays and worker spawn requests too.
+        if reasoning and reasoning != "off" and reasoning not in option.reasoning_efforts:
+            raise ThreadSpawnError(
+                f"model '{model}' takes reasoning {sorted(option.reasoning_efforts)} "
+                f"or 'off' — not '{reasoning}'")
         repo_name = writable_repo.name if writable_repo else None
         # Flywheel injection: pinned knowledge + the owner's
         # episodic recall join every thread's persona prompt. Cached per run, so
@@ -114,6 +135,8 @@ class ThreadManager:
             spawn_context={"prompt": prompt, "persona_prompt": persona_prompt,
                            "resume_session": resume_session,
                            "mode": run.mode,
+                           "model": model,
+                           **({"reasoning": reasoning} if reasoning else {}),
                            # Mount snapshot: a replacement thread (mode switch or
                            # turn-X @mention expansion) remounts the exact same
                            # repo set, plus any newly-mentioned repos the caller
@@ -142,6 +165,10 @@ class ThreadManager:
         try:
             vk = await self.gateway.mint_key(
                 alias=f"thread-{thread.id[:8]}", max_budget_usd=thread.budget_usd,
+                # Scope the key to THIS lane's model only — a leaked key can
+                # spend on nothing else, and per-model spend attribution stays
+                # exact at the gateway.
+                models=[model],
             )
             thread.gateway_key = vk.key
             thread.gateway_key_alias = vk.alias
@@ -266,6 +293,10 @@ class ThreadManager:
                         run, persona=spec["persona"], prompt=spec["prompt"],
                         persona_prompt=spec["persona_prompt"],
                         writable_repo=None, context_repos=context_repos,
+                        # Swarm slices ride the run's default model today; a
+                        # spec MAY pin one (future per-slice compare).
+                        model=spec.get("model"),
+                        reasoning=spec.get("reasoning"),
                     )
                 except ThreadSpawnError as exc:
                     if "queued" not in str(exc):
@@ -327,7 +358,19 @@ class ThreadManager:
             thread = session.get(Thread, thread_id)
             if not thread or not thread.gateway_key:
                 return 0.0
-            spend = await self.gateway.read_spend_reconciled(thread.gateway_key)
+            try:
+                spend = await self.gateway.read_spend_reconciled(thread.gateway_key)
+            except httpx.HTTPStatusError as exc:
+                # The key is already gone at the gateway (its TTL backstop
+                # fired, or gateway-db was reset) — spend is unknowable. This
+                # is an expected end state, not a failure: keep the last
+                # settled cost (stamping 0.0 would erase a real interim
+                # settle) and let the release path proceed quietly.
+                if exc.response is not None and exc.response.status_code == 404:
+                    log.info("gateway key gone before settle; keeping last known cost",
+                             thread_id=thread_id)
+                    return thread.cost_usd or 0.0
+                raise
             thread.cost_usd = spend
             # Only stamp finished_at for genuinely terminal threads — run-end
             # settlement (F3) also reads back spend for LIVE threads (their

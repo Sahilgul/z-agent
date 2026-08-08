@@ -36,6 +36,24 @@ class Node:
     stage: RunStage | None = None  # stage to enter before running this node
 
 
+def lane_override(ctx: BlueprintContext) -> tuple[str | None, str | None]:
+    """The composer's (model, reasoning) choice for non-compare modes.
+
+    create_run validation guarantees non-ask modes carry AT MOST one model,
+    so every thread the blueprint spawns takes the same override. Returns
+    (None, None) when the user didn't choose — the spawn then falls back to
+    the deployment default model with provider-default thinking."""
+    models = ctx.artifacts.get("models") or []
+    model = models[0] if models else None
+    reasoning_map = ctx.artifacts.get("reasoning") or {}
+    if model is not None:
+        return model, reasoning_map.get(model)
+    # No selection: a reasoning entry may still target the default model.
+    from app.core.config import get_settings
+    default = get_settings().gateway_model
+    return None, reasoning_map.get(default)
+
+
 class Blueprint(abc.ABC):
     """ONE FILE PER MODE. Nodes run in order; a node raising marks the run failed
     (resumable via the session volume)."""

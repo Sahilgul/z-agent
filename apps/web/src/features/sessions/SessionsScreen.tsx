@@ -22,6 +22,7 @@ import { useRuns } from "../../stores/run";
 import { useSession } from "../../stores/session";
 import { useUi } from "../../stores/ui";
 import { SwarmView } from "../swarm/SwarmView";
+import { ModelPicker } from "./ModelPicker";
 import { ThreadOverlay } from "./ThreadOverlay";
 import { PlanOverlay } from "./PlanOverlay";
 import { PROverlay } from "./PROverlay";
@@ -77,6 +78,28 @@ export function SessionsScreen() {
   // pending; the chips follow current.mode until the user picks a new one.
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [fanout, setFanout] = useState<number | "">("");
+  // Composer model selection (gateway aliases). Empty = deployment default.
+  // Ask mode allows several (compare: one lane per model); other modes take
+  // at most one — enforced by trimming here when the mode changes.
+  const [models, setModels] = useState<string[]>([]);
+  // Per-model reasoning choice (alias -> "off" | effort). Pruned to the
+  // selection whenever it changes so the contract never carries an entry for
+  // a model the run won't use (the backend rejects those).
+  const [reasoning, setReasoning] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (mode !== "ask" && models.length > 1) setModels(models.slice(0, 1));
+  }, [mode, models]);
+  const onModelsChange = (next: string[]) => {
+    setModels(next);
+    setReasoning((r) => Object.fromEntries(Object.entries(r).filter(([a]) => next.includes(a))));
+  };
+  const onReasoningChange = (alias: string, effort: string | null) =>
+    setReasoning((r) => {
+      const next = { ...r };
+      if (effort === null) delete next[alias];
+      else next[alias] = effort;
+      return next;
+    });
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -169,6 +192,8 @@ export function SessionsScreen() {
         task: title ?? task,
         repo,
         fanout: fanout === "" || Number.isNaN(fanout) ? undefined : fanout,
+        models: models.length > 0 ? models : undefined,
+        reasoning: Object.keys(reasoning).length > 0 ? reasoning : undefined,
         idempotency_key: draftIdemKey.current,
       });
       draftIdemKey.current = uuid(); // the next draft is a new intent
@@ -455,7 +480,18 @@ export function SessionsScreen() {
             />
             {current ? (
               <ThreadChips threads={threads} onOpen={(threadId) => pushOverlay({ kind: "thread", threadId })} />
-            ) : mode === "agent-rnd" ? (
+            ) : (
+              // Model is chosen at run creation — once a run is open its
+              // lanes are fixed, so the picker yields to the thread chips.
+              <ModelPicker
+                selected={models}
+                onChange={onModelsChange}
+                reasoning={reasoning}
+                onReasoningChange={onReasoningChange}
+                multi={mode === "ask"}
+              />
+            )}
+            {!current && mode === "agent-rnd" && (
               <Input
                 type="number"
                 min={1}
@@ -473,7 +509,7 @@ export function SessionsScreen() {
                 title="swarm width — the Lead still authors the slices"
                 className="w-[84px] font-mono"
               />
-            ) : null}
+            )}
             <Button className="ml-auto font-mono" disabled={busy || !task.trim()} onClick={submit}>
               <span className="size-2 rounded-full bg-current shadow-[0_0_6px_1px_currentColor]" aria-hidden="true" />
               {current ? "send" : busy ? "routing…" : "route it"}

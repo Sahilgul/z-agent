@@ -159,6 +159,44 @@ def test_thread_env_read_only(session, make_user):
     assert "RESUME_SESSION_ID" not in env
 
 
+def test_thread_env_lane_model_and_pricing(session, make_user):
+    """Model selection: the lane's model rides spawn_context into MODEL, and
+    the reminder pricing is the REGISTRY rate for that model — a compare run
+    mixes models whose rates differ by an order of magnitude."""
+    run, thread = _make_run_thread(session, make_user)
+    thread.spawn_context = {"model": "deepseek-flash-foundry"}
+    mgr = sb.SandboxManager()
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert env["MODEL"] == "deepseek-flash-foundry"
+    assert env["MODEL_PRICE_IN_PER_MTOK"] == "0.19"
+    assert env["MODEL_PRICE_OUT_PER_MTOK"] == "0.51"
+
+
+def test_thread_env_default_model_uses_registry_pricing(session, make_user):
+    """No selection (pre-selection rows, unset spawn_context): the deployment
+    default model with its registry rate."""
+    run, thread = _make_run_thread(session, make_user)
+    mgr = sb.SandboxManager()
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert env["MODEL"] == "kimi-foundry"
+    assert env["MODEL_PRICE_IN_PER_MTOK"] == "0.95"
+    assert env["MODEL_PRICE_OUT_PER_MTOK"] == "4.0"
+
+
+def test_thread_env_reasoning_effort(session, make_user):
+    """The composer's reasoning choice reaches the worker as REASONING_EFFORT;
+    no choice → the env var is absent (worker sends no override)."""
+    run, thread = _make_run_thread(session, make_user)
+    thread.spawn_context = {"model": "glm-foundry", "reasoning": "max"}
+    mgr = sb.SandboxManager()
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert env["REASONING_EFFORT"] == "max"
+
+    thread.spawn_context = {"model": "glm-foundry"}
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert "REASONING_EFFORT" not in env
+
+
 def test_thread_env_writable_includes_fleet_pat(session, make_user):
     run, thread = _make_run_thread(session, make_user)
     mgr = sb.SandboxManager()

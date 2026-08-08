@@ -623,7 +623,8 @@ async def test_kill_replace_respawns_with_original_context(session, make_user, m
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
-                         preserve_workspace=False, budget_usd=None):
+                         preserve_workspace=False, budget_usd=None, model=None,
+                         reasoning=None):
         captured.update({"persona": persona, "prompt": prompt,
                          "persona_prompt": persona_prompt,
                          "resume_from_thread_id": resume_from_thread_id})
@@ -658,7 +659,8 @@ async def test_kill_replace_passes_resume_from_thread_id(session, make_user, mon
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
-                         preserve_workspace=False, budget_usd=None):
+                         preserve_workspace=False, budget_usd=None, model=None,
+                         reasoning=None):
         captured["resume_from_thread_id"] = resume_from_thread_id
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn
@@ -688,7 +690,8 @@ async def test_kill_replace_waits_for_old_container_before_spawn(session, make_u
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
-                         preserve_workspace=False, budget_usd=None):
+                         preserve_workspace=False, budget_usd=None, model=None,
+                         reasoning=None):
         order.append("spawn")
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn
@@ -738,7 +741,8 @@ async def test_remount_thread_unions_extra_repos_onto_stored_set(session, make_u
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
-                         preserve_workspace=False, budget_usd=None):
+                         preserve_workspace=False, budget_usd=None, model=None,
+                         reasoning=None):
         captured["writable_repo"] = writable_repo
         captured["context_repos"] = context_repos
         captured["resume_from_thread_id"] = resume_from_thread_id
@@ -779,7 +783,8 @@ async def test_remount_thread_dedupes_already_mounted_names(session, make_user, 
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
                          resume_session=False, resume_from_thread_id=None,
-                         preserve_workspace=False, budget_usd=None):
+                         preserve_workspace=False, budget_usd=None, model=None,
+                         reasoning=None):
         captured["context_repos"] = context_repos
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn

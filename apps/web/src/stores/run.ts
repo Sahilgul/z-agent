@@ -26,7 +26,7 @@ interface RunState {
   closeRun: () => void;
   refreshLanes: () => Promise<void>;
   sendIntent: (intent: string | null, opts?: { threadId?: string; text?: string; confirmed?: boolean; payload?: Record<string, unknown> }) => Promise<Record<string, unknown>>;
-  createRun: (body: { mode: string; task: string; repo?: string; fanout?: number; idempotency_key?: string }) => Promise<Run>;
+  createRun: (body: { mode: string; task: string; repo?: string; fanout?: number; models?: string[]; reasoning?: Record<string, string>; idempotency_key?: string }) => Promise<Run>;
 }
 
 let socket: RunSocket | null = null;

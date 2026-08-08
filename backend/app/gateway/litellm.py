@@ -63,9 +63,11 @@ class GatewayClient:
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers, timeout=30) as client:
             resp = await client.post("/key/delete", json={"keys": [key]})
             # F6: deleting an already-deleted/expired key is SUCCESS for our
-            # purposes — the goal state (key unusable) holds. Only propagate
-            # real gateway errors.
-            if resp.status_code in (400, 404) and "not" in resp.text.lower():
+            # purposes — the goal state (key unusable) holds. The request
+            # shape is static, so a 400/404 can only be about the key itself;
+            # gating the tolerance on the gateway's error-body wording broke
+            # whenever LiteLLM rephrased it. Only propagate real gateway errors.
+            if resp.status_code in (400, 404):
                 log.info("gateway key already gone", tail=key[-4:])
                 return
             resp.raise_for_status()

@@ -97,6 +97,29 @@ async def test_cleanup_tolerates_already_deleted_key(session, make_user):
     assert session.get(Thread, "l1").gateway_key is None
 
 
+async def test_cleanup_tolerates_key_gone_before_settle(session, make_user):
+    """The key TTL'd (or gateway-db reset) before the terminal cleanup, so the
+    settle readback 404s: keep the last known cost (never clobber with 0.0),
+    stay quiet, and still release + clear the stored secret."""
+    import httpx
+    from tests.conftest import FakeResponse
+
+    class _GoneGateway(_FakeGateway):
+        async def read_spend_reconciled(self, key, **kw):
+            raise httpx.HTTPStatusError(
+                "404", request=None, response=FakeResponse(status_code=404))
+
+    _mk(session, make_user, status="failed", gateway_key="sk-gone", cost_usd=0.7)
+    tm = _tm()
+    tm.gateway = gw = _GoneGateway()
+    await tm._cleanup_terminal("l1")  # must not raise
+    session.expire_all()
+    row = session.get(Thread, "l1")
+    assert row.cost_usd == 0.7          # last known cost preserved
+    assert gw.deleted == ["sk-gone"]    # release still ran
+    assert row.gateway_key is None      # secret cleared
+
+
 async def test_mark_replaced_releases_key(session, make_user):
     """F1: 'replaced' was missing from every cleanup list — a kill/replace'd
     thread leaked its key and spend."""

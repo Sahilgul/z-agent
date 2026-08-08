@@ -48,7 +48,7 @@ from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override
 from app.orchestrator.blueprints.plan import PLAN_SCHEMA_HINT, PlanBlueprint
 from app.services import delivery, evidence
 from app.services.runs import transition
@@ -214,6 +214,7 @@ class GoalBlueprint(Blueprint):
         requested = max(1, min(int(ctx.artifacts.get("fanout") or 1), cap))
         persona_prompt = self._persona(ctx, EXPLORER_HINT)
 
+        model, reasoning = lane_override(ctx)
         if requested == 1:
             prompt = (f"Feature story:\n{task}\n\nTarget repo: {repo.name}\n"
                       f"Angle: {EXPLORE_ANGLES[0]} (but follow the evidence wherever it leads)")
@@ -221,6 +222,7 @@ class GoalBlueprint(Blueprint):
                 ctx.run, persona="researcher", prompt=prompt, persona_prompt=persona_prompt,
                 writable_repo=None, context_repos=context,
                 resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
+                model=model, reasoning=reasoning,
             )
             ctx.artifacts["thread_ids"].append(thread.id)
             await _await_thread(thread.id)
@@ -235,7 +237,8 @@ class GoalBlueprint(Blueprint):
                  "prompt": (f"Feature story:\n{task}\n\nTarget repo: {repo.name}\n"
                             f"Your slice: {EXPLORE_ANGLES[i % len(EXPLORE_ANGLES)]}"),
                  "persona_prompt": persona_prompt,
-                 "thread_hint": f"explorer-{i}"}
+                 "thread_hint": f"explorer-{i}",
+                 **({"model": model, "reasoning": reasoning} if model else {})}
                 for i in range(requested)
             ]
             threads = await thread_manager.spawn_many(ctx.run, specs, context)
@@ -256,9 +259,11 @@ class GoalBlueprint(Blueprint):
         context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
         prompt = self._compose_planner_prompt(ctx, repo)
         persona_prompt = self._persona(ctx, PLANNER_HINT + PLAN_SCHEMA_HINT)
+        model, reasoning = lane_override(ctx)
         thread = await thread_manager.spawn(
             ctx.run, persona="planner", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=context,
+            model=model, reasoning=reasoning,
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         await _await_thread(thread.id)
@@ -285,11 +290,13 @@ class GoalBlueprint(Blueprint):
             critic_prompt = ("Critique the draft plan (round "
                              f"{round_no}/{CRITIQUE_ROUNDS}).\n\n--- Draft Plan ---\n"
                              + json.dumps(draft, indent=2))
+            model, reasoning = lane_override(ctx)
             critic = await thread_manager.spawn(
                 ctx.run, persona="critic", prompt=critic_prompt,
                 persona_prompt=self._persona(
                     ctx, CRITIC_HINT.format(round_no=round_no, rounds=CRITIQUE_ROUNDS)),
                 writable_repo=None, context_repos=context,
+                model=model, reasoning=reasoning,
             )
             ctx.artifacts["thread_ids"].append(critic.id)
             await _await_thread(critic.id)
@@ -305,6 +312,7 @@ class GoalBlueprint(Blueprint):
                 ctx.run, persona="reviser", prompt=reviser_prompt,
                 persona_prompt=self._persona(ctx, REVISER_HINT + PLAN_SCHEMA_HINT),
                 writable_repo=None, context_repos=context,
+                model=model, reasoning=reasoning,
             )
             ctx.artifacts["thread_ids"].append(reviser.id)
             await _await_thread(reviser.id)
@@ -370,9 +378,11 @@ class GoalBlueprint(Blueprint):
         branch = ctx.artifacts["branch"]
         prompt = self._compose_developer_prompt(ctx)
         persona_prompt = self._persona(ctx, DEVELOPER_HINT.format(branch=branch))
+        model, reasoning = lane_override(ctx)
         thread = await thread_manager.spawn(
             ctx.run, persona="developer", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=writable, context_repos=context,
+            model=model, reasoning=reasoning,
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         ctx.artifacts["develop_thread_id"] = thread.id
@@ -470,11 +480,13 @@ class GoalBlueprint(Blueprint):
         prompt = (f"Verification gate round {round_no}/{MAX_FIX_ROUNDS} is RED.\n"
                   f"Workspace: {ctx.artifacts['workspace']}\nBranch: {branch}\n\n"
                   + "\n\n".join(failures))
+        model, reasoning = lane_override(ctx)
         thread = await thread_manager.spawn(
             ctx.run, persona="fixer", prompt=prompt,
             persona_prompt=self._persona(ctx, FIXER_HINT.format(branch=branch)),
             writable_repo=writable, context_repos=context,
             preserve_workspace=True,  # re-stamping would wipe the implementation
+            model=model, reasoning=reasoning,
         )
         ctx.artifacts["thread_ids"].append(thread.id)
         await _await_thread(thread.id)

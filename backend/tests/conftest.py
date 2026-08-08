@@ -465,7 +465,8 @@ class FakeThreadManager:
         self._spawn_count = 0
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                   resume_session=False, resume_from_thread_id=None):
+                   resume_session=False, resume_from_thread_id=None,
+                   model=None, reasoning=None):
         from app.db.models.thread import Thread
         self._spawn_count += 1
         thread = Thread(id=str(uuid.uuid4()), run_id=run.id, persona=persona,
@@ -508,7 +509,12 @@ class FakeRunManager:
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
                          work_item_id=None, autonomy=None, fanout=None, delivery_id=None,
-                         idempotency_key=None):
+                         models=None, reasoning=None, idempotency_key=None):
+        # Selection validation is the REAL thing (the validators are self-free)
+        # so API tests see production's 422s, not a fake that accepts anything.
+        from app.orchestrator.run_manager import RunManager
+        models = RunManager._validate_models(self, models, mode_name)
+        reasoning = RunManager._validate_reasoning(self, reasoning, models)
         from collegium_contracts import RunStage
 
         from app.db.base import get_session
@@ -528,7 +534,8 @@ class FakeRunManager:
         finally:
             session.close()
         self.created.append({"id": run.id, "task": task, "repo": repo, "fanout": fanout,
-                             "delivery_id": delivery_id})
+                             "delivery_id": delivery_id, "models": models,
+                             "reasoning": reasoning})
         return run
 
     async def stop_run(self, run_id):

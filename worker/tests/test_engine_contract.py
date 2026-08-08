@@ -400,6 +400,42 @@ def test_make_llm_omits_temperature_for_fixed_param_models():
     assert qwen_llm.temperature == 0.0
 
 
+def test_make_llm_reasoning_maps_to_extra_body():
+    """The composer's reasoning choice becomes extra_body: "off" disables
+    thinking, an effort enables it with reasoning_effort, and None sends NO
+    override (byte-identical to pre-feature traffic — provider default)."""
+    import os
+    from unittest.mock import patch
+
+    from worker.engine.llm import make_llm
+
+    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+        off = make_llm("kimi-foundry", streaming=False, reasoning="off")
+        effort = make_llm("glm-foundry", streaming=False, reasoning="max")
+        default = make_llm("glm-foundry", streaming=False)
+    assert off.extra_body == {"thinking": {"type": "disabled"}}
+    assert effort.extra_body == {
+        "thinking": {"type": "enabled"}, "reasoning_effort": "max"}
+    assert default.extra_body is None
+
+
+def test_make_llm_reasoning_rejects_effort_the_model_lacks():
+    """Fail-closed at the model edge too: an effort the deployment doesn't
+    take raises instead of silently clamping (mirrors the backend registry)."""
+    import os
+    from unittest.mock import patch
+
+    import pytest
+
+    from worker.engine.llm import make_llm
+
+    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+        with pytest.raises(RuntimeError, match="not 'xhigh'"):
+            make_llm("kimi-foundry", streaming=False, reasoning="xhigh")
+        with pytest.raises(RuntimeError, match="not 'low'"):
+            make_llm("glm-foundry", streaming=False, reasoning="low")
+
+
 def test_tool_arg_aliases_normalized_at_model_edge():
     """Models habitually call terminal_exec with cmd= (other harnesses' schema)
     instead of the bound schema's command=. Without normalization the approval

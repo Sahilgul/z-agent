@@ -154,6 +154,15 @@ class SandboxManager:
                 f"run mode {run.mode!r} is not in the worker engine vocabulary "
                 f"{sorted(WORKER_MODES)} — reconcile the backend Mode row or the "
                 "worker state.Mode enum before spawning")
+        # The lane's model rides spawn_context (set at spawn, replayed on
+        # kill/replace); absent on pre-selection rows → the deployment default.
+        lane_model = (thread.spawn_context or {}).get("model") or self.settings.gateway_model
+        # Per-model pricing for the worker's budget reminders: the registry
+        # rate for the lane's model, falling back to the deployment-wide
+        # default pair for anything the registry doesn't know.
+        option = self.settings.model_option(lane_model)
+        price_in = option.price_in_per_mtok if option else self.settings.worker_price_in_per_mtok
+        price_out = option.price_out_per_mtok if option else self.settings.worker_price_out_per_mtok
         env = {
             "RUN_ID": run.id,
             "THREAD_ID": thread.id,
@@ -166,7 +175,7 @@ class SandboxManager:
             "ANTHROPIC_AUTH_TOKEN": thread.gateway_key or "",
             # Without this the SDK sends its own default Claude model name, which
             # the gateway does not publish and the thread key is not scoped to.
-            "MODEL": self.settings.gateway_model,
+            "MODEL": lane_model,
             "WORKSPACE_DIR": "/workspace",
             # --- Custom engine ---
             "ENGINE": self.settings.engine_runtime,
@@ -180,10 +189,18 @@ class SandboxManager:
             "IDLE_TTL_SECONDS": str(self.settings.idle_ttl_seconds),
             # F4: budget-reminder pricing parity — the worker's local estimate
             # prices tokens with THESE rates so its 50%/80% reminders track
-            # real gateway spend instead of a hardcoded guess.
-            "MODEL_PRICE_IN_PER_MTOK": str(self.settings.worker_price_in_per_mtok),
-            "MODEL_PRICE_OUT_PER_MTOK": str(self.settings.worker_price_out_per_mtok),
+            # real gateway spend instead of a hardcoded guess. Per-lane: a
+            # compare run mixes models whose rates differ by an order of
+            # magnitude, so one global pair would mislead every reminder.
+            "MODEL_PRICE_IN_PER_MTOK": str(price_in),
+            "MODEL_PRICE_OUT_PER_MTOK": str(price_out),
         }
+        # Composer reasoning choice for this lane's model ("off" or an effort
+        # like "max"). Absent = provider default (thinking on) — the worker
+        # sends no override and the request stays identical to pre-feature.
+        reasoning = (thread.spawn_context or {}).get("reasoning")
+        if reasoning:
+            env["REASONING_EFFORT"] = reasoning
         if self.settings.engine_canary:
             env["CANARY"] = "1"
         if self.settings.engine_database_url:

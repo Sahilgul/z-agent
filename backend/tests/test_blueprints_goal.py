@@ -53,7 +53,7 @@ class _FakeLaneManager:
 
     async def spawn(self, run, persona, prompt, persona_prompt, writable_repo,
                     context_repos, resume_session=False, resume_from_thread_id=None,
-                    preserve_workspace=False):
+                    preserve_workspace=False, model=None, reasoning=None):
         self._n += 1
         tid = f"l{self._n}-{persona}"
         self.spawned.append({"persona": persona, "prompt": prompt,

@@ -1,6 +1,7 @@
 /** Query key factory — one registry so invalidation stays consistent. */
 export const qk = {
   me: ["me"] as const,
+  models: ["models"] as const,
   tickets: ["hydration", "my-tickets"] as const,
   approvals: ["approvals"] as const,
   knowledge: (scope?: string) => ["knowledge", scope ?? "all"] as const,

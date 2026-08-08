@@ -27,13 +27,18 @@ class ModelCapabilities:
     def __init__(self, *, vision: bool = False, reasoning: bool = False,
                  max_tokens: int = 8192, supports_tools: bool = True,
                  supports_streaming: bool = True,
-                 supports_temperature: bool = True) -> None:
+                 supports_temperature: bool = True,
+                 reasoning_efforts: tuple[str, ...] = ()) -> None:
         self.vision = vision
         self.reasoning = reasoning
         self.max_tokens = max_tokens
         self.supports_tools = supports_tools
         self.supports_streaming = supports_streaming
         self.supports_temperature = supports_temperature
+        # reasoning_effort values the deployment accepts (empty = the model
+        # takes the thinking toggle only). Mirrors the backend registry —
+        # make_llm validates against it and refuses unknown efforts.
+        self.reasoning_efforts = reasoning_efforts
 
 
 # Registry keyed by gateway model alias. Add entries as models are validated.
@@ -44,8 +49,29 @@ _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
     # = False so make_llm omits the param entirely (don't rely on drop_params).
     "kimi-foundry": ModelCapabilities(
         vision=False, reasoning=True, max_tokens=8192, supports_temperature=False,
+        # Live-probed through the gateway (2026-08-08): Foundry's K2.6 accepts
+        # low/high/max and emits reasoning_content at every level.
+        reasoning_efforts=("low", "high", "max"),
     ),
     "qwen-foundry": ModelCapabilities(vision=False, reasoning=False, max_tokens=8192),
+    # Compare fleet (Azure AI Foundry, same /openai/v1 surface as Kimi).
+    # reasoning=True selects the ChatOpenAIReasoning subclass, which only ADDS
+    # preservation of reasoning_content — the request payload is unchanged, so
+    # it's the safe default for models whose thinking emission is unverified.
+    # Efforts per provider docs (2026-08): GLM maps low/medium→high so only the
+    # real two are offered; V4 Pro treats low as high; V4 Flash has all three.
+    "glm-foundry": ModelCapabilities(
+        vision=False, reasoning=True, max_tokens=8192,
+        reasoning_efforts=("high", "max"),
+    ),
+    "deepseek-pro-foundry": ModelCapabilities(
+        vision=False, reasoning=True, max_tokens=8192,
+        reasoning_efforts=("high", "max"),
+    ),
+    "deepseek-flash-foundry": ModelCapabilities(
+        vision=False, reasoning=True, max_tokens=8192,
+        reasoning_efforts=("low", "high", "max"),
+    ),
 }
 
 _DEFAULT_CAPS = ModelCapabilities()
@@ -257,10 +283,15 @@ def _retry_after(exc: Exception) -> float | None:
 
 # --- Cost estimation (budget accounting) ---
 
-# USD per 1M tokens (input, output). Conservative defaults; refine from gateway
-# invoices. Unknown aliases get the conservative default (fail-closed posture).
+# USD per 1M tokens (input, output). Fallback only — the backend injects the
+# registry rate as MODEL_PRICE_*_PER_MTOK per lane (F4), so these values are
+# hit only when a worker runs outside the sandbox env. Kept in sync with
+# backend/app/core/models.py (Azure AI Foundry listings, 2026-08).
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "kimi-foundry": (2.0, 6.0),
+    "kimi-foundry": (0.95, 4.00),
+    "glm-foundry": (1.54, 4.84),
+    "deepseek-pro-foundry": (1.74, 3.48),
+    "deepseek-flash-foundry": (0.19, 0.51),
     "qwen-foundry": (1.0, 3.0),
 }
 _DEFAULT_PRICING = (2.0, 6.0)
@@ -314,10 +345,17 @@ def make_llm(
     streaming: bool = True,
     temperature: float = 0.0,
     tools: list | None = None,
+    reasoning: str | None = None,
 ) -> ChatOpenAI:
     """Build a ChatOpenAI pointed at the LiteLLM gateway.
 
     Fail-closed: if the gateway env is unset, raise (never substitute a model).
+
+    ``reasoning`` is the composer's per-lane choice: "off" disables thinking,
+    an effort string ("low"/"high"/"max") enables thinking at that effort, and
+    None sends NO override — the request stays byte-identical to pre-feature
+    traffic (provider default: thinking on). Both params ride extra_body so
+    LiteLLM forwards them verbatim (its drop_params never sees them).
     """
     base_url = os.environ.get("LITELLM_BASE_URL")
     api_key = os.environ.get("LITELLM_API_KEY")
@@ -348,6 +386,17 @@ def make_llm(
     # the param entirely instead of relying on the gateway's drop_params.
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
+    if reasoning == "off":
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    elif reasoning:
+        if reasoning not in caps.reasoning_efforts:
+            raise RuntimeError(
+                f"model '{model}' takes reasoning {sorted(caps.reasoning_efforts)} "
+                f"or 'off' — not '{reasoning}' (fail-closed, no silent clamp)")
+        kwargs["extra_body"] = {
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": reasoning,
+        }
     # Reasoning models (Kimi-K2, DeepSeek-R1, …) return a non-standard
     # ``reasoning_content`` field that stock ChatOpenAI silently drops
     # (langchain-ai/langchain#37960). Use the subclass that preserves it so

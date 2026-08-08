@@ -37,7 +37,7 @@ from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override
 from app.services import delivery, evidence
 
 log = get_logger(service="blueprint_development")
@@ -120,10 +120,12 @@ class DevelopmentBlueprint(Blueprint):
                                         "You are the DEVELOPER. Implement the approved plan "
                                         "steps in the writable clone. Mark each step done only "
                                         "when its success_criterion is met.")
+        model, reasoning = lane_override(ctx)
         thread = await thread_manager.spawn(
             ctx.run, persona="developer", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=writable, context_repos=context,
             resume_from_thread_id=ctx.artifacts.get("resume_from_thread_id"),
+            model=model, reasoning=reasoning,
         )
         ctx.artifacts["develop_thread_id"] = thread.id
         await self._await_thread(thread.id)
@@ -151,9 +153,11 @@ class DevelopmentBlueprint(Blueprint):
         # writable_repo=None: the evaluator is read-only — it verifies, never edits.
         repo: Repo = ctx.artifacts["repo_row"]
         context: list[Repo] = ctx.artifacts.get("context_repos") or [repo]
+        model, reasoning = lane_override(ctx)
         thread = await thread_manager.spawn(
             ctx.run, persona="evaluator", prompt=prompt, persona_prompt=persona_prompt,
             writable_repo=None, context_repos=context,
+            model=model, reasoning=reasoning,
         )
         ctx.artifacts["evaluator_thread_id"] = thread.id
         await self._await_thread(thread.id)

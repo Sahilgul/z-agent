@@ -203,6 +203,7 @@ def create_app() -> FastAPI:
         hydration,
         ideas,
         knowledge,
+        models,
         modes,
         proposals,
         push,
@@ -218,8 +219,8 @@ def create_app() -> FastAPI:
     for r in (auth.router, team.router, runs.router, threads.router,
               approvals.router, repos.router, modes.router, sessions.router,
               hydration.router, knowledge.router, ideas.router, byo_pat.router,
-              proposals.router, push.router, bench.router, campaigns.router,
-              webhooks.router):
+              models.router, proposals.router, push.router, bench.router,
+              campaigns.router, webhooks.router):
         app.include_router(r)
     app.include_router(ws_router)
 

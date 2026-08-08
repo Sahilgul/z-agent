@@ -43,6 +43,25 @@ async def test_delete_key(monkeypatch):
     assert fake.calls[0][0] == "POST"
 
 
+async def test_delete_key_tolerates_missing_key(monkeypatch):
+    """F6: a 400/404 from /key/delete means the key is already gone — the goal
+    state holds regardless of how the gateway phrases its error body."""
+    for status in (400, 404):
+        routes = {"/key/delete": FakeResponse(status_code=status, text='{"detail":"gone"}')}
+        install_fake_httpx(monkeypatch, litellm, routes)
+        client = GatewayClient(base_url="http://gw", master_key="mk")
+        await client.delete_key("sk-gone")  # must not raise
+
+
+async def test_delete_key_raises_on_real_gateway_error(monkeypatch):
+    import httpx
+    routes = {"/key/delete": FakeResponse(status_code=500)}
+    install_fake_httpx(monkeypatch, litellm, routes)
+    client = GatewayClient(base_url="http://gw", master_key="mk")
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.delete_key("sk-1")
+
+
 async def test_key_spend(monkeypatch):
     routes = {"/key/info": FakeResponse({"info": {"spend": 12.34}})}
     install_fake_httpx(monkeypatch, litellm, routes)

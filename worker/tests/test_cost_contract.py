@@ -23,7 +23,8 @@ def test_estimate_falls_back_without_env(monkeypatch):
     monkeypatch.delenv("MODEL_PRICE_OUT_PER_MTOK", raising=False)
     cost = llm.estimate_cost("kimi-foundry",
                              {"input_tokens": 1_000_000, "output_tokens": 0})
-    assert cost == pytest.approx(2.0)
+    # Static fallback table = the registry's real Kimi rate ($0.95/1M in).
+    assert cost == pytest.approx(0.95)
 
 
 # ------------------------------------------------------------------- F7
