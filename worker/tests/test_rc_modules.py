@@ -165,10 +165,10 @@ class TestWebFetch:
 class TestGitSnapshot:
     @pytest.mark.asyncio
     async def test_snapshot_captures_state(self, tmp_path: Path, monkeypatch):
-        subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=tmp_path, check=True)  # noqa: ASYNC221 — test setup
+        subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=tmp_path, check=True)
         (tmp_path / "a.txt").write_text("hello\n")
-        subprocess.run(["git", "add", "a.txt"], cwd=tmp_path, check=True)  # noqa: ASYNC221 — test setup
-        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",  # noqa: ASYNC221 — test setup
+        subprocess.run(["git", "add", "a.txt"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                         "commit", "-qm", "init"], cwd=tmp_path, check=True)
         (tmp_path / "a.txt").write_text("changed\n")
         (tmp_path / "new.txt").write_text("untracked\n")

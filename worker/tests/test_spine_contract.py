@@ -30,13 +30,16 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+from worker.engine.checkpointer import open_checkpointer
 from worker.engine.compaction import CompactionPolicy, Compactor
 from worker.engine.events import EventEmitter
-from worker.engine.goal_mode import GoalStage, clear_pending_questions, _reset_pending_questions
 from worker.engine.fanout import set_current_thread_id
+from worker.engine.goal_mode import (
+    GoalStage,
+    _reset_pending_questions,
+)
 from worker.engine.graph import _should_continue, build_graph
 from worker.engine.state import Budget, Mode, tag_message
-from worker.engine.checkpointer import open_checkpointer
 
 # ----------------------------------------------------------- scripted LLM
 
@@ -355,7 +358,7 @@ async def test_three_denials_trigger_blocked_escalation(monkeypatch: pytest.Monk
 
     await graph.ainvoke(_initial(), config)
     for decision in ({"decision": "deny", "reason": "no"},) * 3:
-        result = await graph.ainvoke(Command(resume=decision), config)
+        await graph.ainvoke(Command(resume=decision), config)
     await collector.flush()
 
     snap = await graph.aget_state(config)

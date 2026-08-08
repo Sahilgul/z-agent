@@ -109,7 +109,7 @@ async def web_fetch(url: str) -> str:
         return "error: url must start with http:// or https://"
     try:
         markdown = await _fetch_markdown(url)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"error: fetch failed: {exc}"
     if not markdown:
         return "error: page contained no extractable text"
@@ -150,7 +150,7 @@ def git_snapshot(include_diff_stat: bool = True) -> str:
         }
         if include_diff_stat:
             snapshot["diff_stat"] = git("diff", "--stat", "HEAD").splitlines()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"error: git snapshot failed: {exc}"
     return json.dumps(snapshot, indent=1)
 
@@ -290,7 +290,7 @@ async def call_extended_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         is_error = output.startswith("error:")
         return {"kind": "error" if is_error else "success", "ok": not is_error,
                 "output": output, "tool": name, "args": args}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
 
 

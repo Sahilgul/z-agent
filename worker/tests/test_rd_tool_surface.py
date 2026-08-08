@@ -72,7 +72,7 @@ class TestRoster:
 
     def test_roster_excludes_bound_and_discovered(self):
         frag = roster_fragment("development",
-                               bound=default_tool_names("development") + ["web_fetch"])
+                               bound=[*default_tool_names("development"), "web_fetch"])
         assert "file_read —" not in frag  # bound tools are not "deferred"
         assert "web_fetch —" not in frag  # discovered tools leave the roster
         assert "playbook_load —" in frag  # deferred tools are listed

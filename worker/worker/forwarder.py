@@ -28,14 +28,32 @@ class Forwarder:
     async def publish_events(self, events: list[StepEvent]) -> None:
         if not events:
             return
-        pipe = self.redis.pipeline(transaction=False)
-        for event in events:
-            pipe.xadd(self.stream_key, {
-                "thread_id": self.thread_id,
-                "seq": event.seq,
-                "payload": json.dumps(event.model_dump(mode="json")),
-            })
-        await pipe.execute()
+        # D9: the durable leg must survive a Redis blip — a dropped turn
+        # boundary or engine-error signal silently holes the record. Bounded
+        # retry with backoff; after the retries the exception propagates so
+        # the caller's own doctrine applies (the runner marks the turn failed
+        # rather than pretending the event landed).
+        import asyncio
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                pipe = self.redis.pipeline(transaction=False)
+                for event in events:
+                    pipe.xadd(self.stream_key, {
+                        "thread_id": self.thread_id,
+                        "seq": event.seq,
+                        "payload": json.dumps(event.model_dump(mode="json")),
+                        # D4: bound the stream so an unconsumed run can't grow
+                        # Redis without limit; the events TABLE is the system
+                        # of record, the stream is only the transport.
+                    }, maxlen=100_000, approximate=True)
+                await pipe.execute()
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(0.25 * (2 ** attempt))
+        raise last_exc  # type: ignore[misc]
 
     async def publish_approval_request(self, payload: dict) -> None:
         """Bridge the engine's approval card to the backend ApprovalService:

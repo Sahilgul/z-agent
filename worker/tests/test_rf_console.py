@@ -4,14 +4,13 @@ pairing, and the ◆ recap emission at goal stage advances."""
 from __future__ import annotations
 
 import pytest
-from langgraph.checkpoint.memory import MemorySaver
 from collegium_contracts import StepKind
+from langgraph.checkpoint.memory import MemorySaver
+from test_spine_contract import EventCollector, _ai, _config, _initial, _patch_llm, _tc
 
 from worker.engine.events import EventEmitter
 from worker.engine.goal_mode import GoalStage
 from worker.engine.state import Mode
-
-from test_spine_contract import EventCollector, _ai, _config, _initial, _patch_llm, _tc
 
 
 def test_approval_stepkind_exists_in_contracts():

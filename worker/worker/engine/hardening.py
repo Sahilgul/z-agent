@@ -124,7 +124,7 @@ async def run_soak(*, model: str, run_id: str, thread_id: str,
     try:
         outcome = await graph.ainvoke(state, config=config)
         result.is_error = bool(outcome.get("error"))
-    except Exception:  # noqa: BLE001
+    except Exception:
         result.is_error = True
 
     result.turns = emitter._seq

@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import pytest
 
+from worker.engine.fanout import set_current_thread_id
 from worker.engine.goal_mode import (
     GoalArtifact,
     GoalStage,
+    _reset_pending_questions,
     ask_user,
     build_clarify_card,
     clear_pending_questions,
     get_pending_questions,
     make_goal,
     needs_clarification,
-    _reset_pending_questions,
 )
-from worker.engine.fanout import set_current_thread_id
 
 
 @pytest.fixture(autouse=True)

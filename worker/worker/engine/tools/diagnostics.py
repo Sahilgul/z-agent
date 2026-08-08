@@ -48,7 +48,7 @@ def _ruff(path: Path) -> list[str]:
             check=False,
         )
         items = json.loads(proc.stdout or "[]")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
     out = []
     for item in items:

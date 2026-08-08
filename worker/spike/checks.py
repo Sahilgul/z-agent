@@ -8,13 +8,14 @@ pre-run, "no number-and-a-debate").
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from collegium_contracts import Notebook, Plan
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from spike.agent_loop import MAX_TURNS_DEFAULT, AgentRecorder, make_llm, run_agent_loop
 
@@ -37,19 +38,31 @@ NUDGE_TEXT = (
 
 
 def stamp_workspace(golden: Path, repo: str, branch: str, dest: Path) -> Path:
-    """Self-contained clone stamp from golden, checked out at origin/<branch>."""
+    """Self-contained clone stamp from golden, checked out at origin/<branch>.
+
+    N5: matrix PARALLEL-SAFE. The old code did rmtree(dest) then cloned in
+    place — two matrix workers stamping the same model-repo pair raced: one
+    could rmtree the other's half-written clone, or read a torn workspace.
+    Now the clone lands in a per-process temp dir and the final result is
+    published with an atomic rename; stale temp dirs from killed runs are
+    pruned first."""
     src = golden / repo
     if not src.is_dir():
         raise SystemExit(f"[spike] golden repo not found: {src}")
-    if dest.exists():
-        shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "clone", "--quiet", str(src), str(dest)], check=True)
-    subprocess.run(["git", "-C", str(dest), "fetch", "--quiet", "origin"], check=True)
+    for stale in dest.parent.glob(f"{dest.name}.tmp-*"):
+        shutil.rmtree(stale, ignore_errors=True)
+    tmp = dest.parent / f"{dest.name}.tmp-{os.getpid()}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    subprocess.run(["git", "clone", "--quiet", str(src), str(tmp)], check=True)
+    subprocess.run(["git", "-C", str(tmp), "fetch", "--quiet", "origin"], check=True)
     subprocess.run(
-        ["git", "-C", str(dest), "checkout", "--quiet", "-B", "spike", f"origin/{branch}"],
+        ["git", "-C", str(tmp), "checkout", "--quiet", "-B", "spike", f"origin/{branch}"],
         check=True,
     )
+    if dest.exists():
+        shutil.rmtree(dest)
+    os.replace(tmp, dest)  # atomic publish — readers never see a torn clone
     print(f"[spike] stamped {repo} @ origin/{branch} -> {dest}")
     return dest
 
@@ -89,7 +102,7 @@ async def check_structured(model: str) -> dict[str, Any]:
             )
             Plan.model_validate(_parse_structured(msg))
             plan_ok += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[spike] Plan validation failed ({model} attempt {i}): {exc}")
 
         llm_n = make_llm(model, streaming=False, structured=Notebook)
@@ -105,7 +118,7 @@ async def check_structured(model: str) -> dict[str, Any]:
             )
             Notebook.model_validate(_parse_structured(msg))
             notebook_ok += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[spike] Notebook validation failed ({model} attempt {i}): {exc}")
 
     return {

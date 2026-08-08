@@ -86,7 +86,9 @@ def file_search(pattern: str, glob: str | None = None, max_results: int = 200) -
             cmd += ["--include", glob]
         cmd += [str(ws)]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
-    out = proc.stdout[:_BASH_MAX_OUTPUT]
+    raw = proc.stdout
+    truncated = len(raw) > _BASH_MAX_OUTPUT
+    out = raw[:_BASH_MAX_OUTPUT]
     # M-12: an invalid regex makes rg exit 2 with the error on STDERR, but the
     # old code only inspected stdout (empty) and returned "no matches" — the
     # agent never learned its pattern was bad. rg: 0 = matches, 1 = no matches,
@@ -97,7 +99,14 @@ def file_search(pattern: str, glob: str | None = None, max_results: int = 200) -
                 f"{err[:200] or 'invalid pattern or I/O error'}")
     if not out:
         return "no matches"
-    return out + f"\n[{out.count(chr(10))} matches]"
+    # K10: count matches in the FULL output, and say so when the visible
+    # window was cut — the old footer counted newlines in the TRUNCATED
+    # slice, underreporting with no marker.
+    total = raw.count("\n")
+    shown = out.count("\n")
+    marker = (f"\n[truncated — showing {shown} of {total} matches; "
+              "narrow the pattern or glob]") if truncated else ""
+    return out + marker + f"\n[{total} matches]"
 
 
 # --- file_glob ---
@@ -203,8 +212,15 @@ def terminal_exec(command: str) -> str:
         )
     except subprocess.TimeoutExpired:
         return f"error: command timed out after {_BASH_TIMEOUT_S}s"
-    out = (proc.stdout + proc.stderr)[:_BASH_MAX_OUTPUT]
-    return f"{out}\n[exit {proc.returncode}]"
+    combined = proc.stdout + proc.stderr
+    truncated = len(combined) > _BASH_MAX_OUTPUT
+    out = combined[:_BASH_MAX_OUTPUT]
+    # K10: the [exit N] marker must survive (K17's evidence extractor depends
+    # on it) and a cut must be VISIBLE — a mid-stream cut otherwise reads as
+    # complete output.
+    marker = ("\n[truncated — output cut at "
+              f"{_BASH_MAX_OUTPUT} chars]") if truncated else ""
+    return f"{out}{marker}\n[exit {proc.returncode}]"
 
 
 def _resolve(file_path: str) -> Path:
@@ -242,7 +258,7 @@ async def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "tool": name,
             "args": args,
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
 
 

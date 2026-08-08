@@ -14,7 +14,8 @@ from typing import Any
 from langchain_core.tools import tool
 
 from worker.engine.security import wrap_untrusted
-from worker.engine.tools.readonly import _resolve as _resolve_path, _workspace
+from worker.engine.tools.readonly import _resolve as _resolve_path
+from worker.engine.tools.readonly import _workspace
 
 AWAIT_TIMEOUT_DEFAULT_S = 120.0
 # Odd-interval poll rules: irregular cadence, never a fixed tight loop.
@@ -161,7 +162,7 @@ async def call_deferred_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         is_error = output.startswith("error:")
         return {"kind": "error" if is_error else "success", "ok": not is_error,
                 "output": output, "tool": name, "args": args}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: {exc}",
                 "tool": name, "args": args}
 
@@ -186,7 +187,7 @@ async def _web_search(args: dict[str, Any]) -> dict[str, Any]:
                 "query": query, "max_results": int(args.get("max_results", 5))})
             resp.raise_for_status()
             data = resp.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: web_search failed: {exc}",
                 "tool": "web_search", "args": args}
     results = data.get("results", []) if isinstance(data, dict) else []

@@ -183,21 +183,35 @@ class ApprovalBroker:
 
     async def persist_always_allow(self, tool_name: str) -> None:
         await self.redis.sadd(f"always_allow:{self.run_id}", tool_name)
+        # G3: the set outlives its run without a TTL; 7 days covers the
+        # longest realistic run while guaranteeing eventual cleanup.
+        await self.redis.expire(f"always_allow:{self.run_id}", 7 * 24 * 3600)
 
     async def wait_decision(self, approval_id: str) -> dict[str, Any]:
         """Block for the human's decision. Timeout = DENY deterministically.
 
         A Redis connection error during the (potentially 15-min) BLPOP is a
         transient failure, not a run-killer: deny deterministically, matching
-        the timeout contract, instead of propagating and failing the run."""
+        the timeout contract, instead of propagating and failing the run.
+
+        G2: BLPOP is destructive — the backend also SETs a durable
+        ``decision_value`` copy, and we read it FIRST. A replaced container
+        re-entering the gate after a crash finds the already-made decision
+        instead of waiting out a full timeout into a wrong deny."""
         try:
-            result = await self.redis.blpop(f"approval:{approval_id}:decision", timeout=self.timeout_s)
-        except redis.RedisError as exc:
-            return {"decision": "deny",
-                    "reason": f"approval channel error — denied ({type(exc).__name__})"}
-        if result is None:
-            return {"decision": "deny", "reason": "approval timed out — denied"}
-        _, raw = result
+            durable = await self.redis.get(f"approval:{approval_id}:decision_value")
+        except redis.RedisError:
+            durable = None
+        if durable is None:
+            try:
+                result = await self.redis.blpop(f"approval:{approval_id}:decision", timeout=self.timeout_s)
+            except redis.RedisError as exc:
+                return {"decision": "deny",
+                        "reason": f"approval channel error — denied ({type(exc).__name__})"}
+            if result is None:
+                return {"decision": "deny", "reason": "approval timed out — denied"}
+            _, durable = result
+        raw = durable
         try:
             decision = json.loads(raw)
         except (json.JSONDecodeError, TypeError):

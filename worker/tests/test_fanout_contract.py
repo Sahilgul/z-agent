@@ -27,7 +27,8 @@ def _clean_registry():
 def test_spawn_agent_succeeds_when_worker_idle(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("THREAD_ID", "thread-1")
     result = spawn_agent.invoke({"prompt": "investigate the dedupe bug"})
-    assert result.startswith("spawned agent")
+    # C1: the tool records a vetted REQUEST; the backend spawns the thread.
+    assert result.startswith("spawn requested: agent")
     reg = get_registry()
     assert reg.live_count() == 1
 
@@ -91,7 +92,7 @@ def test_spawn_swarm_registers_all_slices(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("THREAD_ID", "thread-1")
     slices = [{"title": f"s{i}", "prompt": f"distinct prompt {i}"} for i in range(3)]
     result = spawn_swarm.invoke({"slices": slices})
-    assert "spawned swarm of 3" in result
+    assert "swarm of 3 threads requested" in result
     reg = get_registry()
     assert reg.live_count() == 3
 
@@ -154,8 +155,23 @@ async def test_timeout_watchdog_skips_finished_spawn():
     assert "already finished" in result
 
 
+@pytest.fixture
+def fake_spawn_redis(monkeypatch: pytest.MonkeyPatch):
+    """C1: stand in for the spawn-request stream so dispatch tests don't need
+    a live Redis. Verifies the request payload the SpawnBridge consumes."""
+    import fakeredis.aioredis
+
+    from worker.engine import fanout
+    client = fakeredis.aioredis.FakeRedis()
+    monkeypatch.setattr(fanout, "_spawn_redis", client)
+    monkeypatch.setenv("RUN_ID", "run-1")
+    yield client
+    monkeypatch.setattr(fanout, "_spawn_redis", None)
+
+
 @pytest.mark.asyncio
-async def test_spawn_arms_2h_watchdog_via_dispatch(monkeypatch: pytest.MonkeyPatch):
+async def test_spawn_arms_2h_watchdog_via_dispatch(monkeypatch: pytest.MonkeyPatch,
+                                                   fake_spawn_redis):
     """C-04: a successful spawn must arm the 2h hard-cap watchdog. The sync
     spawn tool runs in an executor thread with no running loop, so the watchdog
     is armed by the async dispatch path (call_tool_direct -> _call_extra_tool)
@@ -177,7 +193,34 @@ async def test_spawn_arms_2h_watchdog_via_dispatch(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_cascade_drain_cancels_watchdog(monkeypatch: pytest.MonkeyPatch):
+async def test_spawn_publishes_request_to_backend(monkeypatch: pytest.MonkeyPatch,
+                                                  fake_spawn_redis):
+    """C1: a dispatched spawn becomes a spawn_requests stream entry the
+    backend SpawnBridge turns into a REAL thread (no phantom spawns)."""
+    import json
+
+    monkeypatch.setenv("THREAD_ID", "thread-1")
+    from worker.engine.tools import call_tool_direct
+    result = await call_tool_direct("spawn_agent",
+                                    {"prompt": "map the auth flow", "repo": "web"})
+    assert result["ok"] is True
+    entries = await fake_spawn_redis.xrange("spawn_requests:run-1")
+    assert len(entries) == 1
+    fields = {k.decode() if isinstance(k, bytes) else k:
+              v.decode() if isinstance(v, bytes) else v
+              for k, v in entries[0][1].items()}
+    payload = json.loads(fields["payload"])
+    assert payload["run_id"] == "run-1"
+    assert payload["parent_thread_id"] == "thread-1"
+    assert payload["kind"] == "agent"
+    assert payload["prompt"] == "map the auth flow"
+    assert payload["repo"] == "web"
+    assert payload["spawn_id"] in get_registry().spawns
+
+
+@pytest.mark.asyncio
+async def test_cascade_drain_cancels_watchdog(monkeypatch: pytest.MonkeyPatch,
+                                              fake_spawn_redis):
     """C-04: cascade drain must cancel the watchdog of every drained spawn
     (the 2h cap is moot once the parent stops the spawn)."""
     monkeypatch.setenv("THREAD_ID", "thread-1")

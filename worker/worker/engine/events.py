@@ -11,10 +11,11 @@ type and the two-phase verbatim approval flow extend it.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
 from collegium_contracts import StepEvent, StepKind
+from langchain_core.messages import AIMessage, ToolMessage
 
 from worker.engine.security import redact, redact_dict
 
@@ -26,12 +27,38 @@ class EventEmitter:
     is monotonic across the thread's lifetime via the state's compacted_event_ids).
     """
 
-    def __init__(self, run_id: str, thread_id: str, context_id: str | None = None) -> None:
+    def __init__(self, run_id: str, thread_id: str, context_id: str | None = None,
+                 seq_store: Path | None = None) -> None:
         self.run_id = run_id
         self.thread_id = thread_id
         self.context_id = context_id or thread_id
-        self._seq = 0
+        # D2: seq is single-sourced PER THREAD and must survive container
+        # replacement — otherwise the replacement restarts at seq=0 and the
+        # backend's unique (run_id, thread_id, seq) constraint dedupes the
+        # whole replayed prefix into oblivion. The store lives on the durable
+        # session volume (CHECKPOINT_MIRROR_DIR).
+        self._seq_store = seq_store
+        self._seq = self._load_seq()
         self._pending_tools: dict[str, dict[str, Any]] = {}
+
+    def _load_seq(self) -> int:
+        if self._seq_store is None:
+            return 0
+        try:
+            return int(self._seq_store.read_text().strip())
+        except (OSError, ValueError):
+            return 0
+
+    def _persist_seq(self) -> None:
+        if self._seq_store is None:
+            return
+        import os
+        tmp = self._seq_store.with_suffix(".seq.tmp")
+        try:
+            tmp.write_text(str(self._seq))
+            os.replace(tmp, self._seq_store)
+        except OSError:
+            pass  # a persist miss degrades to a redelivery the DB dedupes
 
     def _next(self, kind: StepKind, title: str, detail: dict[str, Any],
               task_id: str | None, sdk_uuid: str | None) -> StepEvent:
@@ -47,6 +74,7 @@ class EventEmitter:
             sdk_message_uuid=sdk_uuid,
         )
         self._seq += 1
+        self._persist_seq()
         return event
 
     # --- Dedicated approval StepKind + action_id pairing ---
@@ -90,7 +118,7 @@ class EventEmitter:
     def from_assistant(self, msg: AIMessage, task_id: str | None) -> list[StepEvent]:
         """Turn an AIMessage into StepEvents (thinking/text + pending tool uses)."""
         events: list[StepEvent] = []
-        sdk_uuid = getattr(msg, "id", None) or getattr(msg, "usage_metadata", None) and None
+        sdk_uuid = getattr(msg, "id", None) or (getattr(msg, "usage_metadata", None) and None)
         content = msg.content if isinstance(msg.content, list) else [msg.content] if msg.content else []
 
         # OpenAI-compatible reasoning models (Kimi-K2, DeepSeek-R1, …) return

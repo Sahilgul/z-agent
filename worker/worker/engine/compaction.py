@@ -41,6 +41,24 @@ _PROTECTED_ORIGINS = frozenset({
 # Origins pruned in order (most expendable first).
 _PRUNE_ORDER = [PromptOrigin.TOOL, PromptOrigin.ENVELOPE, PromptOrigin.MEMORY, PromptOrigin.ASSISTANT]
 
+# K8: tool RESULTS carrying these markers hold facts the system prompt
+# guarantees survive compaction (errors encountered, approvals granted,
+# edits made). Pruning them breaks the agent's own constitution.
+_SURVIVAL_TOOL_MARKERS = (
+    "error:", "[exit 1", "[exit 2", "[exit 127",
+    "approval", "denied", "always_allow",
+    "applied", "edit applied", "wrote ",
+)
+_MUTATING_TOOL_NAMES = {"file_edit", "file_write", "file_delete", "terminal_exec"}
+
+
+def _is_survival_critical(msg: BaseMessage) -> bool:
+    name = str(getattr(msg, "name", "") or "")
+    if name in _MUTATING_TOOL_NAMES:
+        content = str(getattr(msg, "content", "") or "")
+        return any(m in content for m in _SURVIVAL_TOOL_MARKERS)
+    return False
+
 
 def _repair_tool_pairs(msgs: list[BaseMessage]) -> list[BaseMessage]:
     """Restore tool-call/tool-result pairing after pruning.
@@ -207,6 +225,12 @@ class Compactor:
         buckets: dict[PromptOrigin, list[tuple[int, BaseMessage]]] = {}
         for i, msg in enumerate(span):
             origin = self._origin_of(msg)
+            if origin == PromptOrigin.TOOL and _is_survival_critical(msg):
+                # K8: the system prompt GUARANTEES errors, approvals, and
+                # edits survive compaction — but they're all TOOL origin and
+                # were pruned FIRST. Reclassify them out of the prune set.
+                buckets.setdefault(PromptOrigin.SYSTEM, []).append((i, msg))
+                continue
             buckets.setdefault(origin, []).append((i, msg))
 
         pruned: list[tuple[int, BaseMessage]] = []

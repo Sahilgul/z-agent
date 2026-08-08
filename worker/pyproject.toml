@@ -42,3 +42,22 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["worker"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Same families as the backend gate; the worker shares the compact style.
+select = ["F", "I", "UP", "B", "RUF", "BLE"]
+ignore = [
+    "B008",
+    "BLE001",  # deliberate never-fail boundaries at event sink / control edges
+    "RUF059",
+    "RUF001", "RUF002", "RUF003",  # typographic punctuation in prose is deliberate
+    "UP042",   # str+Enum mixins are deliberate (JSON-serializable enums)
+]
+
+[dependency-groups]
+dev = [
+    "fakeredis>=2.37.0",
+]

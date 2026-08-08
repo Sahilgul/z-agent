@@ -14,8 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from collegium_contracts import StepKind
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from worker.engine.events import EventEmitter
 from worker.engine.graph import (

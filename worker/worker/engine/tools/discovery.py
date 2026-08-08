@@ -67,7 +67,7 @@ def _tool_schema(t: Any) -> dict[str, Any]:
         args = getattr(t, "args_schema", None)
         if args is not None and hasattr(args, "model_json_schema"):
             return args.model_json_schema()
-    except Exception:  # noqa: BLE001 — a tool with a broken schema still indexes by name/description
+    except Exception:
         return {}
     return {}
 
@@ -186,6 +186,29 @@ def roster_fragment(mode: str, *, bound: list[str], char_budget: int = ROSTER_CH
     return out
 
 
+def skills_roster_fragment() -> str:
+    """K7: the skills list the system prompt promises. One line per playbook
+    (name + first-line description), mirroring the playbook_load surface."""
+    from pathlib import Path
+
+    pdir = Path(__file__).resolve().parent.parent / "prompts" / "playbooks"
+    if not pdir.exists():
+        return ""
+    lines = []
+    for path in sorted(pdir.glob("*.md")):
+        first = ""
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                first = stripped
+                break
+        lines.append(f"  {path.stem} — {first or '(no description)'}")
+    if not lines:
+        return ""
+    return ("Available skills (load the full procedure with "
+            "playbook_load(name)):\n" + "\n".join(lines))
+
+
 # --- the tool_search tool itself (Tier 0 — always bound) ---
 
 @tool
@@ -235,7 +258,7 @@ async def tool_search_async(args: dict[str, Any], *, mode: str,
         sections.append(f"toLoad: {buckets['toLoad']}")
         sections.append(f"alreadyAvailable: {buckets['alreadyAvailable']}")
         sections.append(f"unknown: {buckets['unknown']}")
-        for name, info in schemas.items():
+        for info in schemas.values():
             sections.append(json.dumps(info, default=str))
 
     if not query and not names:

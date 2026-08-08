@@ -15,8 +15,8 @@ via the gateway at turn start.
 
 from __future__ import annotations
 
-import json
 import contextvars
+import json
 import logging
 import sqlite3
 import threading

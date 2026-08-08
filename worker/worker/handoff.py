@@ -5,6 +5,11 @@ up exactly where the previous container stopped. The 'living artifact' memory
 faculty — an organ the next context READS.
 """
 
+# NOTE (K16, Wave 4 audit): LEGACY SDK-runtime only — no importers in the
+# default ENGINE=custom path. Retained for the flag-gated SDK fallback; do not
+# extend.
+
+
 from __future__ import annotations
 
 import subprocess

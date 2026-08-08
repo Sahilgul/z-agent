@@ -59,7 +59,7 @@ async def run_matrix(command: str, golden: Path, repo: str, branch: str, models:
                 results[model]["interrupt"] = await run_interrupt_check(golden, model, RESULTS_DIR)
             if command in ("cache", "all"):
                 results[model]["cache"] = await check_cache(model)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             results[model]["error"] = str(exc)
             print(f"[spike] model {model} failed: {exc}")
     return results

@@ -61,6 +61,55 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+class ReplayJournal:
+    """K1: replay guard for NON-IDEMPOTENT tool calls.
+
+    LangGraph resumes a killed container from the last checkpoint — a crash
+    mid-tools-node re-executes the node's pending tool calls with the SAME
+    tool_call_id (it comes from the checkpointed AIMessage). Without a guard,
+    `terminal_exec` runs twice and `file_write` double-applies.
+
+    The journal lives on the DURABLE session volume (CHECKPOINT_MIRROR_DIR)
+    so it survives container replacement. One file per tool_call_id holding
+    the recorded result; a hit returns the recorded result verbatim instead
+    of re-executing. Writes are atomic (tmp + os.replace) so a crash
+    mid-record never yields a torn entry (treated as a miss, not corruption).
+    """
+
+    def __init__(self, mirror_dir: Path) -> None:
+        self.dir = Path(mirror_dir) / ".replay-guard"
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, tool_call_id: str) -> Path:
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in tool_call_id)
+        return self.dir / f"{safe}.json"
+
+    def lookup(self, tool_call_id: str) -> dict[str, Any] | None:
+        if not tool_call_id:
+            return None
+        try:
+            with self._path(tool_call_id).open(encoding="utf-8") as f:
+                record = json.load(f)
+            return record.get("result") if isinstance(record, dict) else None
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def record(self, tool_call_id: str, tool: str, result: dict[str, Any]) -> None:
+        if not tool_call_id:
+            return
+        line = {"ts": _now_iso(), "tool": tool, "result": result}
+        path = self._path(tool_call_id)
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(line, f, default=str)
+            os.replace(tmp, path)
+        except OSError:
+            # A journal write failure degrades to a replay MISS (double
+            # execution) — bad, but never fail the tool call over it.
+            log.warning("replay journal write failed", tool_call_id=tool_call_id)
+
+
 class MirroredSaver(BaseCheckpointSaver):
     """Checkpointer proxy that mirrors every checkpoint write to a DeltaChannel.
 
@@ -141,7 +190,7 @@ class MirroredSaver(BaseCheckpointSaver):
                 str(checkpoint.get("id", "")),
                 dict(metadata or {}),
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.warning("delta-channel mirror append failed — fallback degraded, write kept",
                         exc_info=True)
         return result
@@ -230,4 +279,5 @@ class _PostgresCtx:
             await self._ctx.__aexit__(*exc)
 
 
-__all__ = ["DeltaChannel", "MirroredSaver", "make_checkpointer", "open_checkpointer"]
+__all__ = ["DeltaChannel", "MirroredSaver", "ReplayJournal",
+           "make_checkpointer", "open_checkpointer"]

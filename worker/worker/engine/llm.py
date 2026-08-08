@@ -190,7 +190,7 @@ async def with_gateway_retry_aiter(stream_factory: Any, *, max_retries: int = 2,
             if stream is not None:
                 try:
                     await stream.aclose()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
             last_exc = exc
             if not _is_retryable(exc):
@@ -266,14 +266,44 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
 _DEFAULT_PRICING = (2.0, 6.0)
 
 
+def _pricing_for(model: str) -> tuple[float, float]:
+    """F4: the backend injects MODEL_PRICE_*_PER_MTOK so the local estimate
+    tracks the gateway's real rates (reminder thresholds == real spend). The
+    static table remains as the fallback when the env is absent."""
+    env_in = os.environ.get("MODEL_PRICE_IN_PER_MTOK")
+    env_out = os.environ.get("MODEL_PRICE_OUT_PER_MTOK")
+    if env_in and env_out:
+        try:
+            return float(env_in), float(env_out)
+        except ValueError:
+            pass
+    return _MODEL_PRICING.get(model, _DEFAULT_PRICING)
+
+
+# Cached input tokens are billed at 10% of the input rate (the common
+# provider convention for prompt-cache reads). Gateway-truth remains the
+# readback (F3); this only keeps the LOCAL reminder estimate honest.
+CACHE_READ_PRICE_FACTOR = 0.1
+
+
 def estimate_cost(model: str, usage: dict[str, Any] | None) -> float:
     """Estimate USD cost of one turn from its usage_metadata."""
     if not usage:
         return 0.0
-    input_price, output_price = _MODEL_PRICING.get(model, _DEFAULT_PRICING)
+    input_price, output_price = _pricing_for(model)
     in_tok = float(usage.get("input_tokens", 0) or 0)
     out_tok = float(usage.get("output_tokens", 0) or 0)
-    return (in_tok * input_price + out_tok * output_price) / 1_000_000
+    # K6: OpenAI-compatible usage often INCLUDES cached tokens inside
+    # input_tokens. Without this, cached turns were billed at full freight
+    # and the 50%/80% budget reminders drifted far ahead of real spend.
+    details = usage.get("input_token_details") or {}
+    cached = float(details.get("cache_read", 0) or
+                   usage.get("cache_read_input_tokens", 0) or 0)
+    cached = min(cached, in_tok)
+    uncached = in_tok - cached
+    return (uncached * input_price
+            + cached * input_price * CACHE_READ_PRICE_FACTOR
+            + out_tok * output_price) / 1_000_000
 
 
 # --- LLM factory ---
@@ -297,6 +327,13 @@ def make_llm(
             "gateway OpenAI-compatible endpoint + key). The engine never "
             "substitutes a model — fail-closed."
         )
+    # F7: normalize the gateway URL — callers variously inject
+    # "http://gw:4000", "http://gw:4000/", or the full "/v1" form. ChatOpenAI
+    # appends "/chat/completions" to whatever it gets, so a bare host misses
+    # LiteLLM's OpenAI routes and a doubled "/v1/v1" 404s just the same.
+    base_url = base_url.rstrip("/")
+    if not base_url.endswith("/v1"):
+        base_url += "/v1"
 
     caps = get_capabilities(model)
     kwargs: dict[str, Any] = {

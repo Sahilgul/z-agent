@@ -177,7 +177,7 @@ class Normalizer:
             )
         kind = _tool_kind(pending["name"])
         title = _tool_title(pending["name"], pending["input"])
-        if kind == StepKind.TEST_RUN or pending["name"] == "Bash" and _looks_like_test(pending["input"]):
+        if kind == StepKind.TEST_RUN or (pending["name"] == "Bash" and _looks_like_test(pending["input"])):
             kind = StepKind.TEST_RUN
         return self._next(
             kind, title,

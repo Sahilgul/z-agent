@@ -45,9 +45,68 @@ from langchain_core.tools import tool
 # --- Configuration (fan-out guards) ---
 
 SPAWN_STAGGER_S = 2.0          # delay between spawns
-SWARM_MAX_SLICES = 8           # hard cap on simultaneous swarm width
-THREAD_TIMEOUT_S = 2 * 60 * 60  # 2h hard cap
+# H3: SWARM_MAX_SLICES is a LOCAL REQUEST-BATCHING HINT only — the
+# authoritative capacity is the backend's global_thread_cap (100), enforced
+# DB-side. The worker no longer decides how much of the fleet a swarm may
+# consume; it only keeps a single spawn REQUEST from being absurdly wide.
+SWARM_MAX_SLICES = 8           # max slices per spawn_swarm REQUEST (batching hint)
+THREAD_TIMEOUT_S = 2 * 60 * 60  # 2h hard cap (enforced backend-side; I3)
 SPAWN_RETRY_BACKOFF = [1, 2, 4]  # shrink/recover retry delays
+
+
+# --- Backend spawn-request channel (C1) ---
+#
+# spawn_agent/spawn_swarm used to be PHANTOM spawns: they registered a local
+# id and returned a success string, but no backend thread ever existed. Now
+# the tools only RECORD the vetted request; the async dispatch path
+# (tools/__init__._call_extra_tool) publishes it to the
+# ``spawn_requests:{run_id}`` stream, and the backend SpawnBridge spawns real
+# threads through ThreadManager (the only capacity/lock/container authority)
+# and reports each child's terminal state back as a spawn_done control
+# message.
+
+_spawn_redis = None
+
+
+async def publish_spawn_requests(spawn_ids: list[str]) -> None:
+    """Publish newly-registered spawn requests to the backend. Best-effort
+    per request: a failed publish marks the spawn vetoed so the registry
+    never claims a thread the backend will never create."""
+    import json as _json
+
+    import redis.asyncio as _redis
+    global _spawn_redis
+    if _spawn_redis is None:
+        _spawn_redis = _redis.from_url(
+            os.environ.get("REDIS_URL", "redis://redis:6379/0"))
+    run_id = os.environ.get("RUN_ID", "")
+    for sid in spawn_ids:
+        sp = _registry.spawns.get(sid)
+        if sp is None or sp["status"] != "requested":
+            continue
+        try:
+            await _spawn_redis.xadd(f"spawn_requests:{run_id}", {
+                "payload": _json.dumps({
+                    "spawn_id": sid,
+                    "run_id": run_id,
+                    "parent_thread_id": sp["parent_thread_id"],
+                    "kind": sp["kind"],
+                    "prompt": sp["prompt"],
+                    "repo": sp.get("repo"),
+                    "context_id": sp["context_id"],
+                }),
+            })
+            sp["status"] = "running"
+        except Exception as exc:
+            sp["status"] = "vetoed"
+            sp["veto_reason"] = f"spawn request publish failed: {exc}"
+            log_spawn_warning(sid, sp["veto_reason"])
+
+
+def log_spawn_warning(spawn_id: str, reason: str) -> None:
+    import logging
+    logging.getLogger(__name__).warning(
+        "spawn %s vetoed: %s", spawn_id, reason)
 
 
 @dataclass
@@ -70,26 +129,34 @@ class SpawnRegistry:
     spawns: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def register(self, spawn_id: str, kind: str, parent_thread_id: str,
-                 context_id: str, prompt: str) -> None:
+                 context_id: str, prompt: str, repo: str | None = None) -> None:
+        # "requested": the backend hasn't spawned anything yet — the async
+        # dispatch path publishes the request and flips it to "running" only
+        # once the SpawnBridge has it. A crash between register and publish
+        # leaves a "requested" entry, which live_count excludes.
         self.spawns[spawn_id] = {
             "kind": kind, "parent_thread_id": parent_thread_id,
-            "context_id": context_id, "prompt": prompt,
-            "started_at": time.time(), "status": "running",
+            "context_id": context_id, "prompt": prompt, "repo": repo,
+            "started_at": time.time(), "status": "requested",
             "watchdog": None,
         }
 
     def drain(self, parent_thread_id: str) -> list[str]:
-        """Cascade drain: stop all spawns under a parent. Returns drained ids."""
+        """Cascade drain: stop all spawns under a parent. Returns drained ids.
+        "requested" entries are drained too — a parent dying before the
+        publish landed must not leak a pending request."""
         drained = []
         for sid, sp in self.spawns.items():
-            if sp["parent_thread_id"] == parent_thread_id and sp["status"] == "running":
+            if (sp["parent_thread_id"] == parent_thread_id
+                    and sp["status"] in ("running", "requested")):
                 sp["status"] = "drained"
                 self._cancel_watchdog(sid)
                 drained.append(sid)
         return drained
 
     def live_count(self) -> int:
-        return sum(1 for s in self.spawns.values() if s["status"] == "running")
+        return sum(1 for s in self.spawns.values()
+                   if s["status"] in ("running", "requested"))
 
     def is_saturated(self, cap: int = SWARM_MAX_SLICES) -> bool:
         return self.live_count() >= cap
@@ -142,7 +209,7 @@ def reset_registry() -> None:
     watchdog of the outgoing registry before replacing it, or the 2h
     hard-cap tasks leak across runs and fire against the wrong spawn ids."""
     global _registry
-    for sid, sp in list(_registry.spawns.items()):
+    for sid, _sp in list(_registry.spawns.items()):
         _registry._cancel_watchdog(sid)
     _registry = SpawnRegistry()
 
@@ -204,10 +271,14 @@ def spawn_agent(prompt: str, repo: str | None = None) -> str:
         return f"error: spawn vetoed — {reason}"
     spawn_id = str(uuid.uuid4())
     context_id = f"{_current_thread_id()}::worker-{spawn_id[:8]}"
-    _registry.register(spawn_id, "agent", _current_thread_id(), context_id, prompt)
-    # The actual spawn is async; the tool returns the spawn handle for the feed.
-    return (f"spawned agent {spawn_id} (context={context_id}). "
-            f"2h timeout; cascade-drained if parent stops.")
+    _registry.register(spawn_id, "agent", _current_thread_id(), context_id, prompt,
+                       repo=repo)
+    # The actual spawn is a BACKEND thread (C1): this tool only records the
+    # vetted request; the async dispatcher publishes it to the SpawnBridge,
+    # which spawns the real container and reports spawn_done on termination.
+    return (f"spawn requested: agent {spawn_id} (context={context_id}). "
+            f"The backend spawns the thread; 2h timeout; "
+            f"cascade-drained if parent stops.")
 
 
 # --- spawn_swarm tool ---
@@ -230,10 +301,11 @@ def spawn_swarm(slices: list[dict[str, str]], rationale: str = "") -> str:
     for i, s in enumerate(slices):
         sid = str(uuid.uuid4())
         context_id = f"{_current_thread_id()}::swarm-{i}-{sid[:8]}"
-        _registry.register(sid, "swarm", _current_thread_id(), context_id, s.get("prompt", ""))
+        _registry.register(sid, "swarm", _current_thread_id(), context_id,
+                           s.get("prompt", ""), repo=s.get("repo") or None)
         spawn_ids.append(sid)
-    return (f"spawned swarm of {len(spawn_ids)} threads (staggered 2s, 2h timeout, "
-            f"one-approval batch). ids: {', '.join(spawn_ids)}")
+    return (f"swarm of {len(spawn_ids)} threads requested (backend-orchestrated, "
+            f"2h timeout, one-approval batch). ids: {', '.join(spawn_ids)}")
 
 
 # M-14: the current thread id is per-coroutine state, not a process-wide env
@@ -268,10 +340,11 @@ def hydrate_orientation(agents_md: str | None, prompt: str) -> str:
 # --- Timeout watchdog ---
 
 async def enforce_timeout(spawn_id: str, timeout_s: float = THREAD_TIMEOUT_S) -> str:
-    """The 2h hard cap. A spawn exceeding it is drained."""
+    """The 2h hard cap (LOCAL backstop — the authoritative timeout is the
+    backend SpawnBridge's, which kills the real container; I3)."""
     await asyncio.sleep(timeout_s)
     sp = _registry.spawns.get(spawn_id)
-    if sp and sp["status"] == "running":
+    if sp and sp["status"] in ("running", "requested"):
         sp["status"] = "timed_out"
         return f"drained {spawn_id} (2h timeout exceeded)"
     return f"{spawn_id} already finished"
@@ -286,6 +359,7 @@ __all__ = [
     "enforce_timeout",
     "get_registry",
     "hydrate_orientation",
+    "publish_spawn_requests",
     "reset_registry",
     "spawn_agent",
     "spawn_swarm",

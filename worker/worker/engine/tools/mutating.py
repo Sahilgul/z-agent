@@ -52,6 +52,28 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """K1: atomic file write — temp file in the SAME directory, fsync, then
+    os.replace. A kill/crash mid-write used to leave a half-written file on
+    disk; on resume the checkpoint replays the tools node and the agent sees
+    corrupt content. os.replace is atomic on POSIX, so a reader (or a
+    replayed tools node) only ever sees the old or the new content."""
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 # --- file_edit ---
 
 @tool
@@ -92,7 +114,7 @@ def file_edit(file_path: str, old_string: str, new_string: str,
 
     new_content = current.replace(old_string, new_string, 1)
     try:
-        p.write_text(new_content, encoding="utf-8")
+        _atomic_write_text(p, new_content)
     except OSError as exc:
         return f"error: write failed: {exc}"
     return (f"edited {file_path} ({len(old_string)} -> {len(new_string)} chars). "
@@ -132,7 +154,7 @@ def file_write(file_path: str, content: str, expected_hash: str | None = None) -
             return f"error: {file_path} does not exist — cannot overwrite a non-existent file"
 
     try:
-        p.write_text(content, encoding="utf-8")
+        _atomic_write_text(p, content)
     except OSError as exc:
         return f"error: write failed: {exc}"
     # Diagnostics hook: ERROR-only, bounded, never fails the write.
@@ -199,7 +221,7 @@ async def terminal_exec_async(args: dict[str, Any]) -> dict[str, Any]:
             background=bool(args.get("background", False)),
             watch_regex=args.get("watch_regex"),
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: {exc}",
                 "tool": "terminal_exec", "args": args}
 
@@ -235,7 +257,7 @@ async def call_mutating_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "tool": name,
             "args": args,
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
 
 

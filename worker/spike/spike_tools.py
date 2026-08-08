@@ -39,7 +39,7 @@ def file_read(file_path: str, offset: int = 1, limit: int = 2000) -> str:
         return f"error: path is a directory: {file_path}"
     try:
         raw = p.read_text(encoding="utf-8", errors="replace")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"error: read failed: {exc}"
     lines = raw.splitlines()
     total = len(lines)
@@ -106,7 +106,7 @@ def bash(command: str) -> str:
         )
     except subprocess.TimeoutExpired:
         return f"error: command timed out after {_BASH_TIMEOUT_S}s\n$ {command}"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"error: exec failed: {exc}"
     out = (proc.stdout or "") + (proc.stderr or "")
     truncated = ""
@@ -148,7 +148,7 @@ async def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         result = await asyncio.to_thread(fn.invoke, args)
         is_err = isinstance(result, str) and result.startswith("error:")
         return {"kind": "error" if is_err else "success", "ok": not is_err, "output": result}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"tool exception: {exc}"}
 
 

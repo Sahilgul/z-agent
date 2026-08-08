@@ -239,7 +239,8 @@ async def call_any_tool(name: str, args: dict[str, Any],
     return {"kind": "error", "ok": False, "output": f"unknown tool: {name}"}
 
 
-async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
+async def call_tool_direct(name: str, args: dict[str, Any],
+                           mode: str = "development") -> dict[str, Any]:
     """Dispatch WITHOUT the approval gate — the graph's gate node has already
     decided. Mutating tools execute with the gate's verbatim args.
     mcp__* routes to the MCP manager (per-server isolation); the
@@ -250,8 +251,10 @@ async def call_tool_direct(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return await mcp_manager().call(name, args)
     if name == "tool_search":
         from worker.engine.tools.discovery import tool_search_async
-        return await tool_search_async(args, mode="development",
-                                       bound=default_tool_names("development"))
+        # K11: mode is threaded from the caller — hardcoding "development"
+        # here let an ask-mode spawn path discover mutating tools.
+        return await tool_search_async(args, mode=mode,
+                                       bound=default_tool_names(mode))
     from worker.engine.tools.extended import EXTENDED_TOOL_BY_NAME, call_extended_tool
     if name in EXTENDED_TOOL_BY_NAME:
         return await call_extended_tool(name, args)
@@ -307,10 +310,16 @@ async def _call_extra_tool(t: Any, name: str, args: dict[str, Any]) -> dict[str,
         if is_spawn and not is_error:
             from worker.engine import fanout
             new_ids = set(fanout.get_registry().spawns.keys()) - before
+            # C1: publish the vetted spawn requests to the backend SpawnBridge
+            # FIRST (it owns real thread creation), then arm the local 2h
+            # watchdog as a backstop. A publish failure vetoes the spawn (the
+            # registry entry flips to "vetoed") instead of pretending.
+            if new_ids:
+                await fanout.publish_spawn_requests(sorted(new_ids))
             for sid in new_ids:
                 fanout.get_registry().arm_watchdog(sid, loop)
         return out
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"kind": "error", "ok": False, "output": f"error: {exc}", "tool": name, "args": args}
 
 

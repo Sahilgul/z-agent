@@ -24,7 +24,7 @@ from langgraph.types import Command, interrupt
 try:
     from langgraph.errors import GraphInterrupt
 except ImportError:  # older langgraph
-    GraphInterrupt = type(None)  # noqa: N816 — sentinel; never raised/matched
+    GraphInterrupt = type(None)
 
 from spike.agent_loop import SYSTEM_PROMPT, AgentRecorder, make_llm
 from spike.checks import NUDGE_CANARY, NUDGE_TEXT, SOAK_PROMPT, stamp_workspace
@@ -71,7 +71,7 @@ async def _agent_node(state: State, config: dict[str, Any]) -> dict[str, Any]:
             # only the last delta, which has no content and no tool_calls, so
             # the tools node never ran and the interrupt was never exercised.
             ai_message = msg if ai_message is None else ai_message + msg
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         recorder.record_turn(None, is_error=True)
         recorder.events.append({"kind": "error", "error": str(exc)})
         # Do NOT return {"messages": []} — the replace reducer would wipe the
@@ -172,7 +172,7 @@ async def run_interrupt_check(golden: Any, model: str, results_dir: Any) -> dict
     except GraphInterrupt:
         # The interrupt surfaces as a GraphInterrupt in some versions; resume below.
         recorder.events.append({"kind": "interrupt_exception", "error": "GraphInterrupt"})
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # M-22: a REAL error (tool crash, graph bug) used to be swallowed here
         # as "interrupt_exception" and then the code RESUMED a graph that was
         # never interrupted — a no-op that masked the failure as a passing
@@ -190,7 +190,7 @@ async def run_interrupt_check(golden: Any, model: str, results_dir: Any) -> dict
     # Resume with the nudge (the canary is appended inside _agent_node).
     try:
         await graph.ainvoke(Command(resume="Steering nudge incoming."), config=config)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         recorder.events.append({"kind": "resume_exception", "error": str(exc)})
 
     summary = recorder.finish()

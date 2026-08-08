@@ -30,7 +30,6 @@ approval + clarify transport, so it must survive container replacement.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -38,11 +37,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from collegium_contracts import StepEvent, StepKind, TypingDelta
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, StateGraph
 from langgraph.types import interrupt
-from collegium_contracts import StepEvent, StepKind, TypingDelta
 
 from worker.engine.compaction import Compactor
 from worker.engine.events import EventEmitter
@@ -59,12 +58,17 @@ from worker.engine.goal_mode import (
     needs_clarification,
     stage_of,
 )
-from worker.engine.llm import estimate_cost, make_llm, with_gateway_retry, with_gateway_retry_aiter
+from worker.engine.llm import (
+    estimate_cost,
+    make_llm,
+    with_gateway_retry_aiter,
+)
 from worker.engine.metrics import get_registry
 from worker.engine.permissions import Effect
 from worker.engine.permissions import evaluate as perms_evaluate
 from worker.engine.state import Budget, EngineState, Mode, tag_message
 from worker.engine.tools import call_tool_direct, needs_approval, tools_for_mode
+from worker.engine.tools.mutating import is_destructive_command
 from worker.engine.watchdogs import CriticRubric
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -88,9 +92,46 @@ def _read_prompt(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+_SYSTEM_PROMPT_CACHE: str | None = None
+
+
+def _system_prompt_text() -> str:
+    """K4: read ONCE per process and freeze. Re-reading system_prompt.md from
+    disk every turn silently changed the agent's constitution mid-run AND
+    broke the cache prefix (cache-prefix drift) whenever the file was edited
+    between turns. A missing file is fail-LOUD — the old empty-string
+    fallback shipped an agent with no constitution and no log line."""
+    global _SYSTEM_PROMPT_CACHE
+    if _SYSTEM_PROMPT_CACHE is None:
+        path = PROMPTS_DIR / "system_prompt.md"
+        if not path.exists():
+            raise RuntimeError(
+                f"system prompt missing: {path} — refusing to boot an agent "
+                "with no constitution")
+        _SYSTEM_PROMPT_CACHE = path.read_text(encoding="utf-8")
+        if not _SYSTEM_PROMPT_CACHE.strip():
+            raise RuntimeError(f"system prompt empty: {path}")
+    return _SYSTEM_PROMPT_CACHE
+
+
+def _skills_block() -> str:
+    """K7: system_prompt.md promises 'the skills available to this thread are
+    listed at the end of this system prompt' — that list was never injected
+    (dangling pointer). Append the playbook roster so the promise is true."""
+    try:
+        from worker.engine.tools.discovery import skills_roster_fragment
+        fragment = skills_roster_fragment().strip()
+    except Exception:
+        fragment = ""
+    if not fragment:
+        return ""
+    return f"\n\n## Skills\n\n{fragment}\n"
+
+
 def _build_system_message() -> SystemMessage:
-    """system_prompt.md, verbatim — ONE system message per turn."""
-    msg = SystemMessage(content=_read_prompt("system_prompt.md"))
+    """system_prompt.md, verbatim + skills roster — ONE system message per
+    turn, frozen at first read (K4)."""
+    msg = SystemMessage(content=_system_prompt_text() + _skills_block())
     return tag_message(msg, "system")  # type: ignore[arg-type]
 
 
@@ -230,10 +271,10 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     mode = _mode_of(state)
     llm = make_llm(model, streaming=True, tools=_bound_tools(state, mode))
     system = _build_system_message()
-    messages = [system] + state.get("messages", [])
+    messages = [system, *state.get("messages", [])]
     envelope = _build_turn_envelope(state, config)
     if envelope is not None:
-        messages = messages + [envelope]
+        messages = [*messages, envelope]
 
     ai_message: AIMessage | None = None
     metrics = get_registry(config)
@@ -260,7 +301,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
                 # (real SSE streams end with a usage-only chunk). The scripted
                 # LLM in tests yields one chunk per call, which masked this.
                 ai_message = chunk if ai_message is None else ai_message + chunk
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         err = str(exc)
         # Context-length overflow -> force one compaction and retry the turn
         # (force-compaction path; the retry cap stops an infinite loop).
@@ -279,6 +320,18 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     if metrics:
         metrics.observe("llm_call_latency_s", time.monotonic() - llm_started)
         metrics.increment("turns")
+        # K5: cache-hit metrics in the engine (previously spike-only). Track
+        # cached-token reads per turn so prompt-cache efficacy is observable
+        # and prefix drift (which shows as a cache-hit-rate drop) is
+        # detectable.
+        _usage_now = getattr(ai_message, "usage_metadata", None) or {}
+        _details = _usage_now.get("input_token_details") or {}
+        _cached = float(_details.get("cache_read", 0) or
+                        _usage_now.get("cache_read_input_tokens", 0) or 0)
+        if _cached:
+            metrics.increment("cache_read_input_tokens", _cached)
+        if _usage_now.get("input_tokens"):
+            metrics.increment("input_tokens", float(_usage_now["input_tokens"]))
 
     events = emitter.from_assistant(ai_message, task_id)
     await _publish_events(config, events)
@@ -287,7 +340,7 @@ async def agent_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     # remains the hard cap, this drives the 50%/80% reminders.
     usage = getattr(ai_message, "usage_metadata", None)
     out: dict[str, Any] = {
-        "messages": state.get("messages", []) + [ai_message],
+        "messages": [*state.get("messages", []), ai_message],
         "turn_count": state.get("turn_count", 0) + 1,
         "compaction_retries": 0,  # a healthy turn resets the overflow-retry loop guard
         "last_usage": dict(usage) if usage else None,
@@ -355,10 +408,14 @@ def _aiter(llm: Any, messages: list) -> Any:
 
 def _delta(state: EngineState, content: Any, *, kind: StepKind = StepKind.MESSAGE) -> TypingDelta:
     text = content if isinstance(content, str) else str(content)
+    # D5: deltas stream LIVE over pub/sub — redact with the same parity as
+    # StepEvents or a secret the model echoes streams unredacted to every
+    # subscriber even though the durable event is clean.
+    from worker.engine.security import redact
     return TypingDelta(
         run_id=state["run_id"], thread_id=state["thread_id"],
         context_id=state.get("context_id", state["thread_id"]),
-        kind=kind, text=text,
+        kind=kind, text=redact(text),
     )
 
 
@@ -450,7 +507,14 @@ async def approval_gate_node(state: EngineState, config: RunnableConfig) -> dict
             approved[tc_id] = {"approved": True, "via": verdict, "args": exec_args}
             denial_streak = 0
             if verdict == "always_allow" and broker is not None:
-                await broker.persist_always_allow(name)
+                # G4: re-verify at the gate, not just in the card payload —
+                # a crafted always_allow decision for a DESTRUCTIVE command
+                # must not persist the tool class into the run-wide set.
+                destructive = (name == "terminal_exec"
+                               and is_destructive_command(
+                                   str(exec_args.get("command", ""))))
+                if not destructive:
+                    await broker.persist_always_allow(name)
         else:
             approved[tc_id] = {"approved": False, "reason": decision.get("reason", "denied by user")}
             denial_streak += 1
@@ -581,13 +645,27 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
             # Execute with the VERBATIM args recorded at the gate
             # (edit-and-resend args land here via decision["args"]).
             exec_args = (decision or {}).get("args", args)
-            started = time.monotonic()
-            result = await call_tool_direct(name, exec_args)
-            if metrics:
-                metrics.observe("tool_call_latency_s", time.monotonic() - started)
-                metrics.increment("tool_calls_total")
-                if not result["ok"]:
-                    metrics.increment("tool_calls_failed")
+            # K1: replay guard — a crash mid-tools-node resumes the graph and
+            # re-executes pending calls with the SAME tool_call_id. Mutating
+            # tools consult the durable journal first; a hit returns the
+            # recorded result instead of double-executing the side effect.
+            journal = config["configurable"].get("replay_journal")
+            replayed = None
+            if journal is not None and name in ("file_edit", "file_write", "terminal_exec"):
+                replayed = journal.lookup(tc_id)
+            if replayed is not None:
+                result = {**replayed, "replayed": True}
+            else:
+                started = time.monotonic()
+                result = await call_tool_direct(name, exec_args, mode=_mode_of(state))
+                if metrics:
+                    metrics.observe("tool_call_latency_s", time.monotonic() - started)
+                    metrics.increment("tool_calls_total")
+                    if not result["ok"]:
+                        metrics.increment("tool_calls_failed")
+                if journal is not None and name in ("file_edit", "file_write", "terminal_exec"):
+                    journal.record(tc_id, name,
+                                   {k: v for k, v in result.items() if k != "replayed"})
 
         # knowledge_draft: stage the draft (scope=user lands directly;
         # repo|global staged for the human-gated approve path).
@@ -627,9 +705,15 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
         # the tools_node emits the result event directly. Pop the staged entry
         # here so the dict can't grow unbounded across a long run.
         emitter._pending_tools.pop(tc_id, None)
-        new_messages.append(tag_message(ToolMessage(
+        tool_msg = ToolMessage(
             content=result["output"], tool_call_id=tc_id, name=name,
-        ), "tool"))  # type: ignore[arg-type]
+        )
+        # K17: carry the STRUCTURED exit code on the message so verification
+        # evidence doesn't depend on string-matching "[exit 0]" in output.
+        details = result.get("details") or {}
+        if "exit_code" in details:
+            tool_msg.additional_kwargs["exit_code"] = details["exit_code"]
+        new_messages.append(tag_message(tool_msg, "tool"))  # type: ignore[arg-type]
 
         # ask_user pauses the pipeline (goal-mode clarify = INPUT_REQUIRED).
         if name == "ask_user" and result["ok"]:
@@ -663,7 +747,9 @@ async def tools_node(state: EngineState, config: RunnableConfig) -> dict[str, An
     # notifications that should wait for a real turn.
     if denied_count < len(tool_calls):
         from worker.engine.tools.background import terminal_manager
-        for note in terminal_manager().completed_notifications():
+        # K2: drain only THIS thread's completion notifications.
+        for note in terminal_manager().completed_notifications(
+                thread_id=state.get("thread_id")):
             new_messages.append(tag_message(HumanMessage(
                 content=f"[background terminal] {note}"), "nudge"))  # type: ignore[arg-type]
 
@@ -951,7 +1037,8 @@ async def _critic_block(state: EngineState, config: RunnableConfig, emitter: Eve
         out["goal_artifact"] = nxt
         out["stage_envelope"] = nxt["stage"]
     # The finding rides as a nudge so the agent revises with full context.
-    nudged = list(state.get("messages", [])) + [
+    nudged = [
+        *state.get("messages", []),
         tag_message(HumanMessage(content=f"<critic-finding>\n{reason}\n</critic-finding>"), "nudge"),  # type: ignore[arg-type]
     ]
     out["messages"] = nudged
@@ -1013,14 +1100,21 @@ def _clarify_answered(state: EngineState) -> bool:
 
 
 def _extract_evidence(state: EngineState) -> dict[str, Any]:
-    """Heuristic verify evidence: the most recent test-looking
-    terminal_exec result decides tests_pass. The story->PR fixture hardens
-    this into the real evidence contract."""
+    """Verify evidence from the most recent test-looking terminal_exec result.
+    K17: the STRUCTURED exit_code (stamped from the tool result's details at
+    execution time) decides tests_pass; the legacy "[exit 0]" string match is
+    the fallback for messages that predate the stamp."""
     messages = state.get("messages", [])
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage) and msg.name == "terminal_exec":
             content = str(msg.content)
             if any(t in content for t in ("pytest", "PASSED", "FAILED", "tests passed", "npm test", "vitest")):
+                exit_code = (msg.additional_kwargs or {}).get("exit_code")
+                if exit_code is not None:
+                    if exit_code == 0:
+                        return {"tests_pass": True}
+                    return {"tests_pass": False,
+                            "detail": f"exit {exit_code}: {content[-400:]}"}
                 if "[exit 0]" in content:
                     return {"tests_pass": True}
                 return {"tests_pass": False, "detail": content[-500:]}

@@ -80,7 +80,7 @@ class MCPManager:
                 st.tools = {f"mcp__{name}__{getattr(t, 'name', str(t))}": t for t in tools}
                 return {"kind": "success", "ok": True, "tools": sorted(st.tools),
                         "attempts": attempt + 1}
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = str(exc)
                 # M-19: a dead MCP subprocess leaves a stale cached client
                 # here; every retry reused it -> permanent outage (the
@@ -91,7 +91,7 @@ class MCPManager:
                     st.needs_auth = True
                     try:
                         await self._lazy_auth(name, cfg)
-                    except Exception as auth_exc:  # noqa: BLE001
+                    except Exception as auth_exc:
                         # A failing auth hook must not escape the retry loop
                         # and crash the whole batch refresh — the contract is
                         # "one server's failure never fails the batch".
@@ -159,7 +159,7 @@ class MCPManager:
             return {"kind": "success", "ok": True,
                     "output": wrap_untrusted(str(result), source=f"mcp__{server}"),
                     "tool": exposed_name, "args": args}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return {"kind": "error", "ok": False, "output": f"error: {exc}",
                     "tool": exposed_name, "args": args}
 
@@ -174,14 +174,28 @@ def _is_auth_error(exc: Exception) -> bool:
 
 
 def _servers_from_env() -> list[dict[str, Any]]:
+    servers: list[dict[str, Any]] = []
     raw = os.environ.get("MCP_SERVERS", "").strip()
-    if not raw:
-        return []
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                servers.extend(parsed)
+        except json.JSONDecodeError:
+            pass
+    # C7: the backend stamps a .mcp.json into UI-repo workspaces (Playwright
+    # MCP opt-in). The legacy SDK read it at session start; the custom engine
+    # must load it explicitly or the stamped config is a dead stub.
+    mcp_json = os.path.join(os.environ.get("WORKSPACE_DIR", "/workspace"), ".mcp.json")
     try:
-        servers = json.loads(raw)
-        return servers if isinstance(servers, list) else []
-    except json.JSONDecodeError:
-        return []
+        with open(mcp_json, encoding="utf-8") as f:
+            stamped = json.load(f)
+        for name, cfg in (stamped.get("mcpServers") or {}).items():
+            if isinstance(cfg, dict) and not any(s.get("name") == name for s in servers):
+                servers.append({"name": name, "transport": "stdio", **cfg})
+    except (OSError, json.JSONDecodeError):
+        pass
+    return servers
 
 
 _MANAGER: MCPManager | None = None

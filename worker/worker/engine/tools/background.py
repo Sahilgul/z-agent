@@ -37,11 +37,25 @@ def _jobs_dir() -> Path:
     return d
 
 
+def _pids_dir() -> Path:
+    # K15: one file per live background job, containing the process-group
+    # leader's pid. A worker that is SIGKILLed never runs its cleanup — the
+    # pid file survives on the workspace volume, and the NEXT worker to boot
+    # in this workspace reaps the orphan at manager construction.
+    d = _jobs_dir() / "pids"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 class BackgroundJob:
     def __init__(self, command: str, workspace: Path, watch_regex: str | None) -> None:
         self.job_id = f"job-{uuid.uuid4().hex[:8]}"
         self.command = command
         self.workspace = workspace
+        # K2: which thread spawned this job — completion notifications are
+        # scoped to it (the manager is process-global; cross-thread drains
+        # cross-consumed notifies under in-process concurrency).
+        self.thread_id: str | None = None
         self.watch_regex = watch_regex
         self.output_file = _jobs_dir() / f"{self.job_id}.out"
         self.ring: deque[str] = deque(maxlen=RING_BUFFER_LINES)
@@ -67,6 +81,38 @@ class TerminalManager:
 
     def __init__(self) -> None:
         self.jobs: dict[str, BackgroundJob] = {}
+        self._reap_orphans()
+
+    def _reap_orphans(self) -> None:
+        """K15: kill process groups left behind by a SIGKILLed predecessor.
+        Own pid files (live jobs of THIS process) are only written after
+        __init__, so every file found here is an orphan by definition."""
+        import glob as _glob
+        for pidfile in _glob.glob(str(_pids_dir() / "*.pid")):
+            try:
+                pid = int(Path(pidfile).read_text().strip())
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except (ValueError, OSError, ProcessLookupError, PermissionError):
+                pass
+            try:
+                Path(pidfile).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _write_pid(job: BackgroundJob) -> None:
+        if job._proc is not None:
+            try:
+                (_pids_dir() / f"{job.job_id}.pid").write_text(str(job._proc.pid))
+            except OSError:
+                pass
+
+    @staticmethod
+    def _clear_pid(job: BackgroundJob) -> None:
+        try:
+            (_pids_dir() / f"{job.job_id}.pid").unlink(missing_ok=True)
+        except OSError:
+            pass
 
     async def run(self, command: str, *, background: bool = False,
                   watch_regex: str | None = None,
@@ -87,6 +133,12 @@ class TerminalManager:
                     "details": {"background": False}}
         job = BackgroundJob(command, workspace, watch_regex)
         job._watch = watch  # type: ignore[attr-defined]
+        # K2: stamp the spawning thread when one is in scope.
+        try:
+            from worker.engine.fanout import _current_thread_id
+            job.thread_id = _current_thread_id()
+        except Exception:
+            job.thread_id = None
         self.jobs[job.job_id] = job
         job._proc = await asyncio.create_subprocess_shell(
             command,
@@ -96,6 +148,7 @@ class TerminalManager:
             cwd=str(workspace),
             start_new_session=True,  # own process group -> killProcessTree
         )
+        self._write_pid(job)  # K15: orphan-reap marker for a SIGKILLed worker
         reader = asyncio.create_task(self._pump(job))
 
         if not background:
@@ -123,7 +176,7 @@ class TerminalManager:
         reader.cancel()
         try:
             await reader
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        except (asyncio.CancelledError, Exception):
             # The pump owns job completion (exit_code/ended are always set in
             # its finally); a pump error must surface as a typed result, not
             # propagate out of run() leaving the job looking alive.
@@ -161,7 +214,7 @@ class TerminalManager:
                     pass
             job.exit_code = job.exit_code if job.exit_code is not None else -1
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # The pump owns the job's terminal state. ANY failure here (file
             # I/O, reap error) must end the job with a verdict — never leave
             # it "running" forever with the exception lost to the void.
@@ -170,8 +223,9 @@ class TerminalManager:
             job.watch_hits.append(f"pump error: {exc}")
         finally:
             job.ended = time.monotonic()
+            self._clear_pid(job)  # K15: job ended cleanly — no orphan to reap
 
-    async def _pump_loop(self, job: BackgroundJob, watch: "re.Pattern[str] | None",
+    async def _pump_loop(self, job: BackgroundJob, watch: re.Pattern[str] | None,
                          loop: asyncio.AbstractEventLoop, deadline: float) -> None:
         with job.output_file.open("ab") as fh:
             while True:
@@ -244,10 +298,14 @@ class TerminalManager:
         job.killed_by = job.killed_by or reason
         return True
 
-    def completed_notifications(self) -> list[str]:
-        """Turn-end completion notifies (consumed once per turn)."""
+    def completed_notifications(self, thread_id: str | None = None) -> list[str]:
+        """Turn-end completion notifies (consumed once per turn). With
+        thread_id given, only THAT thread's jobs notify — a turn of thread A
+        must not drain thread B's completion card."""
         notes = []
         for job in self.jobs.values():
+            if thread_id is not None and job.thread_id not in (None, thread_id):
+                continue
             if not job.running and not getattr(job, "_notified", False):
                 job._notified = True  # type: ignore[attr-defined]
                 status = f"exit {job.exit_code}"
@@ -255,6 +313,8 @@ class TerminalManager:
                     status += f" (killed: {job.killed_by})"
                 notes.append(f"background job {job.job_id} finished: {status} — {job.command[:80]}")
         for job in self.jobs.values():
+            if thread_id is not None and job.thread_id not in (None, thread_id):
+                continue
             while job.watch_hits:
                 notes.append(f"background job {job.job_id} watch matched: {job.watch_hits.pop(0)}")
         return notes
@@ -286,7 +346,7 @@ class TerminalManager:
             keep_tail = tail - head
             omitted = len(lines) - tail  # always >= 0: we only truncate when len > tail
             body = "\n".join(
-                lines[:head] + [f"... {omitted} lines omitted ..."] + lines[-keep_tail:]
+                [*lines[:head], f"... {omitted} lines omitted ...", *lines[-keep_tail:]]
             )
         else:
             body = "\n".join(lines)

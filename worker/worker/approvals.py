@@ -47,12 +47,18 @@ class ApprovalBridge:
         # fail it. Assert the type directly.
         assert isinstance(context, ToolPermissionContext)
 
-        if tool_name in AUTO_ALLOW_TOOLS or tool_name in self.always_allowed:
-            return PermissionResultAllow(updated_input=tool_input)
-        members = await self.redis.smembers(f"always_allow:{self.run_id}")
-        if tool_name in set(members):
-            self.always_allowed.add(tool_name)
-            return PermissionResultAllow(updated_input=tool_input)
+        # G4: destructive commands bypass EVERY always-allow fast path —
+        # they must surface a card every time (engine-gate parity).
+        from worker.engine.tools.mutating import is_destructive_command
+        destructive = (tool_name == "terminal_exec"
+                       and is_destructive_command(str(tool_input.get("command", ""))))
+        if not destructive:
+            if tool_name in AUTO_ALLOW_TOOLS or tool_name in self.always_allowed:
+                return PermissionResultAllow(updated_input=tool_input)
+            members = await self.redis.smembers(f"always_allow:{self.run_id}")
+            if tool_name in set(members):
+                self.always_allowed.add(tool_name)
+                return PermissionResultAllow(updated_input=tool_input)
 
         approval_id = str(uuid.uuid4())
         try:
@@ -68,12 +74,23 @@ class ApprovalBridge:
             # must not crash the can_use_tool callback into the SDK either.
             return PermissionResultDeny(message="approval channel error — denied deterministically")
         decision_key = f"approval:{approval_id}:decision"
+        # G2: read the durable decision copy first — the BLPOP below is
+        # destructive and a crash after pop used to lose the decision.
         try:
-            result = await self.redis.blpop(decision_key, timeout=self.timeout_seconds)
+            durable = await self.redis.get(f"approval:{approval_id}:decision_value")
         except redis.RedisError:
-            # A dropped connection must not crash the can_use_tool callback
-            # into the SDK — deterministic deny, same contract as timeout.
-            return PermissionResultDeny(message="approval channel error — denied deterministically")
+            durable = None
+        if durable is not None:
+            result = (None, durable)
+        else:
+            result = None
+        if result is None:
+            try:
+                result = await self.redis.blpop(decision_key, timeout=self.timeout_seconds)
+            except redis.RedisError:
+                # A dropped connection must not crash the can_use_tool callback
+                # into the SDK — deterministic deny, same contract as timeout.
+                return PermissionResultDeny(message="approval channel error — denied deterministically")
         if result is None:
             if DENY_ON_TIMEOUT:
                 return PermissionResultDeny(message="approval timed out — denied deterministically")
@@ -87,8 +104,19 @@ class ApprovalBridge:
         if not isinstance(decision, dict):
             return PermissionResultDeny(message="malformed decision payload — denied")
         if decision.get("decision") == "always_allow":
-            self.always_allowed.add(tool_name)
-            await self.redis.sadd(f"always_allow:{self.run_id}", tool_name)
+            # G4: destructive re-verify parity with the engine gate — a
+            # crafted always_allow for a destructive command honors the ALLOW
+            # for this call only; it never whitelists the tool class.
+            from worker.engine.tools.mutating import is_destructive_command
+            destructive = (tool_name == "terminal_exec"
+                           and is_destructive_command(
+                               str(tool_input.get("command", ""))))
+            if not destructive:
+                self.always_allowed.add(tool_name)
+                await self.redis.sadd(f"always_allow:{self.run_id}", tool_name)
+                # G3: bound the set's lifetime (was: forever until eviction).
+                await self.redis.expire(f"always_allow:{self.run_id}",
+                                        7 * 24 * 3600)
             return PermissionResultAllow(updated_input=tool_input)
         if decision.get("decision") in ("allow", "allow_once"):
             return PermissionResultAllow(updated_input=tool_input)

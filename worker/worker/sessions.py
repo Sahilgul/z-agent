@@ -11,6 +11,11 @@ Start the client with resume=<new_uuid>; the original attempt is preserved as a
 sibling branch.
 """
 
+# NOTE (K16, Wave 4 audit): LEGACY SDK-runtime only — no importers in the
+# default ENGINE=custom path. Retained for the flag-gated SDK fallback; do not
+# extend.
+
+
 from __future__ import annotations
 
 import asyncio

@@ -17,9 +17,10 @@ import redis.asyncio as redis
 
 @dataclass
 class ControlMessage:
-    type: str  # interrupt | nudge | mode | kill
+    type: str  # interrupt | nudge | mode | kill | spawn_done
     text: str = ""
     mode: str = ""
+    id: str = ""  # backend-assigned id; critical controls are acked by id
 
 
 class ControlListener:
@@ -27,6 +28,11 @@ class ControlListener:
         self.redis = redis.from_url(redis_url, decode_responses=True)
         self.channel = f"thread:{thread_id}:control"
         self.queue: asyncio.Queue[ControlMessage] = asyncio.Queue()
+        # Set once the FIRST subscribe lands. The runner awaits this before
+        # its first heartbeat, so the backend's readiness probe (the
+        # heartbeat key) can never precede the control subscription — a
+        # nudge/kill sent in that window used to fall on the floor (C10).
+        self.subscribed = asyncio.Event()
 
     async def listen(self) -> None:
         """Subscribe and feed the queue — forever, across reconnects.
@@ -42,6 +48,7 @@ class ControlListener:
             pubsub = self.redis.pubsub()
             try:
                 await pubsub.subscribe(self.channel)
+                self.subscribed.set()
                 async for raw in pubsub.listen():
                     if raw.get("type") != "message":
                         continue
@@ -51,6 +58,7 @@ class ControlListener:
                             type=data.get("type", ""),
                             text=data.get("text", ""),
                             mode=data.get("mode", ""),
+                            id=data.get("id", ""),
                         ))
                         backoff = 0.5  # healthy message flow resets the backoff
                     except (json.JSONDecodeError, TypeError):

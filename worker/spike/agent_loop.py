@@ -203,7 +203,7 @@ async def run_agent_loop(
                 # never execute a tool against a real streaming gateway.
                 # Accumulate the chunks into the complete message.
                 ai_message = msg if ai_message is None else ai_message + msg
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             recorder.record_turn(None, is_error=True)
             recorder.events.append({"kind": "error", "error": str(exc)})
             print(f"[spike] stream error on turn {turn}: {exc}")

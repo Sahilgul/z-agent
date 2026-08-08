@@ -44,7 +44,12 @@ from langgraph.types import Command
 
 from worker.control import ControlListener, ControlMessage
 from worker.engine.approvals import ApprovalBroker
-from worker.engine.checkpointer import DeltaChannel, MirroredSaver, open_checkpointer
+from worker.engine.checkpointer import (
+    DeltaChannel,
+    MirroredSaver,
+    ReplayJournal,
+    open_checkpointer,
+)
 from worker.engine.compaction import Compactor, SelfTuningLimit
 from worker.engine.events import EventEmitter
 from worker.engine.graph import build_graph
@@ -98,7 +103,11 @@ class EngineRunner:
 
         self.context_id = self.resume_context_id or self.thread_id
         self.task_id = str(uuid.uuid4())
-        self.emitter = EventEmitter(self.run_id, self.thread_id, self.context_id)
+        # D2: the seq store rides the durable session volume so a replaced
+        # container CONTINUES the thread's seq instead of restarting at 0.
+        self.emitter = EventEmitter(
+            self.run_id, self.thread_id, self.context_id,
+            seq_store=self.mirror_dir / f"{self.thread_id}.seq")
         self.forwarder = Forwarder(self.redis_url, self.run_id, self.thread_id)
         self.broker = ApprovalBroker(
             self.redis_url, self.run_id, self.thread_id, timeout_s=self.approval_timeout_s,
@@ -109,7 +118,11 @@ class EngineRunner:
         # spawn registry so a process reused across runs (or the spike
         # matrix running models sequentially in one process) can't inherit
         # the previous run's live spawns / watchdogs.
-        from worker.engine.fanout import get_registry, reset_registry, set_current_thread_id
+        from worker.engine.fanout import (
+            get_registry,
+            reset_registry,
+            set_current_thread_id,
+        )
         reset_registry()
         self._spawn_registry = get_registry()
         # M-14: scope the spawn registry's parent_thread_id to THIS runner
@@ -123,14 +136,30 @@ class EngineRunner:
         self.last_activity = time.monotonic()
         self._stop = asyncio.Event()
         self._pending_nudges: asyncio.Queue[ControlMessage] = asyncio.Queue()
+        # The in-flight turn (graph invocation incl. any approval wait) runs as
+        # a tracked task so interrupt/kill can wake it: interrupt drains it
+        # briefly, kill cancels immediately. Cancelling the task also cancels
+        # the broker's BLPOP, so a pending approval never wedges a stop (G5).
+        self._turn_task: asyncio.Task | None = None
+        # Bounded graceful drain for interrupt (kill drains 0s). LangGraph
+        # checkpoints at node boundaries, so a cancelled turn resumes safely
+        # from the last checkpoint on the replacement container.
+        self.interrupt_drain_s = float(os.environ.get("INTERRUPT_DRAIN_S", "30"))
 
     # ------------------------------------------------------------ state/config
 
     def _initial_state(self) -> EngineState:
-        user_msg = tag_message(
-            HumanMessage(content=f"Workspace root: {self.workspace}\n\n{self.task_prompt}"),
-            "user",
-        )
+        # C2: PERSONA_PROMPT (persona + playbook + knowledge block, composed
+        # backend-side) is injected as part of the INITIAL USER MESSAGE —
+        # below the frozen system prompt so the byte-stable cache prefix is
+        # untouched. Previously the backend set the env var and the engine
+        # never read it: dead injection.
+        persona = os.environ.get("PERSONA_PROMPT", "").strip()
+        content = ""
+        if persona:
+            content += f"<persona>\n{persona}\n</persona>\n\n"
+        content += f"Workspace root: {self.workspace}\n\n{self.task_prompt}"
+        user_msg = tag_message(HumanMessage(content=content), "user")
         return {
             "run_id": self.run_id,
             "thread_id": self.thread_id,
@@ -174,6 +203,10 @@ class EngineRunner:
                 "delta_sink": _delta_sink,
                 "metrics": self.metrics,
                 "permissions": _permissions_from_env(),
+                # K1: replay guard for non-idempotent tool calls, journaled on
+                # the durable session volume so a replaced container can't
+                # double-execute a crash-interrupted tools node.
+                "replay_journal": ReplayJournal(self.mirror_dir),
             },
             "recursion_limit": 80,
         }
@@ -227,10 +260,10 @@ class EngineRunner:
         await self.forwarder.publish_events([self.emitter.approval_card(payload, self.task_id)])
         try:
             await self.forwarder.publish_approval_request(payload)
-        except Exception as exc:  # noqa: BLE001
-            log.error("approval bridge publish failed; card will time out into a deny",
-                      run_id=self.run_id, approval_id=payload.get("approval_id"),
-                      error=str(exc)[:200])
+        except Exception as exc:
+            log.error("approval bridge publish failed; card will time out into a deny "
+                      "(run=%s approval=%s): %s",
+                      self.run_id, payload.get("approval_id"), str(exc)[:200])
 
     # ---------------------------------------------------------------- turn loop
 
@@ -241,7 +274,6 @@ class EngineRunner:
                 StepKind.STATUS, "canary: read-only thread on the custom engine",
                 {"kind": "warning", "canary": True}, self.task_id, None,
             )])
-        await self.forwarder.heartbeat(self.status)
         episodic = EpisodicMemory(self.mirror_dir / f"{self.thread_id}-episodes.db")
         set_episodic_memory(episodic)
 
@@ -249,6 +281,32 @@ class EngineRunner:
         control_pump = asyncio.create_task(self._control_pump(), name="control-pump")
         heartbeat = asyncio.create_task(self._heartbeat_loop(), name="heartbeat")
         watchdog = asyncio.create_task(self._idle_watchdog(), name="idle-watchdog")
+        # C10: readiness ordering — the first heartbeat (the backend's
+        # readiness probe) must not go out before the control channel is
+        # subscribed, or a kill/nudge sent in that window is lost.
+        try:
+            await asyncio.wait_for(self.control.subscribed.wait(), timeout=10.0)
+        except TimeoutError:
+            log.warning("control subscribe slow; heartbeating anyway (run=%s thread=%s)",
+                        self.run_id, self.thread_id)
+        await self.forwarder.heartbeat(self.status)
+
+        # B1: publish the engine's stable resumable identity UP FRONT, as a
+        # dedicated event — the backend captures thread.session_id from the
+        # detail field, never from a fragile "turn complete" title match.
+        # A first-turn crash used to leave the thread unresumable because
+        # identity only flowed on a successful turn boundary.
+        try:
+            from collegium_contracts import StepKind
+            await self.forwarder.publish_events([self.emitter._next(
+                StepKind.STATUS, "engine identity",
+                {"kind": "engine_identity", "session_id": self.context_id,
+                 "engine": "custom"},
+                self.task_id, None,
+            )])
+        except Exception:
+            log.warning("engine identity publish failed (run=%s thread=%s)",
+                        self.run_id, self.thread_id)
 
         try:
             async with open_checkpointer() as saver:
@@ -269,7 +327,7 @@ class EngineRunner:
 
                 # First turn (or continuation of an in-flight one).
                 if fresh or snap.next:
-                    await self._run_turn(graph, config, pending_input, episodic)
+                    await self._run_turn_guarded(graph, config, pending_input, episodic)
                 elif self.status == "running":
                     # Resumed into an already-completed graph (container
                     # replacement on a finished thread): no turn runs, so
@@ -286,7 +344,7 @@ class EngineRunner:
                     except TimeoutError:
                         continue
                     await self._inject_and_run(graph, config, nudge, episodic)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.status = "failed"
             await self.forwarder.heartbeat(self.status)
             await self._emit_engine_error(str(exc))
@@ -313,17 +371,73 @@ class EngineRunner:
                         {"kind": "cascade_drain", "drained": drained},
                         self.task_id, None,
                     )])
-                except Exception:  # noqa: BLE001
-                    log.warning("cascade-drain event publish failed",
-                                run_id=self.run_id, thread_id=self.thread_id)
+                except Exception:
+                    log.warning("cascade-drain event publish failed (run=%s thread=%s)",
+                                self.run_id, self.thread_id)
             await self.forwarder.close()
             await self.broker.close()
             await self.control.close()
             try:
                 episodic.close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         return 0 if self.status != "failed" else 1
+
+    async def _run_turn_guarded(self, graph: Any, config: dict[str, Any],
+                                input_or_none: Any, episodic: EpisodicMemory) -> None:
+        """Run one turn as a TRACKED task so interrupt/kill can cancel it
+        (waking any pending approval BLPOP — G5). A cancelled turn is a clean
+        stop when _stop is set: the checkpoint holds the last node boundary,
+        so the replacement container resumes from there."""
+        self._turn_task = asyncio.create_task(
+            self._run_turn(graph, config, input_or_none, episodic), name="turn")
+        try:
+            await self._turn_task
+        except asyncio.CancelledError:
+            if self._stop.is_set():
+                log.info("turn cancelled by stop request (run=%s thread=%s)",
+                         self.run_id, self.thread_id)
+                return
+            raise
+        finally:
+            self._turn_task = None
+
+    async def _request_stop(self, drain_s: float) -> None:
+        """Shared interrupt/kill path: flip _stop FIRST (a Redis blip on the
+        heartbeat must not leave the thread unstoppable), drain the in-flight
+        turn for at most drain_s, then cancel it."""
+        self._stop.set()
+        task = self._turn_task
+        if task is not None and not task.done():
+            if drain_s > 0:
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=drain_s)
+                except (TimeoutError, asyncio.CancelledError, Exception):
+                    pass
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+        self.status = "stopped"
+        try:
+            await self.forwarder.heartbeat(self.status)
+        except Exception:
+            pass
+
+    async def _ack(self, msg: ControlMessage) -> None:
+        """K14: ack a critical control so the backend can distinguish
+        delivered-and-handled from lost-in-pubsub. Best-effort — the ack
+        must never delay or fail the stop path."""
+        if not msg.id:
+            return
+        try:
+            await self.forwarder.redis.set(
+                f"thread:{self.thread_id}:ack:{msg.id}", msg.type, ex=300)
+        except Exception:
+            log.warning("control ack publish failed (run=%s thread=%s msg=%s)",
+                        self.run_id, self.thread_id, msg.id)
 
     async def _run_turn(self, graph: Any, config: dict[str, Any], input_or_none: Any,
                         episodic: EpisodicMemory) -> None:
@@ -344,12 +458,13 @@ class EngineRunner:
         await self.forwarder.publish_events([boundary])
         try:
             self._record_episode(episodic, result)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Episodic memory is a best-effort side-effect. A SQLite blip
             # (disk full, locked db) must NEVER retroactively fail a turn
             # that already succeeded.
-            log.warning("episodic record failed — memory side-effect, turn unaffected",
-                        run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
+            log.warning("episodic record failed — memory side-effect, turn unaffected "
+                        "(run=%s thread=%s): %s",
+                        self.run_id, self.thread_id, exc)
 
         if err:
             self.status = "failed"
@@ -385,15 +500,16 @@ class EngineRunner:
                 # the next turn runs under the mode the user switched to.
                 "mode": self.mode,
             }, episodic)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # M-04: a transient error on a nudge (LLM blip, tool timeout) used
             # to propagate out of _inject_and_run into the main loop's except,
             # which marked the whole thread failed and exited — killing the
             # thread and losing the idle-linger so the run could not be nudged
             # again. Fail the TURN only: emit a warning, drop back to idle, and
             # keep the thread alive for the next nudge.
-            log.warning("nudge turn failed — failing turn, keeping thread",
-                        run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
+            log.warning("nudge turn failed — failing turn, keeping thread "
+                        "(run=%s thread=%s): %s",
+                        self.run_id, self.thread_id, exc)
             self.status = "idle"
             await self.forwarder.heartbeat(self.status)
             await self._emit_engine_error(f"turn failed (thread alive): {exc}")
@@ -418,22 +534,42 @@ class EngineRunner:
 
     async def _control_pump(self) -> None:
         """Drain the control channel. Nudges queue for the turn boundary; kill
-        and interrupt act immediately."""
+        and interrupt act immediately (both wake a pending approval wait)."""
         while not self._stop.is_set():
             try:
                 msg: ControlMessage = await self.control.queue.get()
                 self.last_activity = time.monotonic()
                 if msg.type == "kill":
-                    self.status = "stopped"
-                    # Stop FIRST: a Redis blip on the heartbeat must not
-                    # leave the thread unkillable with a dead pump.
-                    self._stop.set()
-                    try:
-                        await self.forwarder.heartbeat(self.status)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    # Kill = immediate: no drain. Cancelling the turn task
+                    # wakes the approval BLPOP (G5) so a replaced worker can
+                    # never execute a late decision.
+                    await self._request_stop(drain_s=0)
+                    await self._ack(msg)
+                    return
+                if msg.type == "interrupt":
+                    # A1: interrupt is a REAL stop path for the custom engine —
+                    # bounded graceful drain, then cancel. Previously only kill
+                    # was handled, so a UI stop depended on the gateway key
+                    # being deleted to make the turn fail.
+                    await self._request_stop(drain_s=self.interrupt_drain_s)
+                    await self._ack(msg)
                     return
                 if msg.type == "nudge":
+                    # C11 (defined behavior): a nudge that arrives while the
+                    # thread is parked on an approval card is QUEUED, not
+                    # injected mid-wait — the human's decision lands first,
+                    # the nudge runs as the next turn. Say so in the stream
+                    # so the queued delivery is visible instead of silent.
+                    if self.status == "input_required":
+                        try:
+                            from collegium_contracts import StepKind
+                            await self.forwarder.publish_events([self.emitter._next(
+                                StepKind.STATUS,
+                                "nudge queued behind pending approval",
+                                {"kind": "nudge_deferred"}, self.task_id, None,
+                            )])
+                        except Exception:
+                            pass
                     await self._pending_nudges.put(msg)
                 elif msg.type == "spawn_done":
                     # The feed signals a spawned subagent/swarm thread finished.
@@ -454,30 +590,47 @@ class EngineRunner:
                             self.task_id, None,
                         )])
                     except ValueError:
-                        pass
+                        # C4: an invalid mode payload must fail LOUDLY — the
+                        # old silent `pass` left backend and worker believing
+                        # different modes with no trace.
+                        log.warning("invalid mode control payload rejected: %s "
+                                    "(run=%s thread=%s)", msg.mode,
+                                    self.run_id, self.thread_id)
+                        try:
+                            from collegium_contracts import StepKind
+                            await self.forwarder.publish_events([self.emitter._next(
+                                StepKind.STATUS,
+                                f"invalid mode ignored: {msg.mode}",
+                                {"kind": "error", "error": "invalid_mode",
+                                 "mode": msg.mode},
+                                self.task_id, None,
+                            )])
+                        except Exception:
+                            pass
                 await self.forwarder.heartbeat(self.status)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Same doctrine as the heartbeat loop (M-06): a Redis blip
                 # must not kill the control pump — without it the thread is
                 # permanently unresponsive to kill/nudge/mode/spawn_done.
-                log.warning("control pump iteration failed — continuing",
-                            run_id=self.run_id, thread_id=self.thread_id,
-                            exc_info=True)
+                log.warning("control pump iteration failed — continuing "
+                            "(run=%s thread=%s)",
+                            self.run_id, self.thread_id, exc_info=True)
                 await asyncio.sleep(0.5)
 
     async def _heartbeat_loop(self) -> None:
         while not self._stop.is_set():
             try:
                 await self.forwarder.heartbeat(self.status)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # M-06: a single Redis blip used to propagate out of this
                 # background task into the main loop's except, killing the
                 # whole thread. Log and keep beating — the next tick usually
                 # succeeds once Redis recovers.
-                log.warning("heartbeat publish failed — retrying next tick",
-                            run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
+                log.warning("heartbeat publish failed — retrying next tick "
+                            "(run=%s thread=%s): %s",
+                            self.run_id, self.thread_id, exc)
             await asyncio.sleep(15)
 
     async def _idle_watchdog(self) -> None:
@@ -490,11 +643,12 @@ class EngineRunner:
                     await self.forwarder.heartbeat(self.status)
                     self._stop.set()
                     return
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # M-06: a heartbeat blip on the completion publish used to
                 # kill the watchdog (and the thread). Log and keep watching.
-                log.warning("idle watchdog heartbeat failed — retrying next tick",
-                            run_id=self.run_id, thread_id=self.thread_id, error=str(exc))
+                log.warning("idle watchdog heartbeat failed — retrying next tick "
+                            "(run=%s thread=%s): %s",
+                            self.run_id, self.thread_id, exc)
 
     async def _emit_engine_error(self, error: str) -> None:
         from collegium_contracts import StepKind
@@ -511,8 +665,19 @@ def main() -> int:
     runner = EngineRunner()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    def _on_signal() -> None:
+        # K13: SIGTERM mid-turn must honor the same bounded drain as a control
+        # interrupt — the old handler only set _stop, so a turn (or a 900s
+        # approval BLPOP) ran to completion before the loop noticed, and the
+        # "stopped" heartbeat never went out. Route through _request_stop so
+        # the turn is drained/cancelled and the status is published.
+        loop.call_soon_threadsafe(
+            lambda: asyncio.ensure_future(
+                runner._request_stop(drain_s=runner.interrupt_drain_s)))
+
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, runner._stop.set)
+        loop.add_signal_handler(sig, _on_signal)
     try:
         return loop.run_until_complete(runner.run())
     finally:

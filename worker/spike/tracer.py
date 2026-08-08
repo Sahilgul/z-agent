@@ -272,7 +272,7 @@ async def check_structured() -> dict[str, Any]:
             raw = getattr(rec.result, "structured_output", None) or json.loads(rec.result.result or "{}")
             Plan.model_validate(raw)
             plan_ok += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[spike] Plan validation failed (attempt {i}): {exc}")
 
         rec2 = RunRecorder(f"structured-notebook-{i}")
@@ -291,7 +291,7 @@ async def check_structured() -> dict[str, Any]:
             raw = getattr(rec2.result, "structured_output", None) or json.loads(rec2.result.result or "{}")
             Notebook.model_validate(raw)
             notebook_ok += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[spike] Notebook validation failed (attempt {i}): {exc}")
         _ = structured
 

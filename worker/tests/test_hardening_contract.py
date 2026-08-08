@@ -18,23 +18,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-from collegium_contracts import StepEvent, StepKind
-
-from worker.engine.checkpointer import DeltaChannel, make_checkpointer
-from worker.engine.compaction import CompactionPolicy, Compactor
-from worker.engine.hardening import SoakResult, evaluate_slo
-from worker.engine.state import Budget, Mode, PromptOrigin, tag_message
-
 # --- scripted LLM (for the checkpointer resume drill) ---
-
 from typing import Any
 
+import pytest
+from collegium_contracts import StepEvent, StepKind
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
+from worker.engine.checkpointer import DeltaChannel
+from worker.engine.compaction import CompactionPolicy, Compactor
 from worker.engine.events import EventEmitter
 from worker.engine.graph import build_graph
+from worker.engine.hardening import SoakResult, evaluate_slo
+from worker.engine.state import Budget, Mode, PromptOrigin, tag_message
 
 
 class _ScriptedLLM:
@@ -107,8 +104,9 @@ async def test_redis_stream_survives_consumer_disconnect():
     (pipeline + xadd + JSON payload)."""
     pytest.importorskip("fakeredis.aioredis")
     import fakeredis.aioredis as fake_mod
-    from worker.forwarder import Forwarder
+
     from worker.engine.events import EventEmitter
+    from worker.forwarder import Forwarder
 
     r = fake_mod.FakeRedis(decode_responses=True)
     # Inject the fakeredis backend into a REAL Forwarder so we exercise the
@@ -147,6 +145,7 @@ async def test_approval_request_bridges_to_backend_stream():
     injected) and assert the bridge fields the backend _create_card reads."""
     pytest.importorskip("fakeredis.aioredis")
     import fakeredis.aioredis as fake_mod
+
     from worker.forwarder import Forwarder
 
     r = fake_mod.FakeRedis(decode_responses=True)
@@ -288,6 +287,7 @@ async def test_compaction_rolls_back_when_protected_message_dropped(monkeypatch)
     dropped; the validator must catch it, roll back, and leave the
     conversation intact (original list, unchanged, after_tokens == before_tokens)."""
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
     from worker.engine import compaction as comp_mod
 
     monkeypatch.setattr(
@@ -357,6 +357,7 @@ async def test_agent_node_mid_stream_llm_failure_emits_partial_delta_then_errors
     delta_sink, and the node returns {error, done=True} — NOT
     needs_compaction (the failure isn't a context overflow)."""
     from langchain_core.messages import AIMessage, HumanMessage
+
     from worker.engine.events import EventEmitter
     from worker.engine.graph import agent_node
     from worker.engine.state import Budget, Mode, tag_message
@@ -408,6 +409,7 @@ async def test_tools_node_rejects_invalid_mode_request_target():
     naming the bad mode and the valid set, and the run's mode does NOT
     change. Covers the `target not in valid` branch in tools_node."""
     from langchain_core.messages import AIMessage, ToolMessage
+
     from worker.engine.events import EventEmitter
     from worker.engine.graph import tools_node
     from worker.engine.state import Mode, tag_message

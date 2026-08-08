@@ -35,6 +35,10 @@ except ImportError:  # pragma: no cover - exercised only without the cas extra
     ResultMessage = None  # type: ignore[assignment,misc]
     _CAS_AVAILABLE = False
 
+# K16: ApprovalBridge is used ONLY by the legacy SDK runtime below; the
+# custom engine (ENGINE=custom, the default) uses engine.approvals. Kept
+# importable here deliberately — the SDK path remains a flag-gated fallback
+# until its soak completes.
 from worker.approvals import ApprovalBridge
 from worker.control import ControlListener, ControlMessage
 from worker.forwarder import Forwarder
