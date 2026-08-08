@@ -1,0 +1,79 @@
+# N1: every PR runs the full gate — backend, worker, contracts, web, lint.
+# Evidence scripts (ra/rb) run when the pipeline's Docker service is available.
+trigger: none
+pr:
+  branches:
+    include: ["*"]
+
+pool:
+  vmImage: ubuntu-latest
+
+# N3: throwaway real infra for the integration tier — the concurrency,
+# redelivery, and resume races are executable on every PR, not comments.
+services:
+  postgres:
+    image: postgres:16-alpine
+    env:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: collegium
+    ports:
+      - 5432:5432
+  redis:
+    image: redis:7-alpine
+    ports:
+      - 6379:6379
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.12"
+
+  - script: |
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+      echo "##vso[task.prependpath]$HOME/.local/bin"
+    displayName: Install uv
+
+  - script: |
+      uv sync
+      uv run ruff check backend/app backend/tests worker/worker worker/tests
+    displayName: Lint (Ruff, both suites)
+
+  - script: |
+      uv run pytest packages/contracts -q
+    displayName: Contracts suite
+
+  - script: |
+      cd backend && uv run pytest -q
+    displayName: Backend suite
+
+  - script: |
+      cd worker && uv run pytest -q
+    displayName: Worker suite
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "20.x"
+
+  - script: |
+      cd apps/web && npm ci && npm run test && npm run build
+    displayName: Web tests + build
+
+  - script: |
+      cd backend && uv run pytest tests/integration -q
+    displayName: Integration tier (real Postgres+Redis races)
+    env:
+      COLLEGIUM_INTEGRATION: "1"
+      INTEGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/collegium
+      INTEGRATION_REDIS_URL: redis://127.0.0.1:6379/0
+
+  - script: |
+      scripts/ra_evidence.sh
+    displayName: RA evidence (spine vs real Postgres)
+    continueOnError: false
+
+  - script: |
+      scripts/rb_live_evidence.sh
+    displayName: RB live evidence (full stack)
+    condition: and(succeeded(), eq(variables['RUN_LIVE_EVIDENCE'], '1'))
+    # RB needs the worker image built + the full local stack; run on the
+    # nightly/integration pipeline (set RUN_LIVE_EVIDENCE=1), not every PR.

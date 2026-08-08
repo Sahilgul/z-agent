@@ -20,7 +20,7 @@ KEEP="${1:-}"
 cleanup() {
   [ "${KEEP}" = "--keep" ] && return 0
   docker rm -f rb-redis rb-gateway rb-evidence-pg >/dev/null 2>&1 || true
-  pkill -f "uvicorn app.main:app --port 8000" >/dev/null 2>&1 || true
+  pkill -f "uvicorn app.main:app --port ${RB_PORT:-8111}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -56,12 +56,16 @@ export COLLEGIUM_DB_URL="sqlite:///${DATA}/collegium.db" \
   COLLEGIUM_WORKSPACES_DIR="${DATA}/workspaces" \
   COLLEGIUM_TRANSCRIPTS_DIR="${DATA}/transcripts" \
   COLLEGIUM_EVIDENCE_DIR="${DATA}/evidence" \
-  COLLEGIUM_PLAYBOOKS_DIR="${DATA}/playbooks"
+  COLLEGIUM_PLAYBOOKS_DIR="${DATA}/playbooks" \
+  COLLEGIUM_DEV_INSECURE_DEFAULTS=1 \
+  COLLEGIUM_JWT_SECRET="rb-evidence-local-only-secret" \
+  COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME="sahil" \
+  COLLEGIUM_BOOTSTRAP_ADMIN_PIN="4545"
 
 cd "${ROOT}/backend"
 rm -f "${DATA}/collegium.db"*
 "${PY}" -m alembic upgrade head >/dev/null
-"${PY}" -m app.auth.seed_users >/dev/null
+"${PY}" -m app.auth.seed_users
 "${PY}" - <<'PYEOF'
 import sqlite3
 from datetime import datetime, timezone
@@ -73,15 +77,24 @@ conn.execute(
 conn.commit()
 PYEOF
 
-pkill -f "uvicorn app.main:app --port 8000" >/dev/null 2>&1 || true
-"${PY}" -m uvicorn app.main:app --port 8000 &
+pkill -f "uvicorn app.main:app --port ${RB_PORT:-8111}" >/dev/null 2>&1 || true
+"${PY}" -m uvicorn app.main:app --port ${RB_PORT:-8111} &
 BACKEND_PID=$!
-for _ in $(seq 1 30); do curl -sf http://localhost:8000/health >/dev/null 2>&1 && break; sleep 1; done
+# Fail fast if uvicorn died on bind (port owned by another process) —
+# previously the health loop silently polled a DIFFERENT server.
+sleep 1
+if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+  echo "RB evidence FAILED: backend exited on startup (port ${RB_PORT:-8111} busy?)" >&2
+  exit 1
+fi
+for _ in $(seq 1 30); do curl -sf --max-time 3 http://localhost:${RB_PORT:-8111}/health >/dev/null 2>&1 && break; sleep 1; done
+curl -sf --max-time 3 http://localhost:${RB_PORT:-8111}/health >/dev/null 2>&1 || {
+  echo "RB evidence FAILED: backend never became healthy" >&2; exit 1; }
 
 # --- live thread ---------------------------------------------------------------
-curl -sf -c "${DATA}/cookies.txt" -X POST http://localhost:8000/auth/login \
+curl -sf -c "${DATA}/cookies.txt" -X POST http://localhost:${RB_PORT:-8111}/auth/login \
   -H 'Content-Type: application/json' -d '{"username":"sahil","pin":"4545"}' >/dev/null
-RUN_ID=$(curl -sf -b "${DATA}/cookies.txt" -X POST http://localhost:8000/runs \
+RUN_ID=$(curl -sf -b "${DATA}/cookies.txt" -X POST http://localhost:${RB_PORT:-8111}/runs \
   -H 'Content-Type: application/json' \
   -d '{"mode":"ask","task":"Which engine runtime is serving this thread, and how do steps reach this feed?"}' \
   | "${PY}" -c "import json,sys; print(json.load(sys.stdin)['id'])")
@@ -90,7 +103,7 @@ echo "run: ${RUN_ID}"
 # Wait for the feed to fill (worker boot + turn + ingest).
 FEED=""
 for _ in $(seq 1 24); do
-  FEED=$(curl -sf -b "${DATA}/cookies.txt" "http://localhost:8000/runs/${RUN_ID}/events")
+  FEED=$(curl -sf -b "${DATA}/cookies.txt" "http://localhost:${RB_PORT:-8111}/runs/${RUN_ID}/events")
   [ "$("${PY}" -c "import json; print(len(json.loads('''${FEED}''')))" 2>/dev/null || echo 0)" -ge 3 ] && break
   sleep 5
 done
