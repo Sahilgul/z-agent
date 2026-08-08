@@ -142,8 +142,8 @@ class HeartbeatPersister:
             finally:
                 session.close()
             # A reap can orphan the RUN at a working stage — no live threads,
-            # no future events, composer accepting text into a dead session.
-            # Move the run to INTERRUPTED so the UI offers resume.
+            # no future events. Move the run to INTERRUPTED; the composer
+            # stays open either way (a send chains a fresh lane — §1).
             await self._interrupt_orphaned_run(run_id)
             if getattr(self, "thread_manager", None) is not None:
                 # F1/F3: the reap is a terminal transition — settle spend and
@@ -283,9 +283,57 @@ class HeartbeatPersister:
             # input_required forever even though the engine resumed.
             if status and thread.status in (*ACTIVE_STATUSES, "input_required"):
                 thread.status = status
+            run_id = thread.run_id
             session.commit()
         except Exception as exc:  # a missed beat must never kill the loop
             session.rollback()
             log.warning("heartbeat persist failed", thread_id=thread_id, error=str(exc)[:200])
+            return
         finally:
             session.close()
+        if status == "completed":
+            self._maybe_complete_ask_run(run_id)
+
+    def _maybe_complete_ask_run(self, run_id: str) -> None:
+        """Conversational ask: the run PARKS at awaiting_user after each
+        answer (the lead thread idle-lingers for follow-ups). When the
+        thread's idle TTL finally completes it, the conversation is over —
+        flip the run to COMPLETED and notify the UI. Without this the run
+        sat at "waiting on you" forever after the thread died of old age."""
+        from collegium_contracts import RunStage
+
+        from app.services.runs import transition
+        available: list[str] = []
+        session = get_session()
+        try:
+            run = session.get(Run, run_id)
+            if (run is None or run.mode != "ask"
+                    or run.stage != RunStage.AWAITING_USER.value):
+                return
+            live = (session.query(Thread)
+                    .filter(Thread.run_id == run_id,
+                            Thread.status.in_((*ACTIVE_STATUSES, "input_required")))
+                    .count())
+            if live:
+                return
+            transition(run, RunStage.COMPLETED)
+            run.finished_at = datetime.now(UTC)
+            available = list(run.available_actions)
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            log.warning("ask-run completion failed", run_id=run_id,
+                        error=str(exc)[:200])
+            return
+        finally:
+            session.close()
+        relay = getattr(self, "relay", None)
+        if relay is not None:
+            try:
+                # _persist runs sync inside the async loop — hand the publish
+                # to the loop instead of blocking on it.
+                asyncio.get_running_loop().create_task(
+                    relay.publish_run_stage(
+                        run_id, RunStage.COMPLETED.value, available))
+            except Exception:
+                log.warning("ask-run stage publish failed", run_id=run_id)

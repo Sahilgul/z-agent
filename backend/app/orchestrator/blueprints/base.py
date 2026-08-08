@@ -101,7 +101,13 @@ class Blueprint(abc.ABC):
                 session = get_session()
                 try:
                     run = session.get(Run, ctx.run.id)
-                    transition(run, node.stage)
+                    # allow_terminal_exit: a blueprint only starts on a
+                    # terminal run via a DELIBERATE user act (resume, or a
+                    # message that chains a fresh lane on the prior session
+                    # volume — design philosophy §1: the harness never enters
+                    # an unrecoverable state). H-41's guard stays armed for
+                    # stop/abandon/kill-replace, which pass no such flag.
+                    transition(run, node.stage, allow_terminal_exit=True)
                     session.commit()
                     # M-49: commit expires run's attributes (expire_on_commit
                     # is on by default); close() then detaches it, so reading

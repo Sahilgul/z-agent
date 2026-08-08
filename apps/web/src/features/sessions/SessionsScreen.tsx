@@ -188,8 +188,8 @@ export function SessionsScreen() {
 
   // W-B2b: edit-and-resend. When armed, the composer holds the last user
   // message and Send fires edit_and_resend (replace the thread on its
-  // session volume + deliver the edited text) instead of a plain nudge into
-  // a terminal thread (which the backend now 409s).
+  // session volume + deliver the edited text) instead of chaining a fresh
+  // lane with the original text.
   const [editingResend, setEditingResend] = useState(false);
   useEffect(() => {
     setEditingResend(false);
@@ -270,21 +270,21 @@ export function SessionsScreen() {
   };
 
   const working = current ? agentWorking(current.stage) : false;
-  // W-H14: the composer is a message path into a LIVE run. On a
-  // terminal/interrupted stage a plain send would vanish (backend 409s) —
-  // route the user to resume / edit-and-resend instead of pretending.
+  // Design philosophy §1: the composer is NEVER locked by stage. Sending on
+  // a completed/failed/abandoned run chains a fresh lane on the prior
+  // session volume (backend SEND_MESSAGE terminal-thread path) — the
+  // conversation resumes where it left off, a day or a month later. A
+  // harness the user can't talk to is a harness in an unrecoverable state.
   const stage = current?.stage;
-  const composerBlocked =
-    !!current && (stage === "completed" || stage === "failed" || stage === "abandoned" ||
-      (stage === "interrupted" && !editingResend));
   const submit = () => void (current ? send() : start());
   const placeholder = current
     ? editingResend
       ? "edit the last message, then send — the old turn never runs…"
-      : composerBlocked
-        ? `run is ${current.stage} — resume or edit & resend from the card above`
-        : working
-          ? "nudge the lead — queued for the next turn…"
+      : working
+        ? "nudge the lead — queued for the next turn…"
+        : stage === "completed" || stage === "failed" || stage === "abandoned" ||
+            stage === "interrupted"
+          ? "reply to pick the session back up — a fresh lane resumes the prior context…"
           : "message the lead…"
     : mode === "agent-rnd"
       ? 'investigate across the fleet… ("spawn 5 explorers on ClientApp")'
@@ -514,7 +514,10 @@ export function SessionsScreen() {
             rows={1}
             placeholder={placeholder}
             value={task}
-            disabled={composerBlocked}
+            // Never disabled by stage — there are no dead sessions: a send
+            // on any run chains a fresh lane on the prior session volume
+            // (philosophy §1). Only the in-flight POST (Enter gate, W-B4)
+            // throttles input.
             onChange={(e) => setTask(e.target.value)}
             onKeyDown={(e) => {
               // W-B4: gate on !busy — an Enter during the in-flight POST used
@@ -544,11 +547,10 @@ export function SessionsScreen() {
               options={[...MODE_OPTIONS]}
               value={current ? (pendingMode ?? (current.mode as Mode)) : mode}
               onChange={(v) => (current ? setPendingMode(v as Mode) : setMode(v as Mode))}
-              disabledValues={
-                current && !current.repo
-                  ? new Set<Mode>(["development"])
-                  : undefined
-              }
+              // develop is NOT disabled on repo-less runs: the user builds
+              // context in ask, then switches — the switch's message can
+              // @mention the repo, and the backend fails loudly ("no repo
+              // targeted — mention one with @RepoName") if it can't resolve.
             />
             {!current && (
               <>

@@ -108,13 +108,19 @@ describe("SessionsScreen composer (W6-M9)", () => {
     await waitFor(() => expect(useRuns.getState().current?.id).toBe("r-new"));
   });
 
-  it("disables the composer on a terminal run with the resume hint", async () => {
-    const dead: Run = { ...startedRun, id: "r-dead", stage: "completed" };
-    useRuns.setState({ current: dead, runs: [dead], runsLoaded: true });
+  it("keeps the composer ENABLED on a terminal run — send chains a fresh lane (§1)", async () => {
+    // No dead sessions: a completed run is chatable from where it stopped.
+    const finished: Run = { ...startedRun, id: "r-done", stage: "completed" };
+    useRuns.setState({ current: finished, runs: [finished], runsLoaded: true });
     renderSessions();
-    const composer = await screen.findByPlaceholderText(/resume or edit & resend/i);
-    expect(composer).toBeDisabled();
+    const composer = await screen.findByPlaceholderText(/pick the session back up/i);
+    expect(composer).not.toBeDisabled();
+    fireEvent.change(composer, { target: { value: "one more thing" } });
     fireEvent.keyDown(composer, { key: "Enter" });
-    expect(apiMock.post).not.toHaveBeenCalledWith(expect.stringContaining("/intent"), expect.anything());
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenCalledWith(
+        expect.stringContaining("/intent"),
+        expect.objectContaining({ text: "one more thing" }),
+      ));
   });
 });

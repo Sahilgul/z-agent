@@ -450,10 +450,12 @@ async def test_complete_writes_trajectory_and_settles(session, make_user):
     bp = AskBlueprint()
     ctx = _ctx(run, services={"thread_manager": lm}, artifacts={"thread_id": "l1"})
     await bp._complete(ctx)
-    finished_at = ctx.run.finished_at
     session.expire_all()
     assert session.query(TrajectorySummary).filter_by(run_id="r1").one().summary.startswith("Ask run")
-    assert finished_at is not None
+    # Conversational ask: _complete PARKS the run (awaiting_user) — finished_at
+    # arrives only when the lead thread's idle TTL completes it (the heartbeat
+    # persister stamps it then).
+    assert session.get(Run, "r1").finished_at is None
     assert lm.settled == ["l1"]
 
 
@@ -494,7 +496,9 @@ async def test_complete_without_thread_id(session, make_user):
     bp = AskBlueprint()
     ctx = _ctx(run, services={"thread_manager": lm}, artifacts={})
     await bp._complete(ctx)
-    assert ctx.run.finished_at is not None
+    # No threads at all: still a park, not a finish — completion is the
+    # persister's job once no live thread remains.
+    assert ctx.run.finished_at is None
     assert lm.settled == []
 
 
@@ -508,4 +512,6 @@ def test_nodes_returns_three_stages():
     assert nodes[2].deterministic is True
     assert nodes[0].stage == RunStage.PROVISIONING
     assert nodes[1].stage == RunStage.INVESTIGATING
-    assert nodes[2].stage == RunStage.COMPLETED
+    # Ask is conversational: the last node PARKS at awaiting_user (COMPLETED
+    # is terminal and would lock the composer after the first answer).
+    assert nodes[2].stage == RunStage.AWAITING_USER

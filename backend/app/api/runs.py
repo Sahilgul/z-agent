@@ -400,18 +400,31 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                             {requested_model: requested_reasoning}, [requested_model])
                 except ValueError as exc:
                     raise HTTPException(status_code=422, detail=str(exc)) from exc
-            # W-H14: nudging a TERMINAL thread used to be log-only — the
-            # composer kept accepting text into a dead session and the
-            # message vanished. A mode/model switch survives (it chains a
-            # fresh blueprint on the prior session volume); a plain nudge is
-            # a 409.
-            if not (mode_switch or model_switch) and thread_status in (
-                    "completed", "failed", "stopped", "replaced"):
-                raise HTTPException(
-                    status_code=409,
-                    detail=(f"thread is {thread_status} — the session is over; "
-                            "resume the run or start a new one"))
-            if kind == ActionKind.SEND_MESSAGE and run_mode and (mode_switch or model_switch):
+            # Design philosophy §1 (the harness never enters an unrecoverable
+            # state): THERE IS NO SUCH THING AS A DEAD SESSION. A nudge or
+            # message to a terminal thread chains a FRESH lane on the prior
+            # session volume — the same mechanism a mode/model switch uses —
+            # so every conversation continues from where it stopped, a day
+            # or a month later. The composer is never locked, and no send
+            # ever black-holes or 409s on liveness.
+            terminal_thread = thread_status in (
+                "completed", "failed", "stopped", "replaced")
+            chain_fresh = bool(run_mode) and (
+                terminal_thread
+                or (kind == ActionKind.SEND_MESSAGE
+                    and (mode_switch or model_switch)))
+            if chain_fresh:
+                # Revive a terminal run before the blueprint re-stamps it:
+                # finished_at/failure_reason from the previous life are stale.
+                session = get_session()
+                try:
+                    run_row = session.get(Run, run_id)
+                    if run_row is not None:
+                        run_row.finished_at = None
+                        run_row.failure_reason = None
+                        session.commit()
+                finally:
+                    session.close()
                 # The user's message is the task for the new blueprint's
                 # first thread; persist it as a user event so the transcript
                 # shows the question before the new lane's answer.

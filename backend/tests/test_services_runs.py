@@ -10,18 +10,27 @@ from app.services.runs import (
 
 
 def test_compute_available_actions_per_stage():
-    run = Run(id="r", created_by=1, mode="ask")
+    # Plan mode: the raw stage map holds at every stage (awaiting_user
+    # carries the plan-gate actions).
+    run = Run(id="r", created_by=1, mode="plan")
     for stage in RunStage:
         run.stage = stage.value
         actions = compute_available_actions(run)
         assert actions == ACTIONS_BY_STAGE.get(stage.value, [])
 
 
-def test_compute_available_actions_awaiting_user():
-    run = Run(id="r", created_by=1, mode="ask", stage="awaiting_user")
+def test_compute_available_actions_awaiting_user_plan_mode():
+    run = Run(id="r", created_by=1, mode="plan", stage="awaiting_user")
     assert set(compute_available_actions(run)) == {
         ActionKind.REVIEW_PLAN.value, ActionKind.APPROVE_PLAN.value, ActionKind.REJECT_PLAN.value,
     }
+
+
+def test_compute_available_actions_awaiting_user_ask_mode():
+    # Conversational ask parks at awaiting_user after each answer — the
+    # plan-gate actions have no plan behind them there.
+    run = Run(id="r", created_by=1, mode="ask", stage="awaiting_user")
+    assert compute_available_actions(run) == []
 
 
 def test_compute_available_actions_verifying():
@@ -51,7 +60,7 @@ def test_compute_available_actions_failed():
 
 
 def test_transition_updates_stage_and_actions():
-    run = Run(id="r", created_by=1, mode="ask", stage="queued", available_actions=["x"])
+    run = Run(id="r", created_by=1, mode="plan", stage="queued", available_actions=["x"])
     transition(run, RunStage.AWAITING_USER)
     assert run.stage == "awaiting_user"
     assert ActionKind.APPROVE_PLAN.value in run.available_actions

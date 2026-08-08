@@ -726,16 +726,41 @@ def test_post_intent_illegal_intent_is_409_not_500(auth_client, session, make_us
     assert r.status_code == 409
 
 
-def test_post_intent_nudge_terminal_thread_is_409(auth_client, session, make_user):
-    """W-H14: a nudge into a terminal thread used to be log-only — the
-    composer accepted text into a dead session and the message vanished."""
+def test_post_intent_nudge_terminal_thread_revives_run(auth_client, session, make_user):
+    """Design philosophy §1 — no dead sessions: a nudge into a terminal
+    thread chains a fresh lane on the prior session volume (resume_from_thread_id)
+    instead of the old 409 dead-end. W-H14's black-hole is closed by REVIVAL,
+    not refusal — the composer is never locked."""
     client, _, services, user = auth_client
-    run = Run(id="r1", created_by=user.id, mode="ask", stage="interrupted")
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="interrupted",
+              finished_at=datetime.now(UTC))
     thread = Thread(id="l1", run_id="r1", persona="researcher", status="stopped")
     session.add_all([run, thread]); session.commit()
     r = client.post("/runs/r1/intent", json={"intent": "nudge", "source": "button", "thread_id": "l1"})
-    assert r.status_code == 409
-    assert services["run_manager"].nudged == []
+    assert r.status_code == 200
+    rm = services["run_manager"]
+    assert rm.nudged == []  # no nudge into the terminal thread — a fresh lane chains
+    assert rm.blueprinted == [("r1", "ask", {"resume_from_thread_id": "l1"})]
+    # The terminal run is revived: stale finished_at cleared for the new life.
+    session.expire_all()
+    assert session.get(Run, "r1").finished_at is None
+
+
+def test_post_intent_send_message_terminal_thread_revives_with_task(auth_client, session, make_user):
+    """A plain message on a completed run is the conversational resume: the
+    text becomes the fresh lane's task, persisted as a user event first."""
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="completed", title="t")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="completed")
+    session.add_all([run, thread]); session.commit()
+    r = client.post("/runs/r1/intent",
+                    json={"intent": "send_message", "source": "button",
+                          "text": "one more thing", "thread_id": "l1"})
+    assert r.status_code == 200
+    rm = services["run_manager"]
+    assert rm.nudged == []
+    assert rm.blueprinted == [("r1", "ask", {
+        "resume_from_thread_id": "l1", "task": "one more thing"})]
 
 
 def test_run_serializer_includes_failure_reason(auth_client, session, make_user):

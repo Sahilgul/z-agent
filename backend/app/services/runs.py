@@ -31,6 +31,12 @@ TERMINAL_STAGES = {RunStage.COMPLETED.value, RunStage.FAILED.value, RunStage.ABA
 
 
 def compute_available_actions(run: Run) -> list[str]:
+    # Ask mode parks at AWAITING_USER after every answer as an open
+    # conversation — the plan-gate actions (approve/reject/review plan)
+    # belong to the plan blueprint only; rendering them on an ask run
+    # offers decisions that have no plan behind them.
+    if run.stage == RunStage.AWAITING_USER.value and run.mode == "ask":
+        return []
     return ACTIONS_BY_STAGE.get(run.stage, [])
 
 

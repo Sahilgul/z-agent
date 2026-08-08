@@ -506,6 +506,12 @@ class FakeRunManager:
         self.prs_merged: list[tuple] = []
         self.started_plans: list[str] = []
         self.switched_modes: list[tuple] = []
+        self.blueprinted: list[tuple] = []
+
+    async def _run_blueprint(self, run_id, blueprint_mode, extra_artifacts=None):
+        # Revive/mode-switch path: chains a fresh lane on the prior session
+        # volume. Recorded so tests can assert the chain (and its artifacts).
+        self.blueprinted.append((run_id, blueprint_mode, extra_artifacts))
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
                          work_item_id=None, autonomy=None, fanout=None, delivery_id=None,

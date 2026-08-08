@@ -2,13 +2,17 @@
 
 hydrate (deterministic) -> investigate (agentic: one thread, live-grep ground
 truth, hand-written ServerApp AGENTS.md seed until maps arrive) ->
-complete (deterministic: cost readback + trajectory summary).
+await_user (deterministic: cost readback + trajectory summary, then PARK at
+awaiting_user). Ask is a CONVERSATION, not a one-shot: the run used to land
+on COMPLETED after the first answer, which locked the composer (terminal
+stage) and made follow-up questions impossible. Parking at awaiting_user
+keeps the lead thread idle-lingering for nudges; when the thread's idle TTL
+finally completes it, the heartbeat persister flips the run to COMPLETED.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from pathlib import Path
 
 from collegium_contracts import RunStage
@@ -31,7 +35,11 @@ class AskBlueprint(Blueprint):
         return [
             Node("hydrate", self._hydrate, deterministic=True, stage=RunStage.PROVISIONING),
             Node("investigate", self._investigate, deterministic=False, stage=RunStage.INVESTIGATING),
-            Node("complete", self._complete, deterministic=True, stage=RunStage.COMPLETED),
+            # Park, don't finish: COMPLETED is terminal (composer locked), so
+            # an answered question killed the conversation. AWAITING_USER
+            # keeps the session open; completion arrives via the thread's
+            # idle TTL -> heartbeat persister (see heartbeats._maybe_complete_ask_run).
+            Node("complete", self._complete, deterministic=True, stage=RunStage.AWAITING_USER),
         ]
 
     async def _hydrate(self, ctx: BlueprintContext) -> None:
@@ -201,7 +209,9 @@ class AskBlueprint(Blueprint):
                     run_id=run.id, thread_id=tid, user_id=run.created_by,
                     summary=run.auto_summary or f"Ask run on {run.repo or 'repo'}: {run.title[:200]}",
                 ))
-            run.finished_at = datetime.now(UTC)
+            # No finished_at here: the run is PARKED at awaiting_user, not
+            # over. finished_at is stamped when the persister completes the
+            # run (thread idle TTL) — marking it now would lie about liveness.
             session.commit()
             settle_ids = survivors
         finally:
