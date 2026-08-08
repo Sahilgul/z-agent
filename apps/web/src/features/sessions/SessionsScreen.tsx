@@ -538,6 +538,17 @@ export function SessionsScreen() {
                   : undefined
               }
             />
+            {/* The picker is ALWAYS available: at draft time it chooses the
+                run's model; with a run open it stages a mid-conversation
+                switch — the next message chains a fresh lane on the prior
+                session volume (backend SEND_MESSAGE payload.model path). */}
+            <ModelPicker
+              selected={models}
+              onChange={onModelsChange}
+              reasoning={reasoning}
+              onReasoningChange={onReasoningChange}
+              multi={false}
+            />
             {!current && (
               <>
                 <input
@@ -574,18 +585,6 @@ export function SessionsScreen() {
             {current && (
               <ThreadChips threads={threads} onOpen={(threadId) => pushOverlay({ kind: "thread", threadId })} />
             )}
-            {/* The picker is ALWAYS available: at draft time it chooses the
-                run's model(s); with a run open it stages a mid-conversation
-                switch — the next message chains a fresh lane on the prior
-                session volume (backend SEND_MESSAGE payload.model path).
-                Multi-select compare only makes sense at run creation. */}
-            <ModelPicker
-              selected={models}
-              onChange={onModelsChange}
-              reasoning={reasoning}
-              onReasoningChange={onReasoningChange}
-              multi={false}
-            />
             {!current && mode === "agent-rnd" && (
               <Input
                 type="number"
