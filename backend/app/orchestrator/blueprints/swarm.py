@@ -33,7 +33,7 @@ from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override, media_args
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override, media_args, subagent_override
 from app.orchestrator.blueprints.goal import THREAD_MAX_WAIT_S
 from app.orchestrator.blueprints.plan import PlanBlueprint
 from app.services.runs import transition
@@ -165,14 +165,18 @@ class SwarmBlueprint(Blueprint):
     async def _fanout(self, ctx: BlueprintContext) -> None:
         thread_manager = ctx.services["thread_manager"]
         decomposition: Decomposition = ctx.artifacts["decomposition"]
-        model, reasoning = lane_override(ctx)
+        # Slices are subagents: the settings-level swarm model (when the
+        # user designated one) wins over the composer lane selection.
+        model, reasoning = subagent_override(ctx)
         specs = [
             {"persona": "explorer", "prompt": s.prompt,
              "persona_prompt": ctx.artifacts["mode_persona"] + NOTEBOOK_HINT,
              "thread_hint": f"explorer-{i}",
              # The composer's single-model override applies to every slice —
-             # a swarm on deepseek-pro is uniformly deepseek-pro.
-             **({"model": model, "reasoning": reasoning} if model else {}),
+             # a swarm on deepseek-pro is uniformly deepseek-pro. Spread both
+             # unconditionally: a reasoning-only override (no model selected)
+             # must reach the slices too — spawn handles None as defaults.
+             "model": model, "reasoning": reasoning,
              # Attachments ride every slice: vision slices see them natively,
              # blind slices get the pre-pass description in their prompt.
              **media_args(ctx)}

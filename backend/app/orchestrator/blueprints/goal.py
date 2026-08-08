@@ -48,7 +48,7 @@ from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
-from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override, media_args
+from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node, lane_override, media_args, subagent_override
 from app.orchestrator.blueprints.plan import PLAN_SCHEMA_HINT, PlanBlueprint
 from app.services import delivery, evidence
 from app.services.runs import transition
@@ -214,7 +214,9 @@ class GoalBlueprint(Blueprint):
         requested = max(1, min(int(ctx.artifacts.get("fanout") or 1), cap))
         persona_prompt = self._persona(ctx, EXPLORER_HINT)
 
-        model, reasoning = lane_override(ctx)
+        # Explorers are subagents: the settings-level swarm model (when the
+        # user designated one) wins over the composer lane selection.
+        model, reasoning = subagent_override(ctx)
         if requested == 1:
             prompt = (f"Feature story:\n{task}\n\nTarget repo: {repo.name}\n"
                       f"Angle: {EXPLORE_ANGLES[0]} (but follow the evidence wherever it leads)")
@@ -238,7 +240,11 @@ class GoalBlueprint(Blueprint):
                             f"Your slice: {EXPLORE_ANGLES[i % len(EXPLORE_ANGLES)]}"),
                  "persona_prompt": persona_prompt,
                  "thread_hint": f"explorer-{i}",
-                 **({"model": model, "reasoning": reasoning} if model else {}),
+                 # Spread both unconditionally: a reasoning-only override
+                 # (no model selected, effort set for the default model) is a
+                 # supported case — gating on `model` would silently drop it
+                 # on every fanout slice while the single-explorer path applies it.
+                 "model": model, "reasoning": reasoning,
                  **media_args(ctx)}
                 for i in range(requested)
             ]

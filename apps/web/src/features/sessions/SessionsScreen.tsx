@@ -71,7 +71,7 @@ export function SessionsScreen() {
     socketConnected,
     sendIntent,
   } = useRuns();
-  const { overlays, pushOverlay, closedTabs, closeTab, reopenTab } = useUi();
+  const { overlays, pushOverlay, closedTabs, closeTab, reopenTab, swarmModel } = useUi();
   const [task, setTask] = useState("");
   const [mode, setMode] = useState<Mode>("ask");
   // Mode to switch to on the next send while a run is open. Null = no switch
@@ -87,7 +87,14 @@ export function SessionsScreen() {
   // a model the run won't use (the backend rejects those).
   const [reasoning, setReasoning] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (mode !== "ask" && models.length > 1) setModels(models.slice(0, 1));
+    if (mode !== "ask" && models.length > 1) {
+      const trimmed = models.slice(0, 1);
+      setModels(trimmed);
+      // Prune reasoning to the trimmed selection — otherwise a stale entry
+      // for a dropped model survives and the backend rejects the run (422).
+      setReasoning((r) =>
+        Object.fromEntries(Object.entries(r).filter(([a]) => trimmed.includes(a))));
+    }
   }, [mode, models]);
   const onModelsChange = (next: string[]) => {
     setModels(next);
@@ -214,6 +221,8 @@ export function SessionsScreen() {
         models: models.length > 0 ? models : undefined,
         reasoning: Object.keys(reasoning).length > 0 ? reasoning : undefined,
         images: images.length > 0 ? images : undefined,
+        // Settings-level default for swarm/subagent lanes (null = unset).
+        swarm_model: swarmModel ?? undefined,
         idempotency_key: draftIdemKey.current,
       });
       draftIdemKey.current = uuid(); // the next draft is a new intent

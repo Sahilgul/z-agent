@@ -54,6 +54,22 @@ def lane_override(ctx: BlueprintContext) -> tuple[str | None, str | None]:
     return None, reasoning_map.get(default)
 
 
+def subagent_override(ctx: BlueprintContext) -> tuple[str | None, str | None]:
+    """The (model, reasoning) choice for swarm/subagent lanes (goal
+    explorers, swarm slices).
+
+    The settings-level swarm_model, when set, WINS over the composer lane
+    selection — that is its purpose: subagents always run on the model the
+    user designated for them. Reasoning follows whichever model the lane
+    actually lands on; an entry keyed to a different model does not
+    transfer."""
+    swarm_model = ctx.artifacts.get("swarm_model")
+    if swarm_model:
+        reasoning_map = ctx.artifacts.get("reasoning") or {}
+        return swarm_model, reasoning_map.get(swarm_model)
+    return lane_override(ctx)
+
+
 def media_args(ctx: BlueprintContext) -> dict:
     """The run's image attachments as spawn kwargs: {"images", "image_notes"}.
 

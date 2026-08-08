@@ -84,6 +84,10 @@ class CreateRunBody(BaseModel):
     # reasoning_efforts (GET /models). Absent alias = provider default
     # (thinking on, default effort). Validated in run_manager.create_run.
     reasoning: dict[str, str] | None = None
+    # User settings default model for swarm/subagent lanes (goal explorers,
+    # swarm slices). Distinct from the composer selection: when set, every
+    # subagent lane spawns on this model regardless of the lane-model choice.
+    swarm_model: str | None = None
     # Client dedupe key: a retried POST with the same key returns the
     # original run instead of minting a duplicate.
     idempotency_key: str | None = None
@@ -119,6 +123,7 @@ async def create_run(body: CreateRunBody, request: Request, user: User = Depends
             task=body.task, repo=body.repo, work_item_id=body.work_item_id,
             autonomy=autonomy_dial.clamp(body.autonomy, user.id), fanout=body.fanout,
             models=body.models, reasoning=body.reasoning, images=body.images,
+            swarm_model=body.swarm_model,
             idempotency_key=body.idempotency_key,
         )
     except ValueError as exc:

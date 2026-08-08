@@ -509,12 +509,14 @@ class FakeRunManager:
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
                          work_item_id=None, autonomy=None, fanout=None, delivery_id=None,
-                         models=None, reasoning=None, images=None, idempotency_key=None):
+                         models=None, reasoning=None, images=None, swarm_model=None,
+                         idempotency_key=None):
         # Selection validation is the REAL thing (the validators are self-free)
         # so API tests see production's 422s, not a fake that accepts anything.
         from app.orchestrator.run_manager import RunManager
         models = RunManager._validate_models(self, models, mode_name)
         reasoning = RunManager._validate_reasoning(self, reasoning, models)
+        RunManager._validate_swarm_model(self, swarm_model)
         if images:
             from app.services import vision
             vision.validate_images(images)  # real 422s for bad attachments

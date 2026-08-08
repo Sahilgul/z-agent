@@ -30,6 +30,21 @@ function saveClosed(ids: string[]) {
   }
 }
 
+/** User setting: the default model for swarm/subagent lanes (goal
+ *  explorers, swarm slices). Persisted; sent as swarm_model on run
+ *  creation so every subagent lane spawns on it regardless of the
+ *  composer's lane selection. Null = follow the lane/default model. */
+const SWARM_MODEL_KEY = "collegium.swarm-model";
+
+function loadSwarmModel(): string | null {
+  try {
+    const raw = localStorage.getItem(SWARM_MODEL_KEY);
+    return raw && typeof raw === "string" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 interface UiState {
   overlays: Overlay[];
   pushOverlay: (o: Overlay) => void;
@@ -37,6 +52,10 @@ interface UiState {
   closedTabs: string[];
   closeTab: (runId: string) => void;
   reopenTab: (runId: string) => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
+  swarmModel: string | null;
+  setSwarmModel: (alias: string | null) => void;
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -56,4 +75,16 @@ export const useUi = create<UiState>((set) => ({
   overlays: [],
   pushOverlay: (o) => set((s) => ({ overlays: [...s.overlays, o] })),
   popOverlay: () => set((s) => ({ overlays: s.overlays.slice(0, -1) })),
+  settingsOpen: false,
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  swarmModel: loadSwarmModel(),
+  setSwarmModel: (alias) => {
+    try {
+      if (alias) localStorage.setItem(SWARM_MODEL_KEY, alias);
+      else localStorage.removeItem(SWARM_MODEL_KEY);
+    } catch {
+      /* private mode — the setting just won't survive a reload */
+    }
+    set({ swarmModel: alias });
+  },
 }));
