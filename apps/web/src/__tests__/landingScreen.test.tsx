@@ -44,7 +44,7 @@ describe("LandingScreen", () => {
     renderLanding();
     act(() =>
       useSession.setState({
-        me: { id: 1, username: "sahil", display_name: "sahil", role: "admin", must_change_pin: false },
+        me: { id: 1, username: "sahil", display_name: "sahil", role: "admin" },
       }),
     );
     expect(screen.getByTestId("landing-primary-cta")).toHaveAttribute("href", "/app");

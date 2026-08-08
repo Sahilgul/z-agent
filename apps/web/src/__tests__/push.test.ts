@@ -9,23 +9,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
 const post = vi.fn();
+const del = vi.fn();
 vi.mock("../lib/api", () => ({
-  api: { get: (...a: unknown[]) => get(...a), post: (...a: unknown[]) => post(...a) },
+  api: {
+    get: (...a: unknown[]) => get(...a),
+    post: (...a: unknown[]) => post(...a),
+    delete: (...a: unknown[]) => del(...a),
+  },
 }));
 
 // Browser push primitives — jsdom doesn't ship these, so install them on
 // navigator/window before importing the module under test.
 function installPushPrimitives() {
   const unsubscribe = vi.fn(async () => true);
-  const subscribe = vi.fn(async () => ({
+  const sub = {
     endpoint: "https://push.example/sub/123",
     toJSON: () => ({
       endpoint: "https://push.example/sub/123",
       keys: { p256dh: "p256dh-key", auth: "auth-key" },
     }),
     unsubscribe,
-  }));
-  const registration = { pushManager: { subscribe } };
+  };
+  const subscribe = vi.fn(async () => sub);
+  const getSubscription = vi.fn(async () => sub);
+  const registration = { pushManager: { subscribe, getSubscription } };
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
     value: { getRegistration: async () => registration },
@@ -34,7 +41,7 @@ function installPushPrimitives() {
     configurable: true,
     value: {},
   });
-  return { subscribe, unsubscribe };
+  return { subscribe, unsubscribe, getSubscription };
 }
 
 describe("subscribeToPush", () => {
@@ -81,5 +88,45 @@ describe("subscribeToPush", () => {
     expect(ok).toBe(false);
     expect(post).toHaveBeenCalledWith("/push/subscriptions", expect.anything());
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("W10-#5: returns false instead of throwing when the VAPID fetch fails", async () => {
+    get.mockRejectedValue(new Error("offline"));
+    const { subscribeToPush } = await import("../lib/push");
+    await expect(subscribeToPush()).resolves.toBe(false);
+  });
+
+  it("W10-#5: returns false instead of throwing when the browser denies", async () => {
+    const { subscribe } = installPushPrimitives();
+    subscribe.mockRejectedValue(new Error("permission denied"));
+    const { subscribeToPush } = await import("../lib/push");
+    await expect(subscribeToPush()).resolves.toBe(false);
+  });
+});
+
+describe("unsubscribeFromPush (W10-#8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installPushPrimitives();
+  });
+
+  it("DELETEs the server record then drops the browser subscription", async () => {
+    del.mockResolvedValue(undefined);
+    const { unsubscribe } = installPushPrimitives();
+    const { unsubscribeFromPush } = await import("../lib/push");
+    await expect(unsubscribeFromPush()).resolves.toBe(true);
+    expect(del).toHaveBeenCalledWith("/push/subscriptions", {
+      endpoint: "https://push.example/sub/123",
+      keys: {},
+    });
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the browser subscription when the server DELETE fails (state stays consistent)", async () => {
+    del.mockRejectedValue(new Error("500"));
+    const { unsubscribe } = installPushPrimitives();
+    const { unsubscribeFromPush } = await import("../lib/push");
+    await expect(unsubscribeFromPush()).resolves.toBe(false);
+    expect(unsubscribe).not.toHaveBeenCalled();
   });
 });

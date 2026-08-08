@@ -19,10 +19,15 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
+  // W10-#7: keep in sync with API_PREFIXES in vite.config.ts — /lanes never
+  // existed (threads are /threads); the missing prefixes here meant the SW
+  // cache-first served STALE JSON for knowledge/ideas/proposals/push/etc.
   const isApi =
     url.pathname.startsWith("/ws") ||
-    ["/auth", "/runs", "/lanes", "/sessions", "/repos", "/modes",
-     "/hydration", "/approvals", "/team", "/health"].some((p) => url.pathname.startsWith(p));
+    ["/auth", "/runs", "/threads", "/sessions", "/repos", "/modes",
+     "/hydration", "/approvals", "/team", "/knowledge", "/ideas", "/proposals",
+     "/push", "/me", "/campaigns", "/deliveries", "/stats", "/bench",
+     "/webhooks", "/health"].some((p) => url.pathname.startsWith(p));
   if (isApi || e.request.method !== "GET") return; // network, untouched
   // index.html / navigations are NETWORK-FIRST: they were cache-first, so a
   // redeploy left the browser running the previous bundle (with yesterday's
@@ -41,9 +46,21 @@ self.addEventListener("fetch", (e) => {
     return;
   }
   // Hashed build assets (/assets/index-<hash>.js) are immutable — cache-first
-  // is safe and keeps repeat loads instant.
+  // is safe and keeps repeat loads instant. W10-#3: a cache MISS must still
+  // populate the cache — the old code fetched but never `put`, so an
+  // offline cold boot had no bundle to serve and the PWA was a white screen.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request))
+    caches.match(e.request).then(
+      (hit) =>
+        hit ||
+        fetch(e.request).then((res) => {
+          if (res.ok && url.pathname.startsWith("/assets/")) {
+            const copy = res.clone();
+            caches.open(SHELL).then((c) => c.put(e.request, copy));
+          }
+          return res;
+        })
+    )
   );
 });
 
@@ -59,7 +76,10 @@ self.addEventListener("push", (e) => {
       body: data.body,
       icon: "/icon.svg",
       data: { url: data.url },
-      tag: "collegium-ask",
+      // W10-#4: tag per deep-link — the constant "collegium-ask" collapsed
+      // EVERY concurrent approval card into one notification, so tapping
+      // only ever opened the latest. Distinct cards stay distinct.
+      tag: data.url && data.url !== "/" ? `collegium:${data.url}` : "collegium-ask",
       renotify: true,
     })
   );

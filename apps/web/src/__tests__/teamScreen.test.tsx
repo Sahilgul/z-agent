@@ -1,13 +1,15 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderScreen } from "./render";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TeamScreen } from "../features/team/TeamScreen";
+import { useSession } from "../stores/session";
 
 const get = vi.fn();
 const post = vi.fn();
-vi.mock("../lib/api", () => ({
-  api: { get: (...a: unknown[]) => get(...a), post: (...a: unknown[]) => post(...a) },
-}));
+vi.mock("../lib/api", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../lib/api")>();
+  return { ...orig, api: { get: (...a: unknown[]) => get(...a), post: (...a: unknown[]) => post(...a) } };
+});
 
 const users = [
   { id: 1, username: "sahil", display_name: "Sahil", role: "admin", status: "active",
@@ -21,6 +23,7 @@ const stats = { total_runs: 12, runs_by_stage: { completed: 10 }, runs_by_mode: 
 describe("TeamScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSession.setState({ me: { id: 1, username: "sahil", display_name: "Sahil", role: "admin" } });
     get.mockImplementation((url: string) =>
       Promise.resolve(url === "/team/users" ? users : stats)
     );
@@ -48,15 +51,37 @@ describe("TeamScreen", () => {
     expect(await screen.findByTestId("one-time-code")).toHaveTextContent("ZT-9F3K2");
   });
 
-  it("regenerate shows a fresh code; deactivate reloads", async () => {
+  it("regenerate shows a fresh code; deactivate is a two-tap confirm (W-H16)", async () => {
     renderScreen(<TeamScreen />);
     const regenButtons = await screen.findAllByRole("button", { name: "new code" });
     fireEvent.click(regenButtons[1]);
     await waitFor(() => expect(post).toHaveBeenCalledWith("/team/users/2/regenerate-code", {}));
     expect(await screen.findByTestId("one-time-code")).toBeInTheDocument();
-    const deactivateButtons = screen.getAllByRole("button", { name: "deactivate" });
-    fireEvent.click(deactivateButtons[0]);
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/team/users/1/deactivate", {}));
+
+    const row = screen.getByTestId("user-ali.r");
+    // one tap arms the confirm, nothing is sent yet
+    fireEvent.click(within(row).getByRole("button", { name: "deactivate" }));
+    expect(post).not.toHaveBeenCalledWith("/team/users/2/deactivate", {});
+    fireEvent.click(within(row).getByRole("button", { name: /confirm/ }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/team/users/2/deactivate", {}));
+  });
+
+  it("W-H16: never offers self-deactivation", async () => {
+    renderScreen(<TeamScreen />);
+    const ownRow = await screen.findByTestId("user-sahil");
+    expect(within(ownRow).queryByRole("button", { name: "deactivate" })).toBeNull();
+    expect(within(ownRow).getByText("you")).toBeInTheDocument();
+  });
+
+  it("W-H16: toasts instead of dying silently when regen fails", async () => {
+    renderScreen(<TeamScreen />);
+    await screen.findByTestId("user-ali.r");
+    post.mockRejectedValueOnce(new Error("409 user active"));
+    const row = screen.getByTestId("user-ali.r");
+    fireEvent.click(within(row).getByRole("button", { name: "new code" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/team/users/2/regenerate-code", {}));
+    // failure surfaces as a toast, not an unhandled rejection crashing the row
+    expect(screen.queryByTestId("one-time-code")).not.toBeInTheDocument();
   });
 
   it("renders metadata-only stats", async () => {

@@ -3,9 +3,12 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
 
-/** Backend router prefixes — mirrored in infra/vm/nginx.conf. */
+/** Backend router prefixes — mirrored in infra/vm/nginx.conf and
+ *  public/sw.js (the SW's network-only list). W10-#7: /lanes was dead (no
+ *  such router — threads are /threads), /threads was MISSING (dev-proxying
+ *  nudge/stop/pin hit the SPA fallback). */
 const API_PREFIXES = [
-  "/auth", "/runs", "/lanes", "/sessions", "/repos", "/modes", "/hydration",
+  "/auth", "/runs", "/threads", "/sessions", "/repos", "/modes", "/hydration",
   "/approvals", "/team", "/knowledge", "/ideas", "/proposals", "/push", "/me",
   "/campaigns", "/deliveries", "/stats", "/bench", "/webhooks", "/health",
 ];

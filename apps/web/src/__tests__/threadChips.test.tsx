@@ -42,4 +42,16 @@ describe("ThreadChips", () => {
     expect(screen.getByText("lead")).toBeInTheDocument();
     expect(screen.getByText("researcher")).toBeInTheDocument();
   });
+
+  it("renders an input_required (approval-parked) thread with the warn LED, not the dead one (W-H1)", () => {
+    render(
+      <ThreadChips
+        threads={[thread("l1", "explorer"), thread("l2", "researcher", "input_required")]}
+        onOpen={() => {}}
+      />,
+    );
+    const chip = screen.getByText("researcher").querySelector("span");
+    expect(chip?.className).toContain("led--warn");
+    expect(chip?.className).not.toContain("led--off");
+  });
 });

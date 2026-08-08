@@ -26,16 +26,27 @@ describe("stageMeta", () => {
 });
 
 describe("visibleActions (live-state rules)", () => {
-  it("hides decision buttons while the agent works, keeps Stop", () => {
-    const shown = visibleActions("developing", ["stop_run", "create_pr", "abandon_run"]);
+  // Fixtures mirror backend/app/services/runs.py ACTIONS_BY_STAGE — the
+  // backend NEVER advertises stop_run/abandon_run (the UI hardcodes them).
+  it("adds the hardcoded Stop while the agent works (backend advertises nothing)", () => {
+    const shown = visibleActions("developing", []);
     expect(shown).toEqual(["stop_run"]);
   });
-  it("shows everything when awaiting the user", () => {
-    const shown = visibleActions("awaiting_user", ["approve_plan", "reject_plan", "stop_run"]);
-    expect(shown).toEqual(["approve_plan", "reject_plan", "stop_run"]);
+  it("shows the backend's decisions plus Stop when awaiting the user", () => {
+    const shown = visibleActions("awaiting_user", ["review_plan", "approve_plan", "reject_plan"]);
+    expect(shown).toEqual(["stop_run", "review_plan", "approve_plan", "reject_plan"]);
   });
-  it("agentWorking matches the same stage set", () => {
-    expect(agentWorking("verifying")).toBe(true);
+  it("never double-renders stop/abandon if a backend version starts advertising them", () => {
+    const shown = visibleActions("developing", ["stop_run", "abandon_run", "create_pr"]);
+    expect(shown).toEqual(["stop_run", "create_pr"]);
+  });
+  it("renders nothing on terminal stages (interrupted included)", () => {
+    expect(visibleActions("completed", [])).toEqual([]);
+    expect(visibleActions("interrupted", ["edit_and_resend", "resume_run"])).toEqual([]);
+  });
+  it("agentWorking excludes verifying (W-H3 — the human's review turn)", () => {
+    expect(agentWorking("verifying")).toBe(false);
+    expect(agentWorking("developing")).toBe(true);
     expect(agentWorking("awaiting_user")).toBe(false);
     expect(agentWorking("completed")).toBe(false);
   });

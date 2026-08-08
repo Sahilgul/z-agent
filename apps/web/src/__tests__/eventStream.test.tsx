@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { EventStream } from "../components/EventStream";
 import type { StepEvent } from "../types";
@@ -136,13 +136,25 @@ describe("EventStream", () => {
     expect(container.textContent).toContain("def f():");
   });
 
-  it("highlights a unified-diff file_edit with insertion/deletion tokens", async () => {
+  it("W7-L2: file_edit highlights by file path — the diff-grammar branch is gone", async () => {
+    // file_edit emits SUMMARIES by design; a diff-SHAPED body must not flip
+    // the grammar (that branch pinned a fixture the worker never produces).
     const diff = ["--- a/x.ts", "+++ b/x.ts", "@@ -1 +1 @@", "-old", "+new"].join("\n");
     const { container } = render(
-      <EventStream events={[ev(0, "file_edit", "edit x.ts", { text: diff })]} deltas={[]} />,
+      <EventStream events={[ev(0, "file_edit", "edit x.ts", { text: diff, path: "x.ts" })]} deltas={[]} />,
     );
     await waitFor(() => expect(container.querySelector("code .token")).not.toBeNull());
     expect(container.textContent).toContain("+new");
+  });
+
+  it("W7-M3: windows the rendered tail and offers the full history on tap", () => {
+    const many = Array.from({ length: 350 }, (_, i) => ev(i, "message", `step ${i}`, { text: `body ${i}` }));
+    render(<EventStream events={many} deltas={[]} />);
+    expect(screen.queryByText("body 0")).not.toBeInTheDocument();
+    expect(screen.getByText("body 349")).toBeInTheDocument();
+    const expander = screen.getByRole("button", { name: /show 50 earlier steps/ });
+    fireEvent.click(expander);
+    expect(screen.getByText("body 0")).toBeInTheDocument();
   });
 
   it("renders markdown code fences with syntax highlighting", async () => {

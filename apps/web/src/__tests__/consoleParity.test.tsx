@@ -1,13 +1,11 @@
 /** Exit evidence: the 4 previously-missing card kinds
  *  (todo-checklist, compaction, ⚠ warning, ◆ recap) + the dedicated approval
- *  kind render from LIVE-shaped StepEvents in BOTH console surfaces —
- *  the production EventStream and the Feed. */
+ *  kind render from LIVE-shaped StepEvents in the production EventStream.
+ *  W7-L1: the Feed surface was deleted — EventStream is the only console. */
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { EventStream } from "../components/EventStream";
-import { Feed, type FeedItem } from "../components/feed/Feed";
-import { clipPreview, PREVIEW_CLIP_LINES } from "../components/feed/cardTypes";
 import type { StepEvent } from "../types";
 
 const ev = (seq: number, kind: StepEvent["kind"], title: string, detail: Record<string, unknown>): StepEvent => ({
@@ -51,24 +49,6 @@ const APPROVAL_DECISION = ev(6, "approval", "approval edited_allow", {
   kind: "approval_decision", action_id: "ap-tc1", approval_id: "ap-tc1",
   decision: "edited_allow", edited: true,
 });
-
-const ALL_EVENTS = [TODO, COMPACTION, WARNING, RECAP, APPROVAL_CARD, APPROVAL_DECISION];
-
-const feedItems: FeedItem[] = ALL_EVENTS.map((e) => ({
-  key: `k-${e.seq}`,
-  kind: (e.detail.kind === "todo-checklist" ? "todo_checklist"
-    : e.detail.kind === "compaction_card" ? "compaction"
-    : e.detail.kind === "warning" ? "warning"
-    : e.detail.kind === "recap" ? "recap"
-    : "approval") as FeedItem["kind"],
-  title: e.title,
-  text: "",
-  threadId: e.thread_id,
-  ok: null,
-  live: false,
-  role: null,
-  detail: e.detail,
-}));
 
 describe("EventStream — card parity from live StepEvents", () => {
   it("renders the todo-checklist card with checkbox states", () => {
@@ -133,32 +113,5 @@ describe("EventStream — card parity from live StepEvents", () => {
     expect(screen.getByTestId("approval-command").textContent).toContain("pwd && ls -la");
     expect(screen.getByTestId("approval-card").textContent).not.toContain('"cmd"');
     expect(screen.getByTestId("terminal-frame")).toBeInTheDocument();
-  });
-});
-
-describe("Feed — card parity", () => {
-  it("renders all four missing card kinds + approval", () => {
-    render(<Feed items={feedItems} />);
-    expect(screen.getByTestId("todo-checklist")).toBeInTheDocument();
-    expect(screen.getByTestId("compaction-card")).toBeInTheDocument();
-    expect(screen.getByTestId("warning-card")).toBeInTheDocument();
-    expect(screen.getByTestId("recap-card")).toBeInTheDocument();
-    expect(screen.getAllByTestId("approval-card")).toHaveLength(2);
-  });
-});
-
-describe("Feed preview clip — two-tier disclosure", () => {
-  it("clips at 10 lines (raised from 6)", () => {
-    expect(PREVIEW_CLIP_LINES).toBe(10);
-    const text = Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join("\n");
-    const { clipped, more } = clipPreview(text);
-    expect(clipped.split("\n")).toHaveLength(10);
-    expect(more).toBe(4);
-  });
-
-  it("shows all lines when under the clip", () => {
-    const { clipped, more } = clipPreview("a\nb\nc");
-    expect(clipped).toBe("a\nb\nc");
-    expect(more).toBe(0);
   });
 });

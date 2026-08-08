@@ -64,11 +64,27 @@ describe("IdeasScreen", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/ideas/5/ask-counsel", {}));
   });
 
-  it("promote to plan posts and disables after promotion", async () => {
+  it("promote to plan posts once and disables while in flight (W9-H1)", async () => {
+    let resolvePost: (v: unknown) => void = () => {};
+    post.mockImplementation((path: string) =>
+      path.endsWith("/promote") ? new Promise((r) => { resolvePost = r; }) : Promise.resolve({}));
     renderScreen(<IdeasScreen />);
     fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
     fireEvent.click(await screen.findByRole("button", { name: "promote to plan" }));
+    // While the POST is in flight the button must be disabled — a second
+    // click must not mint a second run.
+    expect(await screen.findByRole("button", { name: "promoting…" })).toBeDisabled();
+    resolvePost({});
     await waitFor(() => expect(post).toHaveBeenCalledWith("/ideas/5/promote", {}));
+  });
+
+  it("hides the promote button on an already-promoted thread", async () => {
+    get.mockImplementation((path: string) =>
+      Promise.resolve(path === "/ideas" ? threadList : { ...detail, status: "promoted", promoted_run_id: "r9" }));
+    renderScreen(<IdeasScreen />);
+    fireEvent.click(await screen.findByText("Ship the fleet graph to threads?"));
+    await screen.findByText(/lead synthesis · all voices/);
+    expect(screen.queryByRole("button", { name: /promote/ })).not.toBeInTheDocument();
   });
 
   it("comment composer refuses empty voices", async () => {
