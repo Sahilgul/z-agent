@@ -53,6 +53,8 @@ export interface ModelOption {
   price_in_per_mtok: number;
   price_out_per_mtok: number;
   cache_read_per_mtok: number | null;
+  /** true = natively reads image inputs (Kimi fleet); picker shows a vision badge. */
+  vision: boolean;
   /** reasoning_effort values the model accepts; empty = on/off toggle only. */
   reasoning_efforts: string[];
   /** false = thinking is always on (Kimi K3) — the picker hides "off". */

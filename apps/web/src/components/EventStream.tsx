@@ -87,6 +87,47 @@ function Thinking({ item }: { item: StreamItem }) {
   );
 }
 
+/** Per-turn telemetry the worker stamps on the message event (same numbers
+ *  the LiteLLM playground shows): TTFT, total latency, and the token split.
+ *  Every field is independently nullable — error turns have no TTFT, and
+ *  providers that don't report a breakdown just omit it. */
+interface TurnMetrics {
+  ttft_s?: number | null;
+  latency_s?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  cached_tokens?: number | null;
+}
+
+function metricsOf(item: StreamItem): TurnMetrics | null {
+  const m = item.detail.metrics;
+  return m && typeof m === "object" ? (m as TurnMetrics) : null;
+}
+
+/** The bubble footer: "ttft 7.72s · 9.18s · in 89 · out 94 (72 reasoning) ·
+ *  cached 37" — each segment renders only when the worker reported it. */
+function MetricsFooter({ metrics }: { metrics: TurnMetrics }) {
+  const parts: string[] = [];
+  if (metrics.ttft_s != null) parts.push(`ttft ${metrics.ttft_s.toFixed(2)}s`);
+  if (metrics.latency_s != null) parts.push(`${metrics.latency_s.toFixed(2)}s`);
+  if (metrics.input_tokens != null) parts.push(`in ${metrics.input_tokens}`);
+  if (metrics.output_tokens != null) {
+    parts.push(
+      metrics.reasoning_tokens != null
+        ? `out ${metrics.output_tokens} (${metrics.reasoning_tokens} reasoning)`
+        : `out ${metrics.output_tokens}`,
+    );
+  }
+  if (metrics.cached_tokens) parts.push(`cached ${metrics.cached_tokens}`);
+  if (parts.length === 0) return null;
+  return (
+    <div data-testid="msg-metrics" className="mt-1 font-mono text-[10.5px] text-ink-faint">
+      {parts.join(" · ")}
+    </div>
+  );
+}
+
 /** The clock stamp under every message; agent replies also carry the turn's
  *  "took Ns". Deliberately NOT text-micro — the parity contract reserves that
  *  class for speaker tags, which agent prose never shows. */
@@ -108,11 +149,12 @@ function MsgMeta({ ts, durationS, right }: { ts?: string | null; durationS?: num
  *  prose (the surrounding trace is chrome enough), while the user's own
  *  message is a compact right-aligned card so you can re-find what you asked
  *  while scrolling a long session. Markdown is rendered, never printed raw. */
-function Bubble({ role, body, ts, durationS }: {
+function Bubble({ role, body, ts, durationS, metrics }: {
   role: "user" | "agent";
   body: string;
   ts?: string | null;
   durationS?: number | null;
+  metrics?: TurnMetrics | null;
 }) {
   if (role === "user") {
     return (
@@ -132,6 +174,7 @@ function Bubble({ role, body, ts, durationS }: {
       <span className="sr-only">agent</span>
       <Markdown>{body}</Markdown>
       <MsgMeta ts={ts} durationS={durationS} />
+      {metrics && <MetricsFooter metrics={metrics} />}
     </div>
   );
 }
@@ -157,6 +200,7 @@ const Item = memo(
         body={body}
         ts={item.ts}
         durationS={item.durationS}
+        metrics={item.role === "user" ? null : metricsOf(item)}
       />
     );
   }

@@ -11,9 +11,10 @@ import type { ModelOption } from "../../types";
  *  the control always reads as a statement of what will run.
  *
  *  Each ACTIVE row also carries a reasoning control: "auto" sends no override
- *  (provider default — thinking on), "off" disables thinking, and any effort
- *  the model lists (low/high/max) pins it. Kimi offers no efforts — auto/off
- *  only. */
+ *  (provider default), "off" disables thinking (reasoning_effort=none on the
+ *  wire), and any effort the model lists pins it. Options ride the registry —
+ *  Foundry's enum is none/minimal/low/medium/high, and not every deployment
+ *  takes "minimal". */
 export function ModelPicker({
   selected,
   onChange,
@@ -141,6 +142,14 @@ export function ModelPicker({
                     ✓
                   </span>
                   <span className="min-w-0 flex-1 truncate">{m.label}</span>
+                  {m.vision && (
+                    <span
+                      className="flex-none rounded-pill border border-hairline px-1 text-[9px] uppercase tracking-[0.06em] text-ink-faint"
+                      title="reads image attachments natively"
+                    >
+                      vision
+                    </span>
+                  )}
                   <span className="flex-none text-[10px] text-ink-faint">
                     ${m.price_in_per_mtok}/${m.price_out_per_mtok}
                   </span>
@@ -176,7 +185,7 @@ export function ModelPicker({
             );
           })}
           <div className="border-t border-hairline px-s3 py-s1.5 text-[10px] text-ink-faint">
-            $ per 1M tokens, in/out · reasoning: auto = provider default (thinking on)
+            $ per 1M tokens, in/out · reasoning: auto = provider default
           </div>
         </div>
       )}

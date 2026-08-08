@@ -109,6 +109,38 @@ describe("EventStream", () => {
     expect(container.querySelector("[data-role='agent']")?.textContent).toMatch(/took 70s/);
   });
 
+  it("renders the turn-metrics footer under agent messages", () => {
+    const { container } = render(
+      <EventStream
+        events={[
+          ev(0, "message", "a", {
+            text: "the answer",
+            role: "agent",
+            metrics: {
+              ttft_s: 7.72, latency_s: 9.18, input_tokens: 89,
+              output_tokens: 94, reasoning_tokens: 72, cached_tokens: 37,
+            },
+          }),
+        ]}
+        deltas={[]}
+      />,
+    );
+    const footer = container.querySelector("[data-testid='msg-metrics']");
+    expect(footer?.textContent).toBe(
+      "ttft 7.72s · 9.18s · in 89 · out 94 (72 reasoning) · cached 37",
+    );
+  });
+
+  it("omits the metrics footer when the turn reported none", () => {
+    const { container } = render(
+      <EventStream
+        events={[ev(0, "message", "a", { text: "plain", role: "agent" })]}
+        deltas={[]}
+      />,
+    );
+    expect(container.querySelector("[data-testid='msg-metrics']")).toBeNull();
+  });
+
   it("shows no took-Ns on replies with no preceding user message", () => {
     render(
       <EventStream events={[ev(0, "message", "a", { text: "lone reply", role: "agent" })]} deltas={[]} />,

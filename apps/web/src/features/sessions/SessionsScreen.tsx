@@ -100,6 +100,25 @@ export function SessionsScreen() {
       else next[alias] = effort;
       return next;
     });
+  // Image attachments (base64 data URIs) — run-creation only, like the
+  // model picker. Vision lanes (Kimi) receive them natively; blind lanes
+  // get a Kimi K2.6 pre-pass description in their prompt (backend
+  // app/services/vision.py). Caps mirror the backend: 10 images, 5MB each.
+  const [images, setImages] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const onPickImages = async (files: FileList | null) => {
+    if (!files) return;
+    const accepted = [...files]
+      .filter((f) => /^image\/(png|jpe?g|webp|gif)$/.test(f.type) && f.size <= 5 * 1024 * 1024)
+      .slice(0, Math.max(0, 10 - images.length));
+    const uris = await Promise.all(accepted.map((f) => new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(f);
+    })));
+    if (uris.length > 0) setImages((cur) => [...cur, ...uris]);
+  };
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -194,10 +213,12 @@ export function SessionsScreen() {
         fanout: fanout === "" || Number.isNaN(fanout) ? undefined : fanout,
         models: models.length > 0 ? models : undefined,
         reasoning: Object.keys(reasoning).length > 0 ? reasoning : undefined,
+        images: images.length > 0 ? images : undefined,
         idempotency_key: draftIdemKey.current,
       });
       draftIdemKey.current = uuid(); // the next draft is a new intent
       setTask("");
+      setImages([]);
       await openRun(run.id);
     } finally {
       setBusy(false);
@@ -450,6 +471,27 @@ export function SessionsScreen() {
               run failed — {current.failure_reason}
             </div>
           )}
+          {!current && images.length > 0 && (
+            <div className="mb-s1.5 flex flex-wrap gap-s1.5" data-testid="image-chips">
+              {images.map((uri, i) => (
+                <span key={i} className="relative">
+                  <img
+                    src={uri}
+                    alt={`attachment ${i + 1}`}
+                    className="h-10 w-10 rounded-sm border border-hairline object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label={`remove attachment ${i + 1}`}
+                    onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}
+                    className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border border-hairline bg-panel font-mono text-[9px] text-ink-faint hover:border-red hover:text-danger-bright"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <MentionTextarea
             id="session-composer"
             rows={1}
@@ -460,7 +502,8 @@ export function SessionsScreen() {
             onKeyDown={(e) => {
               // W-B4: gate on !busy — an Enter during the in-flight POST used
               // to mint a second run/message.
-              if (e.key === "Enter" && !e.shiftKey && !busy && task.trim()) {
+              if (e.key === "Enter" && !e.shiftKey && !busy
+                  && (task.trim() || (!current && images.length > 0))) {
                 e.preventDefault();
                 submit();
               }
@@ -478,6 +521,39 @@ export function SessionsScreen() {
                   : undefined
               }
             />
+            {!current && (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  className="hidden"
+                  data-testid="image-input"
+                  onChange={(e) => {
+                    void onPickImages(e.target.files);
+                    e.target.value = ""; // re-picking the same file must re-fire
+                  }}
+                />
+                <button
+                  type="button"
+                  data-testid="attach-images"
+                  title="attach images — Kimi lanes see them directly; other models get a Kimi K2.6 description"
+                  onClick={() => fileRef.current?.click()}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md border border-hairline px-2 py-1 font-mono text-[11px] transition-colors duration-fast",
+                    images.length > 0
+                      ? "border-green text-green-bright"
+                      : "text-ink-faint hover:border-green hover:text-ink-primary",
+                  )}
+                >
+                  <svg viewBox="0 0 16 16" className="size-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                    <path d="M13.5 7.5 8.2 12.8a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3a2.13 2.13 0 0 1 3 3l-5.3 5.3a1.07 1.07 0 0 1-1.5-1.5l4.6-4.6" />
+                  </svg>
+                  {images.length > 0 ? `${images.length} img` : "image"}
+                </button>
+              </>
+            )}
             {current ? (
               <ThreadChips threads={threads} onOpen={(threadId) => pushOverlay({ kind: "thread", threadId })} />
             ) : (
@@ -510,7 +586,14 @@ export function SessionsScreen() {
                 className="w-[84px] font-mono"
               />
             )}
-            <Button className="ml-auto font-mono" disabled={busy || !task.trim()} onClick={submit}>
+            <Button
+              className="ml-auto font-mono"
+              // Image-only send is legal at run creation (the backend
+              // substitutes an examine-the-images task); follow-ups into an
+              // open run still need text.
+              disabled={busy || (!task.trim() && (current !== null || images.length === 0))}
+              onClick={submit}
+            >
               <span className="size-2 rounded-full bg-current shadow-[0_0_6px_1px_currentColor]" aria-hidden="true" />
               {current ? "send" : busy ? "routing…" : "route it"}
             </Button>
