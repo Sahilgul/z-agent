@@ -5,7 +5,7 @@ exact API shape the LiteLLM gateway proxies (OpenAI-compatible /chat/completions
 on the Foundry Models endpoint, `api-key` header), for BOTH model slots the
 gateway config knows about:
 
-  kimi-foundry  <- FOUNDRY_MODEL    + FOUNDRY_API_BASE    + AZURE_AI_FOUNDRY_API_KEY
+  kimi-k2.6  <- FOUNDRY_MODEL    + FOUNDRY_API_BASE    + AZURE_AI_FOUNDRY_API_KEY
   qwen-foundry  <- FOUNDRY_MODEL_2  + FOUNDRY_API_BASE_2  + AZURE_AI_FOUNDRY_API_KEY_2
 
 Per model: non-streaming completion (+ usage), streaming (time-to-first-delta),
@@ -202,7 +202,7 @@ def main() -> int:
     env = load_env(ENV_PATH)
 
     print(f"preflight against {ENV_PATH} (values never printed)")
-    ok_kimi = probe_model("kimi-foundry",
+    ok_kimi = probe_model("kimi-k2.6",
                           env.get("FOUNDRY_MODEL", ""),
                           env.get("FOUNDRY_API_BASE", ""),
                           env.get("AZURE_AI_FOUNDRY_API_KEY", ""))

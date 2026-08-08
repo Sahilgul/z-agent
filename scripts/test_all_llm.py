@@ -16,7 +16,8 @@ Two targets:
       cd ~/z-agent/infra/vm
       docker compose exec -T gateway python - --gateway < ../../scripts/test_all_llm.py
 
-Env is read via dotenv.load_dotenv from infra/vm/.env (override with
+Env is read via dotenv.load_dotenv from the first file that exists among
+infra/vm/.env (the VM's compose path), infra/.env, and .env (override with
 --env PATH or ENV_FILE). If python-dotenv isn't installed, a minimal
 fallback parser handles simple KEY=value files; if the vars are already in
 the process environment (inside the container), no file is needed at all.
@@ -53,20 +54,34 @@ def load_env(path: str) -> None:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                # Hand-grown files accumulate duplicate keys: an EMPTY value
+                # never wins, so a later real assignment still loads.
+                if k and v:
+                    os.environ.setdefault(k, v)
     except FileNotFoundError:
         pass  # inside the gateway container the vars are already set
 
 
 # --------------------------------------------------------------- the matrix
 
-# alias -> (deployment env var, reasoning efforts, thinking-off allowed)
-MODELS: dict[str, tuple[str, list[str], bool]] = {
-    "kimi-foundry":           ("FOUNDRY_MODEL",         ["low", "high", "max"], True),
-    "kimi3-foundry":          ("FOUNDRY_MODEL_K3",      ["low", "high", "max"], False),
-    "glm-foundry":            ("FOUNDRY_MODEL_GLM",     ["high", "max"],        True),
-    "deepseek-pro-foundry":   ("FOUNDRY_MODEL_DS_PRO",  ["low", "high", "max"], True),
-    "deepseek-flash-foundry": ("FOUNDRY_MODEL_DS_FLASH", ["low", "high", "max"], True),
+# alias -> (deployment env var, reasoning efforts, thinking-off allowed,
+#           default deployment, base env var, key env var)
+# Efforts are the enum each deployment's serving layer validates (probed
+# direct 2026-08-08). "off" maps to "none" on the wire; there is NO
+# "thinking" object on these surfaces. K3 is the only "max" taker and lives
+# on its OWN endpoint/key (FOUNDRY_*_K3 vars); the rest share the main two.
+MODELS: dict[str, tuple[str, list[str], bool, str, str | None, str | None]] = {
+    "kimi-k2.6":           ("FOUNDRY_MODEL",         ["low", "medium", "high"],           True, "",
+                               None, None),
+    "kimi-k3":          ("FOUNDRY_MODEL_K3",      ["low", "medium", "high", "max"],    True, "openai/FW-Kimi-K3",
+                               "FOUNDRY_API_BASE_K3", "AZURE_AI_FOUNDRY_API_KEY_K3"),
+    "glm-5.2":            ("FOUNDRY_MODEL_GLM",     ["low", "medium", "high"],           True, "openai/FW-GLM-5.2",
+                               None, None),
+    "deepseek-v4-pro":   ("FOUNDRY_MODEL_DS_PRO",  ["minimal", "low", "medium", "high"], True, "openai/DeepSeek-V4-Pro",
+                               None, None),
+    "deepseek-v4-flash": ("FOUNDRY_MODEL_DS_FLASH", ["minimal", "low", "medium", "high"], True, "openai/DeepSeek-V4-Flash",
+                               None, None),
 }
 
 PROMPT = ("Is 9.11 greater than 9.8? Think step by step, "
@@ -131,18 +146,24 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gateway", metavar="URL",
                     help="test through LiteLLM (aliases) instead of direct Foundry")
-    ap.add_argument("--env", default=os.environ.get("ENV_FILE", "infra/vm/.env"),
-                    help="path to the .env file (default: infra/vm/.env)")
+    ap.add_argument("--env", default=None,
+                    help="path to the .env file (default: first of "
+                         "ENV_FILE, infra/vm/.env, infra/.env, .env)")
     ap.add_argument("--models", nargs="*", choices=[*MODELS, "all"], default=["all"],
                     help="subset of aliases to test")
     ap.add_argument("--timeout", type=int, default=300)
     args = ap.parse_args()
 
-    load_env(args.env)
+    env_path = args.env or os.environ.get("ENV_FILE") or next(
+        (p for p in ("infra/vm/.env", "infra/.env", ".env")
+         if os.path.isfile(p)), "infra/vm/.env")
+    load_env(env_path)
 
     if args.gateway:
         base, key = args.gateway.rstrip("/") + "/v1", os.environ.get("LITELLM_MASTER_KEY", "")
         name_of = {alias: alias for alias in MODELS}  # gateway routes by alias
+        base_of = {a: base for a in MODELS}
+        key_of = {a: key for a in MODELS}
         if not key:
             print("LITELLM_MASTER_KEY is not set (env file missing?)", file=sys.stderr)
             return 2
@@ -150,35 +171,45 @@ def main() -> int:
         base = os.environ.get("FOUNDRY_API_BASE", "")
         key = os.environ.get("AZURE_AI_FOUNDRY_API_KEY", "")
         # "openai/Kimi-K2.6" -> "Kimi-K2.6" (LiteLLM provider prefix)
-        name_of = {a: os.environ.get(env, "").split("/", 1)[-1]
-                   for a, (env, _, _) in MODELS.items()}
+        name_of = {a: (os.environ.get(env) or default).split("/", 1)[-1]
+                   for a, (env, _, _, default, _, _) in MODELS.items()}
+        # Per-model endpoint override (K3 lives on its own Foundry resource);
+        # falls back to the shared base/key when the override vars are unset.
+        base_of = {a: (os.environ.get(be, "") if be else "") or base
+                   for a, (_, _, _, _, be, _) in MODELS.items()}
+        key_of = {a: (os.environ.get(ke, "") if ke else "") or key
+                  for a, (_, _, _, _, _, ke) in MODELS.items()}
         if not base or not key:
             print("FOUNDRY_API_BASE / AZURE_AI_FOUNDRY_API_KEY not set "
-                  f"(looked in {args.env})", file=sys.stderr)
+                  f"(looked in {env_path})", file=sys.stderr)
             return 2
 
     selected = list(MODELS) if args.models == ["all"] else args.models
     failures: list[str] = []
 
     for alias in selected:
-        _, efforts, off_allowed = MODELS[alias]
+        _, efforts, off_allowed, _, _, _ = MODELS[alias]
         model = name_of[alias]
         if not model:
             print(f"\n=== {alias} === SKIPPED (deployment env var unset)")
             failures.append(f"{alias}: no deployment name")
             continue
+        if not base_of[alias] or not key_of[alias]:
+            print(f"\n=== {alias} === SKIPPED (endpoint env vars unset)")
+            failures.append(f"{alias}: no endpoint")
+            continue
         rows: list[tuple[str, dict | None, bool]] = [("default", None, False)]
-        # "off" is always probed: for always-thinking models a 400 CONFIRMS
-        # the registry guard (expected=True), a 200 means the flag can relax.
-        rows.append(("off", {"thinking": {"type": "disabled"}}, not off_allowed))
-        rows += [(e, {"thinking": {"type": "enabled"}, "reasoning_effort": e}, False)
-                 for e in efforts]
+        # "off" is always probed as reasoning_effort=none: for
+        # always-thinking models a 4xx CONFIRMS the registry guard
+        # (expected=True), a 200 means the flag can relax.
+        rows.append(("off", {"reasoning_effort": "none"}, not off_allowed))
+        rows += [(e, {"reasoning_effort": e}, False) for e in efforts]
 
         print(f"\n=== {alias}  ({model}) ===")
         for label, extra, expect_400 in rows:
-            r = call(base, key, model, extra, args.timeout)
+            r = call(base_of[alias], key_of[alias], model, extra, args.timeout)
             line = fmt(r)
-            if expect_400 and not r["ok"] and r["status"] == 400:
+            if expect_400 and not r["ok"] and r["status"] in (400, 422):
                 line += "   <- expected: always-thinking model, guard confirmed"
             elif expect_400 and r["ok"]:
                 line += "   <- UNEXPECTED 200: Foundry tolerates off here — flag can relax"

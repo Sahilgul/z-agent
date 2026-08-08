@@ -179,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -------------------------------------------------------------- chat
     def _chat(self, body: dict) -> None:
-        model = body.get("model", "kimi-foundry")
+        model = body.get("model", "kimi-k2.6")
         deltas, finish = _reply_plan(body)
         prompt_tokens = sum(len(str(m.get("content", ""))) // 4
                             for m in body.get("messages", [])) or 1

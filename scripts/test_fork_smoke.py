@@ -57,7 +57,7 @@ async def main() -> int:
     print(f"session volume: {session_root}")
 
     base_options = ClaudeAgentOptions(
-        model="kimi-foundry",
+        model="kimi-k2.6",
         cwd=str(session_root),
     )
     os.environ["ANTHROPIC_BASE_URL"] = gateway_url
@@ -95,7 +95,7 @@ async def main() -> int:
 
     # --- Leg C: resume the fork with the corrected message ---------------- #
     fork_options = ClaudeAgentOptions(
-        model="kimi-foundry",
+        model="kimi-k2.6",
         cwd=str(session_root),
         resume=fork_id,
     )
