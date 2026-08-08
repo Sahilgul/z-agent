@@ -62,7 +62,10 @@ services:
 
   gateway:
     # LiteLLM tag scheme changed mid-2026: PEP 440 pins; main-v*-stable is gone.
-    image: ghcr.io/berriai/litellm:1.84.0
+    # 1.95.0 is REQUIRED for the composer's reasoning selection: the worker
+    # sends reasoning_effort via a nested extra_body passthrough, verified
+    # end-to-end against a local 1.95.0 proxy + live Foundry (2026-08-08).
+    image: ghcr.io/berriai/litellm:1.95.0
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     environment:
       DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD}@gateway-db:5432/litellm
@@ -70,7 +73,7 @@ services:
       # Optional at first boot: the gateway starts without it; LLM calls fail
       # until a real Foundry key is set (UI/login/runs-metadata work regardless).
       AZURE_AI_FOUNDRY_API_KEY: ${AZURE_AI_FOUNDRY_API_KEY:-}
-      # Which Foundry deployment kimi-foundry actually routes to (config.yaml
+      # Which Foundry deployment kimi-k2.6 actually routes to (config.yaml
       # reads both via os.environ/, so this file stays deployment-agnostic).
       FOUNDRY_MODEL: ${FOUNDRY_MODEL:?set in .env}
       FOUNDRY_API_BASE: ${FOUNDRY_API_BASE:?set in .env}
@@ -79,7 +82,13 @@ services:
       # names; override in .env if yours differ. Every var must resolve —
       # config.yaml references crash LiteLLM at boot when unset.
       FOUNDRY_MODEL_GLM: ${FOUNDRY_MODEL_GLM:-openai/FW-GLM-5.2}
-      FOUNDRY_MODEL_K3: ${FOUNDRY_MODEL_K3:-openai/Kimi-K3}
+      FOUNDRY_MODEL_K3: ${FOUNDRY_MODEL_K3:-openai/FW-Kimi-K3}
+      # K3 lives on a SEPARATE Foundry resource (probed 2026-08-08: it 404s
+      # DeploymentNotFound on the main endpoint) — its route needs its own
+      # base + key. Empty default: the kimi-k3 route stays up but
+      # calls fail until these are set, same contract as the main key above.
+      FOUNDRY_API_BASE_K3: ${FOUNDRY_API_BASE_K3:-}
+      AZURE_AI_FOUNDRY_API_KEY_K3: ${AZURE_AI_FOUNDRY_API_KEY_K3:-}
       FOUNDRY_MODEL_DS_PRO: ${FOUNDRY_MODEL_DS_PRO:-openai/DeepSeek-V4-Pro}
       FOUNDRY_MODEL_DS_FLASH: ${FOUNDRY_MODEL_DS_FLASH:-openai/DeepSeek-V4-Flash}
       STORE_MODEL_IN_DB: "True"

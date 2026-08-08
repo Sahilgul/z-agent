@@ -3,7 +3,7 @@
 # qwen-foundry entry is omitted because its os.environ/ vars are unset (a
 # missing env var fails the whole LiteLLM config load).
 model_list:
-  - model_name: kimi-foundry
+  - model_name: kimi-k2.6
     litellm_params:
       model: os.environ/FOUNDRY_MODEL
       api_base: os.environ/FOUNDRY_API_BASE

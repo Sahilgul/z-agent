@@ -9,7 +9,7 @@ model_list:
   # virtual keys are scoped to the thread's own alias (gateway/litellm.py
   # mint_key), and the backend registry (backend/app/core/models.py) must
   # list every alias offered in the composer. Renaming an alias breaks lanes.
-  - model_name: kimi-foundry
+  - model_name: kimi-k2.6
     litellm_params:
       # All three come from infra/vm/.env — nothing deployment-specific is
       # committed here. FOUNDRY_MODEL carries the provider prefix AND the
@@ -45,17 +45,21 @@ model_list:
       # worker's ChatOpenAIReasoning subclass can surface it as StepKind.THINKING.
       supports_reasoning: true
 
-  - model_name: kimi3-foundry
+  - model_name: kimi-k3
     litellm_params:
-      model: os.environ/FOUNDRY_MODEL_K3      # e.g. openai/Kimi-K3
-      api_base: os.environ/FOUNDRY_API_BASE
-      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+      model: os.environ/FOUNDRY_MODEL_K3      # e.g. openai/FW-Kimi-K3
+      # K3 is deployed on a SEPARATE Foundry resource from the rest of the
+      # fleet (probed 2026-08-08: DeploymentNotFound on the main endpoint),
+      # so this route has its own base + key.
+      api_base: os.environ/FOUNDRY_API_BASE_K3
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY_K3
     model_info:
-      # NOT confirmed against the Foundry listing — seeded at the
-      # Fireworks/Moonshot first-party rate ($3 in / $15 out per 1M). Fix
-      # here + backend/app/core/models.py + the worker fallback together.
-      input_cost_per_token: 0.000003
-      output_cost_per_token: 0.000015
+      # Confirmed against the Foundry listing (2026-08): Fireworks "Kimi K3
+      # US" tier — $3.30 in / $0.33 cached / $16.50 out per 1M. Keep in sync
+      # with backend/app/core/models.py + the worker fallback table.
+      input_cost_per_token: 0.0000033
+      output_cost_per_token: 0.0000165
+      cache_read_input_token_cost: 0.00000033
       # Declared output ceiling: 200k per response. This is METADATA for
       # LiteLLM's registry (nothing in the stack sends max_tokens on the wire —
       # omitting it lets the provider generate to its own limit; explicitly
@@ -63,14 +67,16 @@ model_list:
       max_tokens: 200000
       max_output_tokens: 200000
       mode: chat
-      # K3 always thinks; reasoning_content must flow like K2.6 (see above).
+      # Probed direct (2026-08-08): K3 takes none/low/medium/high/max — the
+      # only fleet model with "max" — and "none" switches thinking off,
+      # despite first-party Moonshot docs claiming K3 always thinks.
       supports_reasoning: true
 
   # The compare-fleet routes: same Foundry resource, same /openai/v1 surface
-  # and key as kimi-foundry — only the deployment name differs. The compose
+  # and key as kimi-k2.6 — only the deployment name differs. The compose
   # file ships defaults for FOUNDRY_MODEL_* (an unset os.environ/ ref resolves
   # to None and crashes LiteLLM at boot, so every route's vars must exist).
-  - model_name: glm-foundry
+  - model_name: glm-5.2
     litellm_params:
       model: os.environ/FOUNDRY_MODEL_GLM      # e.g. openai/FW-GLM-5.2
       api_base: os.environ/FOUNDRY_API_BASE
@@ -88,11 +94,11 @@ model_list:
       max_tokens: 200000
       max_output_tokens: 200000
       mode: chat
-      # Preserve reasoning_content like kimi-foundry (see above) — GLM
+      # Preserve reasoning_content like kimi-k2.6 (see above) — GLM
       # thinking models emit it and stock LiteLLM strips it.
       supports_reasoning: true
 
-  - model_name: deepseek-pro-foundry
+  - model_name: deepseek-v4-pro
     litellm_params:
       model: os.environ/FOUNDRY_MODEL_DS_PRO   # e.g. openai/DeepSeek-V4-Pro
       api_base: os.environ/FOUNDRY_API_BASE
@@ -112,7 +118,7 @@ model_list:
       mode: chat
       supports_reasoning: true
 
-  - model_name: deepseek-flash-foundry
+  - model_name: deepseek-v4-flash
     litellm_params:
       model: os.environ/FOUNDRY_MODEL_DS_FLASH  # e.g. openai/DeepSeek-V4-Flash
       api_base: os.environ/FOUNDRY_API_BASE

@@ -18,58 +18,52 @@ class ModelOption(BaseModel):
     price_in_per_mtok: float      # USD per 1M standard input tokens
     price_out_per_mtok: float     # USD per 1M output tokens
     cache_read_per_mtok: float | None = None  # USD per 1M cached input
+    # True = natively reads image inputs (probed live through the gateway
+    # 2026-08-08: both Kimi deployments pass; GLM 400s; both DeepSeeks 200
+    # but hallucinate — blind). The composer uses this to badge vision
+    # models; the orchestrator routes images through a Kimi pre-pass when
+    # the selected lane is blind.
+    vision: bool = False
     # Selectable reasoning efforts (empty = the model takes no
-    # reasoning_effort value — on/off only). The worker maps the choice into
-    # extra_body {"thinking": ..., "reasoning_effort": ...}.
+    # reasoning_effort value — on/off only). The worker puts the choice on
+    # the wire as reasoning_effort=<value>; "off" maps to "none".
     reasoning_efforts: list[str] = []
-    # False = thinking is ALWAYS on (Kimi K3, kimi-k2.7-code): "off" would
-    # 400 the lane, so the picker hides it and validation rejects it.
+    # False = the deployment rejects reasoning_effort="none" (always
+    # thinks): "off" would 400 the lane, so the picker hides it and
+    # validation rejects it.
     supports_thinking_off: bool = True
 
-
-# Pricing confirmed against the Azure AI Foundry listings (2026-08). Keep in
-# sync with the model_info blocks in infra/litellm/config.yaml — the gateway
-# meters spend from its copy, the worker's budget reminders estimate from
-# ours (injected as MODEL_PRICE_*_PER_MTOK container env).
-# Reasoning efforts, verified against the LIVE Foundry deployments through the
-# gateway (2026-08-08 probe): Kimi accepts low/high/max (provider default is
-# max — dialing down is the cost/latency lever); GLM maps low/medium→high (so
-# we offer the real two); V4 Pro rejects or maps low (unverified — high/max
-# only until probed); V4 Flash has all three. All four default to thinking ON.
 DEFAULT_MODELS: list[ModelOption] = [
     ModelOption(
-        alias="kimi-foundry", label="kimi k2.6",
+        alias="kimi-k2.6", label="Kimi K2.6",
         price_in_per_mtok=0.95, price_out_per_mtok=4.00,
         cache_read_per_mtok=0.16,
-        reasoning_efforts=["low", "high", "max"],
+        vision=True,
+        reasoning_efforts=["low", "medium", "high"],
     ),
     ModelOption(
-        alias="kimi3-foundry", label="kimi k3",
-        # Pricing NOT yet confirmed against the Foundry listing — seeded with
-        # the Fireworks/Moonshot first-party rate ($3/$15 per 1M). Verify and
-        # correct here + config.yaml + the worker fallback table together.
-        price_in_per_mtok=3.00, price_out_per_mtok=15.00,
-        cache_read_per_mtok=None,
-        reasoning_efforts=["low", "high", "max"],
-        # K3 always thinks — there is no disabled state to offer.
-        supports_thinking_off=False,
+        alias="kimi-k3", label="Kimi K3",
+        price_in_per_mtok=3.30, price_out_per_mtok=16.50,
+        cache_read_per_mtok=0.33,
+        vision=True,
+        reasoning_efforts=["low", "medium", "high", "max"],
     ),
     ModelOption(
-        alias="glm-foundry", label="glm 5.2",
+        alias="glm-5.2", label="GLM 5.2",
         price_in_per_mtok=1.54, price_out_per_mtok=4.84,
         cache_read_per_mtok=0.15,
-        reasoning_efforts=["high", "max"],
+        reasoning_efforts=["low", "medium", "high"],
     ),
     ModelOption(
-        alias="deepseek-pro-foundry", label="deepseek v4 pro",
+        alias="deepseek-v4-pro", label="DeepSeek V4 Pro",
         price_in_per_mtok=1.74, price_out_per_mtok=3.48,
         cache_read_per_mtok=0.145,
-        reasoning_efforts=["low", "high", "max"],
+        reasoning_efforts=["minimal", "low", "medium", "high"],
     ),
     ModelOption(
-        alias="deepseek-flash-foundry", label="deepseek v4 flash",
+        alias="deepseek-v4-flash", label="DeepSeek V4 Flash",
         price_in_per_mtok=0.19, price_out_per_mtok=0.51,
         cache_read_per_mtok=0.028,
-        reasoning_efforts=["low", "high", "max"],
+        reasoning_efforts=["minimal", "low", "medium", "high"],
     ),
 ]

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # The gateway's public model alias (infra/litellm/config.yaml model_name).
     # Thread virtual keys are scoped to it, so every caller must use this exact
     # string — asking for anything else is rejected by the gateway.
-    gateway_model: str = "kimi-foundry"
+    gateway_model: str = "kimi-k2.6"
     # The user-selectable model fleet (composer dropdown). Aliases must match
     # gateway routes; gateway_model must be one of them (it is the default
     # when a run doesn't choose). Override with COLLEGIUM_AVAILABLE_MODELS
@@ -157,12 +157,12 @@ class Settings(BaseSettings):
     # Knowledge flywheel retrieval: cheap-model rerank of
     # trigger_descriptions at run start. Any gateway failure falls back to
     # deterministic lexical ranking — retrieval must never fail a run.
-    knowledge_rerank_model: str = "kimi-foundry"
+    knowledge_rerank_model: str = "kimi-k2.6"
     knowledge_top_k: int = 8
     knowledge_rerank_timeout_seconds: float = 10.0
 
     # Ideas space: Counsel + Lead synthesis completions via the gateway.
-    ideas_model: str = "kimi-foundry"
+    ideas_model: str = "kimi-k2.6"
 
     # BYO-PAT: local-era at-rest encryption key; Key Vault
     # takes over at the VM move. Empty disables BYO-PAT storage.
