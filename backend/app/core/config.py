@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     redis_url: str = "memory://0"
 
     gateway_url: str = "http://localhost:4000"
+    # PUBLIC URL of the LiteLLM proxy UI, as reachable from an admin's browser
+    # (the VM's host:port, e.g. https://vm.example.com:4000/ui). The internal
+    # gateway_url is a compose-network address the browser can't resolve, so
+    # the Usage button uses this. Empty = derive from gateway_url (fine for
+    # local dev where localhost means the same thing to both).
+    gateway_ui_url: str = ""
     litellm_master_key: str = ""
     # The gateway's public model alias (infra/litellm/config.yaml model_name).
     # Thread virtual keys are scoped to it, so every caller must use this exact

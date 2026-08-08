@@ -2,18 +2,24 @@ import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   BookOpenIcon,
+  ChartColumnIcon,
   CircleDollarSignIcon,
   FolderGit2Icon,
   InboxIcon,
   LightbulbIcon,
   LogOutIcon,
   RadarIcon,
+  SettingsIcon,
   UsersIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSession } from "../stores/session";
 import { useRuns } from "../stores/run";
+import { useUi } from "../stores/ui";
+import { api } from "../lib/api";
+import { toast } from "@/components/ui/sonner";
+import { SettingsPanel } from "./SettingsPanel";
 import { SCREEN_PATHS } from "../lib/routes";
 import type { Screen } from "../types";
 
@@ -90,7 +96,22 @@ function RailButton({ item }: { item: NavItem }) {
 export function SideRail() {
   const { me, logout } = useSession();
   const socketConnected = useRuns((s) => s.socketConnected);
+  const setSettingsOpen = useUi((s) => s.setSettingsOpen);
   const isAdmin = me?.role === "admin";
+
+  // Usage: open the LiteLLM proxy UI (usage/spend dashboards) on the VM in a
+  // new tab. The URL comes from the backend — the browser can't resolve the
+  // compose-internal gateway address.
+  const openUsage = async () => {
+    try {
+      const { url } = await api.get<{ url: string }>("/team/gateway-ui");
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      toast.error("couldn't resolve the gateway UI URL", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
 
   return (
     <nav
@@ -133,6 +154,26 @@ export function SideRail() {
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-secondary max-[1100px]:hidden">
             {me?.display_name}
           </span>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => void openUsage()}
+              title="usage — LLM proxy dashboards"
+              aria-label="usage"
+              className="rounded-md p-1.5 text-ink-faint transition-colors duration-fast hover:bg-bg-module hover:text-ink-primary"
+            >
+              <ChartColumnIcon className="size-4" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            title="settings"
+            aria-label="settings"
+            className="rounded-md p-1.5 text-ink-faint transition-colors duration-fast hover:bg-bg-module hover:text-ink-primary"
+          >
+            <SettingsIcon className="size-4" aria-hidden="true" />
+          </button>
           <button
             type="button"
             onClick={() => void logout()}
@@ -144,6 +185,7 @@ export function SideRail() {
           </button>
         </div>
       </div>
+      <SettingsPanel />
     </nav>
   );
 }

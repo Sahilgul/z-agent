@@ -92,6 +92,16 @@ def deactivate(user_id: int, actor: User = Depends(admin_user)):
     return {"ok": True}
 
 
+@router.get("/gateway-ui")
+def gateway_ui(_: User = Depends(admin_user)):
+    """The Usage button target: the LiteLLM proxy UI URL as reachable from
+    the admin's BROWSER. Admin-only — the URL reveals the VM host/port."""
+    from app.core.config import get_settings
+    settings = get_settings()
+    url = settings.gateway_ui_url or f"{settings.gateway_url.rstrip('/')}/ui"
+    return {"url": url}
+
+
 @router.get("/stats")
 def metadata_stats(_: User = Depends(admin_user)):
     """METADATA-ONLY: counts/costs — admin never reads content."""
