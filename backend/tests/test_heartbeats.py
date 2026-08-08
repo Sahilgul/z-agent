@@ -13,8 +13,8 @@ import asyncio
 
 import pytest
 
-from app.db.models.thread import Thread
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.services import heartbeats
 
 

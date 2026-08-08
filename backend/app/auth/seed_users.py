@@ -8,10 +8,8 @@ Run: python -m app.auth.seed_users
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 from collegium_contracts import StepKind
 
@@ -19,9 +17,9 @@ from app.core.config import get_settings
 from app.db.base import get_session
 from app.db.models.event import Event
 from app.db.models.idea import IdeaComment, IdeaThread
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.user import User
 
 ASK_PERSONA = (
@@ -210,7 +208,7 @@ def _seed_demo_run(session) -> None:
     system = session.query(User).filter_by(username="system").one()
     run_id = str(uuid.uuid4())
     thread_id = str(uuid.uuid4())
-    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    base = datetime.now(UTC) - timedelta(hours=1)
     session.add(Run(
         id=run_id, created_by=system.id, source="cron", mode="ask", autonomy="supervised",
         stage="completed", title="DEMO: How does scribe dedupe questions?",
@@ -256,7 +254,7 @@ def _seed_welcome_thread(session) -> None:
     for i, body in enumerate(comments):
         session.add(IdeaComment(
             thread_id=thread.id, author_type="user", author_ref=str(system.id),
-            body=body, created_at=datetime.now(timezone.utc) - timedelta(minutes=40 - i * 9),
+            body=body, created_at=datetime.now(UTC) - timedelta(minutes=40 - i * 9),
         ))
     session.commit()
 

@@ -1,10 +1,10 @@
 import pytest
 
 from app.db.models.mode import Mode
+from app.orchestrator import mode_engine
 from app.orchestrator.blueprints.ask import AskBlueprint
 from app.orchestrator.blueprints.base import Blueprint
 from app.orchestrator.blueprints.goal import GoalBlueprint
-from app.orchestrator import mode_engine
 
 
 def test_blueprints_registry_contains_ask():

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from collegium_contracts import RunStage
 
@@ -222,7 +222,7 @@ class PlanBlueprint(Blueprint):
                     success_criterion=step.success_criterion, status="pending",
                 ))
             transition(run, RunStage.AWAITING_USER)
-            run.last_active_at = datetime.now(timezone.utc)
+            run.last_active_at = datetime.now(UTC)
             session.commit()
             ctx.run = run
         finally:
@@ -243,6 +243,7 @@ class PlanBlueprint(Blueprint):
 
     async def _await_thread(self, thread_id: str, poll_seconds: float = 2.0) -> None:
         import asyncio
+
         from app.db.models.thread import Thread
         while True:
             session = get_session()
@@ -252,7 +253,8 @@ class PlanBlueprint(Blueprint):
             finally:
                 session.close()
             if status in ("idle", "completed", "failed", "stopped",
-                          "interrupted", "replaced"):  # H-38
+                          "interrupted", "replaced", "input_required"):  # H-38 + A4:
+                          # approval-parked is terminal for the blueprint await
                 return
             await asyncio.sleep(poll_seconds)
 

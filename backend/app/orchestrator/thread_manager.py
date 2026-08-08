@@ -24,14 +24,14 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import get_session
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.events.bus import IngestConsumer
 from app.events.relay import Relay
 from app.gateway.litellm import GatewayClient
@@ -74,7 +74,8 @@ class ThreadManager:
                     writable_repo: Repo | None, context_repos: list[Repo],
                     resume_session: bool = False,
                     resume_from_thread_id: str | None = None,
-                    preserve_workspace: bool = False) -> Thread:
+                    preserve_workspace: bool = False,
+                    budget_usd: float | None = None) -> Thread:
         repo_name = writable_repo.name if writable_repo else None
         # Flywheel injection: pinned knowledge + the owner's
         # episodic recall join every thread's persona prompt. Cached per run, so
@@ -104,7 +105,11 @@ class ThreadManager:
         thread = Thread(
             id=str(uuid.uuid4()), run_id=run.id, persona=persona,
             repo_scope=repo_name,
-            status="queued", budget_usd=self.settings.default_thread_budget_usd,
+            # F5: kill/replace carries the REMAINING budget across (callers
+            # pass budget_usd); a fresh spawn gets the default cap.
+            status="queued",
+            budget_usd=(budget_usd if budget_usd is not None
+                        else self.settings.default_thread_budget_usd),
             session_id=inherited_session_id,
             spawn_context={"prompt": prompt, "persona_prompt": persona_prompt,
                            "resume_session": resume_session,
@@ -123,6 +128,12 @@ class ThreadManager:
         try:
             session.add(thread)
             session.commit()
+        except Exception:
+            # H2: a failed row insert MUST release the reservation — the old
+            # code leaked it, permanently shrinking capacity (and, for a
+            # writable spawn, holding the repo lock) until process restart.
+            capacity.release(repo_name)
+            raise
         finally:
             session.close()
         # Row exists -> active_thread_count owns the slot now (see Capacity).
@@ -134,6 +145,21 @@ class ThreadManager:
             )
             thread.gateway_key = vk.key
             thread.gateway_key_alias = vk.alias
+            # F2: persist the key BEFORE container start. The old ordering
+            # kept the key in memory until after start — a start failure
+            # marked the thread failed but release_key re-read the row, saw
+            # NULL, and no-oped: the minted key leaked at the gateway.
+            session = get_session()
+            try:
+                row = session.get(Thread, thread.id)
+                if row is not None:
+                    row.gateway_key = vk.key
+                    row.gateway_key_alias = vk.alias
+                    session.commit()
+            finally:
+                session.close()
+        except ThreadSpawnError:
+            raise
         except Exception as exc:  # gateway-down: fail safe before container start
             await self._mark(thread.id, "failed")
             raise ThreadSpawnError(f"gateway key mint failed: {exc}") from exc
@@ -158,14 +184,69 @@ class ThreadManager:
             row.status = "running"
             row.gateway_key = thread.gateway_key
             row.gateway_key_alias = thread.gateway_key_alias
-            row.heartbeat_at = datetime.now(timezone.utc)
+            row.heartbeat_at = datetime.now(UTC)
             session.commit()
         finally:
             session.close()
 
         self.ingest.register_run(run.id)
         await self.relay.publish_thread_status(run.id, thread.id, "running")
+        # C9: boot watchdog — a worker that crashes BEFORE its first heartbeat
+        # (import error, missing env, engine boot failure) used to sit at
+        # "running" forever: the reconcile sweep only trusts stale heartbeats,
+        # and a never-heartbeating row looks fresh at boot. Verify shortly
+        # after start that the container is alive; if it already exited,
+        # mark the thread failed promptly.
+        self._track(asyncio.ensure_future(
+            self._boot_watchdog(thread.id, container_id)))
         return thread
+
+    def _track(self, task: asyncio.Task) -> None:
+        """Track watchdog tasks so they aren't GC'd before completion."""
+        if not hasattr(self, "_boot_tasks"):
+            self._boot_tasks: set[asyncio.Task] = set()
+        self._boot_tasks.add(task)
+        task.add_done_callback(self._boot_tasks.discard)
+
+    async def _boot_watchdog(self, thread_id: str, container_id: str,
+                             grace_s: float = 30.0) -> None:
+        try:
+            await asyncio.sleep(grace_s)
+            session = get_session()
+            try:
+                thread = session.get(Thread, thread_id)
+                if thread is None or thread.status not in ("running", "queued"):
+                    return
+                heartbeat_at = thread.heartbeat_at
+            finally:
+                session.close()
+            alive = await asyncio.to_thread(
+                sandbox_manager.container_running, container_id)
+            if alive:
+                return
+            # Container gone. If the heartbeat is also stale, the worker died
+            # before/without reporting — stamp the failure so the row tells
+            # the truth and capacity frees.
+            fresh = (heartbeat_at is not None
+                     and (datetime.now(UTC) - heartbeat_at).total_seconds() < grace_s)
+            if fresh:
+                return
+            log.error("thread boot watchdog: container exited pre-heartbeat",
+                      thread_id=thread_id, container=container_id[:12])
+            await self._mark(thread_id, "failed")
+            await self.relay.publish_thread_status(
+                # run_id is recoverable from the thread row; re-read cheaply.
+                (await self._run_id_of(thread_id)) or "", thread_id, "failed")
+        except Exception:
+            log.warning("boot watchdog failed", thread_id=thread_id, exc_info=True)
+
+    async def _run_id_of(self, thread_id: str) -> str | None:
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            return thread.run_id if thread else None
+        finally:
+            session.close()
 
     async def spawn_many(self, run: Run, specs: list[dict],
                          context_repos: list[Repo],
@@ -200,6 +281,38 @@ class ThreadManager:
         threads = await asyncio.gather(*(_spawn_one(s) for s in specs))
         return [l for l in threads if l is not None]
 
+    async def _cleanup_terminal(self, thread_id: str) -> None:
+        """F1/F6: the ONE money-and-key cleanup every terminal path runs.
+        Order is deliberate: settle cost FIRST (the readback needs the live
+        key), then delete the gateway key (tolerating already-deleted keys),
+        then clear the stored secret from the row. Capacity is status-derived,
+        so the caller's terminal stamp has already freed the slot."""
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            key = thread.gateway_key if thread else None
+        finally:
+            session.close()
+        if not key:
+            return
+        try:
+            await self.settle_cost(thread_id)
+        except Exception as exc:
+            log.warning("terminal cost settle failed (key still released)",
+                        thread_id=thread_id, error=str(exc)[:120])
+        await self.release_key(thread_id)
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            if thread:
+                # The key is dead at the gateway — don't keep the secret
+                # (or its alias) lying around in the row.
+                thread.gateway_key = None
+                thread.gateway_key_alias = None
+                session.commit()
+        finally:
+            session.close()
+
     async def settle_cost(self, thread_id: str) -> float:
         """End-of-thread spend readback (eventually consistent, grace
         window). This — not the SDK's Anthropic-priced calculator — fills cost."""
@@ -210,7 +323,11 @@ class ThreadManager:
                 return 0.0
             spend = await self.gateway.read_spend_reconciled(thread.gateway_key)
             thread.cost_usd = spend
-            thread.finished_at = datetime.now(timezone.utc)
+            # Only stamp finished_at for genuinely terminal threads — run-end
+            # settlement (F3) also reads back spend for LIVE threads (their
+            # final settle happens at the thread's own terminal transition).
+            if thread.status in ("completed", "failed", "stopped", "replaced"):
+                thread.finished_at = thread.finished_at or datetime.now(UTC)
             run = session.get(Run, thread.run_id)
             if run:
                 run.cost_usd = sum(l.cost_usd for l in session.query(Thread).filter_by(run_id=run.id))
@@ -263,11 +380,13 @@ class ThreadManager:
             # thread while the container was dying.
             if thread and thread.status not in ("completed", "failed", "stopped", "replaced"):
                 thread.status = final_status
-                thread.finished_at = datetime.now(timezone.utc)
+                thread.finished_at = datetime.now(UTC)
                 session.commit()
         finally:
             session.close()
-        await self.release_key(thread_id)
+        # F1: node-end is a terminal transition — unified cleanup (settle,
+        # release, clear), not a bare key release.
+        await self._cleanup_terminal(thread_id)
 
     async def _mark(self, thread_id: str, status: str) -> None:
         session = get_session()
@@ -278,12 +397,12 @@ class ThreadManager:
                 session.commit()
         finally:
             session.close()
-        # H-36: release the minted LiteLLM key when the thread reaches a
-        # terminal state. The old _mark never called release_key, so every
-        # minted key (and its unsettled cost) leaked — the gateway held
-        # the key forever even after the thread died.
-        if status in ("completed", "failed", "stopped"):
-            await self.release_key(thread_id)
+        # H-36/F1: every terminal stamp runs the unified cleanup — settle the
+        # cost, release the key, clear the secret. "replaced" is included: a
+        # kill/replace'd thread's key used to leak (the status was missing
+        # from the release list and its spend was never read back).
+        if status in ("completed", "failed", "stopped", "replaced"):
+            await self._cleanup_terminal(thread_id)
 
     def _mark_sync(self, thread_id: str, status: str) -> None:
         """Sync variant for contexts that can't await (sets status only;

@@ -1,8 +1,8 @@
 import pytest
 
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.gateway.litellm import VirtualKey
 from app.orchestrator import thread_manager
 from app.orchestrator.thread_manager import ThreadManager, ThreadSpawnError

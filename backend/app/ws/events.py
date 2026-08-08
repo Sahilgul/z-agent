@@ -54,7 +54,7 @@ async def run_events_ws(websocket: WebSocket, run_id: str):
 
     await websocket.accept()
     relay = websocket.app.state.relay
-    queue = relay.subscribe(run_id)
+    queue = relay.subscribe(run_id, user_id=user.id)
     try:
         while True:
             message = await queue.get()

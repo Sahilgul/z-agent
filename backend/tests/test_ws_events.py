@@ -1,7 +1,5 @@
-from unittest.mock import MagicMock
 
 from app.core.security import issue_token
-from app.db.models.user import User
 
 
 class _FakeWs:
@@ -59,8 +57,8 @@ def test_authenticate_success(session, make_user):
 
 
 def test_authenticate_decode_exception_returns_none(monkeypatch):
-    from app.ws import events
     from app.core import security
+    from app.ws import events
 
     def boom(token):
         raise RuntimeError("decode blew up")
@@ -119,9 +117,9 @@ async def test_ws_close_run_not_found(session, make_user):
 
 
 async def test_ws_close_run_owned_by_other(session, make_user):
+    from app.db.models.run import Run
     from app.ws.events import run_events_ws
     from tests.conftest import FakeRelay
-    from app.db.models.run import Run
     u = make_user("alice", role="member", status="active", pin="1234")
     other = make_user("bob", role="member", status="active", pin="1234")
     session.add(Run(id="r1", created_by=other.id, mode="ask", stage="completed"))
@@ -136,9 +134,10 @@ async def test_ws_close_run_owned_by_other(session, make_user):
 async def test_ws_accepts_and_forwards_messages(session, make_user):
     import asyncio
     import json
+
+    from app.db.models.run import Run
     from app.ws.events import run_events_ws
     from tests.conftest import FakeRelay
-    from app.db.models.run import Run
     u = make_user("alice", role="member", status="active", pin="1234")
     session.add(Run(id="r1", created_by=u.id, mode="ask", stage="completed"))
     session.commit()
@@ -151,7 +150,7 @@ async def test_ws_accepts_and_forwards_messages(session, make_user):
     # Wait for the endpoint to subscribe, then push messages into its queue.
     for _ in range(50):
         await asyncio.sleep(0)
-        if "r1" in relay.subscribers and relay.subscribers["r1"]:
+        if relay.subscribers.get("r1"):
             break
     queue = next(iter(relay.subscribers["r1"]))
     # H-53: push TWO messages and assert PAYLOAD + ORDER. The old test pushed

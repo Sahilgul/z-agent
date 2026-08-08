@@ -1,14 +1,13 @@
 import asyncio
 import json
-import uuid
 
 import pytest
 from collegium_contracts import StepEvent, StepKind
 
 import app.db.base as db_base
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.events import bus as bus_mod
 
 
@@ -20,6 +19,9 @@ def _consumer(fake_redis, relay=None):
     c.relay = relay or FakeRelay()
     c.run_streams = set()
     c._task = None
+    c._drain_tasks = set()
+    c._deadletter_seen = {}
+    c._loops_since_scan = 0
     return c
 
 

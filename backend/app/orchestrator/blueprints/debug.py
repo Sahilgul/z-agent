@@ -16,16 +16,16 @@ present    (deterministic): parse+validate the proposal, persist a draft Plan + 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from collegium_contracts import RunStage
 
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
+from app.db.models.thread import Thread
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
 from app.services import evidence
 from app.services.runs import transition
@@ -192,7 +192,7 @@ class DebugBlueprint(Blueprint):
             # Debug-specific promotion surface: review the proposed fix, or start_plan
             # to promote it into a plan run (the plan blueprint runs with this as the seed).
             run.available_actions = ["review_plan", "start_plan"]
-            run.last_active_at = datetime.now(timezone.utc)
+            run.last_active_at = datetime.now(UTC)
             session.commit()
             ctx.run = run
         finally:
@@ -254,7 +254,8 @@ class DebugBlueprint(Blueprint):
             finally:
                 session.close()
             if status in ("idle", "completed", "failed", "stopped",
-                          "interrupted", "replaced"):  # H-38
+                          "interrupted", "replaced", "input_required"):  # H-38 + A4:
+                          # approval-parked is terminal for the blueprint await
                 return
             await asyncio.sleep(poll_seconds)
 

@@ -1,7 +1,5 @@
 import asyncio
 
-import pytest
-
 from app.db.models.thread import Thread
 from app.orchestrator import semaphores
 

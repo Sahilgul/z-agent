@@ -1,5 +1,9 @@
 from app.orchestrator.autonomy import (
-    AUTONOMOUS, GATED, SUPERVISED, PERMISSION_MODE_BY_AUTONOMY, permission_mode_for,
+    AUTONOMOUS,
+    GATED,
+    PERMISSION_MODE_BY_AUTONOMY,
+    SUPERVISED,
+    permission_mode_for,
 )
 
 

@@ -1,8 +1,6 @@
 import asyncio
 import json
 
-import pytest
-
 from app.events import relay as relay_mod
 
 
@@ -11,6 +9,7 @@ def _relay(fake_redis):
     r.redis = fake_redis
     r.subscribers = {}
     r._delta_tasks = {}
+    r._queue_owner = {}
     return r
 
 
@@ -106,7 +105,6 @@ async def test_publish_global_fans_to_all_runs(fake_redis):
 async def test_delta_loop_forwards_published_deltas(fake_redis, monkeypatch):
     r = _relay(fake_redis)
     fake_redis.pubsub_channels["deltas:run-1"] = []
-    started = asyncio.Event()
 
     class FakePubSub:
         def __init__(self):

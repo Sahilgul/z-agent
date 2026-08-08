@@ -27,7 +27,7 @@ class PlaywrightMcpClient:
         self.settings = settings or get_settings()
 
     @classmethod
-    def build(cls) -> "PlaywrightMcpClient | None":
+    def build(cls) -> PlaywrightMcpClient | None:
         """Return a client when Playwright MCP is configured, else None so callers
         can skip screenshot evidence without crashing."""
         try:

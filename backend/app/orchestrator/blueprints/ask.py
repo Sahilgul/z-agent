@@ -8,15 +8,15 @@ complete (deterministic: cost readback + trajectory summary).
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from collegium_contracts import RunStage
 
 from app.db.base import get_session
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
 from app.services.runs import transition
@@ -109,8 +109,10 @@ class AskBlueprint(Blueprint):
                           # H-38: interrupted (nudge/stop) and replaced
                           # (kill-replace) are terminal too — the old set
                           # omitted them so the await loop never returned
-                          # and the blueprint stuck forever.
-                          "interrupted", "replaced"):
+                          # and the blueprint stuck forever. A4: input_required
+                          # (approval-parked) is terminal for the blueprint —
+                          # the run stage tracks the human wait.
+                          "interrupted", "replaced", "input_required"):
                 return
             await asyncio.sleep(poll_seconds)
 
@@ -140,7 +142,7 @@ class AskBlueprint(Blueprint):
                     run_id=run.id, thread_id=thread_id, user_id=run.created_by,
                     summary=run.auto_summary or f"Ask run on {run.repo or 'repo'}: {run.title[:200]}",
                 ))
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             session.commit()
         finally:
             session.close()

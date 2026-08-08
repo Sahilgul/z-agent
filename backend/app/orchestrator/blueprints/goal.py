@@ -36,6 +36,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from collegium_contracts import RunStage
 
 from app.core.config import get_settings
@@ -548,7 +549,18 @@ class GoalBlueprint(Blueprint):
         session = get_session()
         try:
             thread = session.get(Thread, develop_thread_id)
-            seq = (thread.next_seq if thread else 0)
+            if thread is not None:
+                seq = thread.next_seq
+            else:
+                # Control-plane fallback thread may not exist as a row — with
+                # the D1 unique (run_id, thread_id, seq) constraint a fixed
+                # seq=0 collides on the second fix round. Allocate above the
+                # current max instead.
+                max_seq = (session.query(sa.func.max(Event.seq))
+                           .filter_by(run_id=ctx.run.id,
+                                      thread_id=develop_thread_id)
+                           .scalar())
+                seq = (max_seq if max_seq is not None else -1) + 1
             session.add(Event(
                 run_id=ctx.run.id, thread_id=develop_thread_id, seq=seq,
                 type="test_run",
@@ -595,7 +607,10 @@ async def _await_thread(thread_id: str, poll_seconds: float = 2.0,
         finally:
             session.close()
         if status in ("idle", "completed", "failed", "stopped",
-                      "interrupted", "replaced"):  # H-38
+                      "interrupted", "replaced",
+                      "input_required"):  # H-38 + A4: approval-parked threads
+                      # end the blueprint await — the run stage tracks the
+                      # human wait; polling forever wedged the run.
             return
         if waited >= max_wait_s:
             raise RuntimeError(

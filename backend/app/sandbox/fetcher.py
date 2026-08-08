@@ -13,7 +13,7 @@ or bind-mount read-only.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -72,7 +72,7 @@ def fetch_all() -> dict[str, str]:
         for repo in repos:
             ok, detail = fetch_one(repo, settings.golden_dir)
             if ok:
-                repo.last_fetch_at = datetime.now(timezone.utc)
+                repo.last_fetch_at = datetime.now(UTC)
                 repo.last_fetch_head = detail
                 if repo.status == RepoStatus.ERROR:
                     repo.status = RepoStatus.READY
@@ -115,6 +115,6 @@ def stop_fetch_loop() -> None:
     if _scheduler is not None:
         try:
             _scheduler.shutdown(wait=False)
-        except Exception as exc:  # noqa: BLE001 — already shutting down
+        except Exception as exc:
             log.warning("fetch scheduler shutdown failed", error=str(exc)[:200])
         _scheduler = None

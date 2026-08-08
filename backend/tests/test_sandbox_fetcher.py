@@ -1,6 +1,4 @@
-import time
 
-import pytest
 
 from app.db.models.repo import Repo, RepoStatus
 from app.sandbox import fetcher

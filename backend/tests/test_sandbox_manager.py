@@ -1,12 +1,11 @@
 import os
 import time
-from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.sandbox import manager as sb
 
 
@@ -133,6 +132,11 @@ def test_stamp_clone_propagates_failure(monkeypatch):
     import subprocess
     repo = Repo(name="ServerApp", integration_branch="main")
 
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
     def fake_run(cmd, **kw):
         if "fetch" in cmd:
             raise subprocess.CalledProcessError(1, cmd, stderr="fetch refused")
@@ -168,7 +172,10 @@ def test_thread_env_resume_session(session, make_user):
     run, thread = _make_run_thread(session, make_user, session_id="sess-9")
     mgr = sb.SandboxManager()
     env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
-    assert env["RESUME_SESSION_ID"] == "sess-9"
+    # B2: the custom engine resumes via RESUME_CONTEXT_ID (LangGraph
+    # checkpoint namespace); RESUME_SESSION_ID was the legacy SDK var.
+    assert env["RESUME_CONTEXT_ID"] == "sess-9"
+    assert env["CHECKPOINT_MIRROR_DIR"] == "/session"
 
 
 def test_thread_env_proxy_injection(session, make_user, monkeypatch):
@@ -284,7 +291,7 @@ def test_shred_workspace_missing_is_noop():
     sb.sandbox_manager.shred_workspace("never-existed")
 
 
-def test_purge_expired_sessions_purges_old(monkeypatch):
+def test_purge_expired_sessions_purges_old(monkeypatch, session):
     sessions = sb.get_settings().sessions_dir
     old = sessions / "old-run"
     old.mkdir(parents=True, exist_ok=True)
@@ -307,7 +314,26 @@ def test_purge_expired_sessions_purges_old(monkeypatch):
     assert fresh.exists()
 
 
-def test_purge_expired_sessions_keeps_old_dir_with_fresh_file(monkeypatch):
+def test_purge_expired_sessions_never_shreds_live_thread_volume(session):
+    """M5: a session volume owned by a non-terminal thread must survive the
+    retention sweep even when it is older than the cutoff."""
+    sessions = sb.get_settings().sessions_dir
+    live = sessions / "sess-live"
+    live.mkdir(parents=True, exist_ok=True)
+    (live / "f.txt").write_text("x")
+    old_ts = time.time() - (31 * 86400)
+    os.utime(live, (old_ts, old_ts))
+    os.utime(live / "f.txt", (old_ts, old_ts))
+    session.add(Thread(id="t-live", run_id="r-1", repo_scope="repo",
+                       persona="lead", status="active",
+                       session_id="sess-live"))
+    session.commit()
+    purged = sb.sandbox_manager.purge_expired_sessions(retention_days=30)
+    assert purged == 0
+    assert live.exists()
+
+
+def test_purge_expired_sessions_keeps_old_dir_with_fresh_file(monkeypatch, session):
     # M-72: an OLD dir (stale dir mtime) with a FRESH file inside is ACTIVE
     # — the session was written to recently. Purge must use the newest mtime
     # (dir + files) so this survives (the old dir-only check purged it).
@@ -320,8 +346,10 @@ def test_purge_expired_sessions_keeps_old_dir_with_fresh_file(monkeypatch):
     fresh_ts = time.time()
     os.utime(stale_dir, (old_ts, old_ts))   # dir mtime stale (no new entries)
     os.utime(f, (fresh_ts, fresh_ts))       # file mtime fresh (written today)
-    purged = sb.sandbox_manager.purge_expired_sessions(retention_days=30)
-    assert purged == 0
+    sb.sandbox_manager.purge_expired_sessions(retention_days=30)
+    # Other tests in this file may leave their own stale dirs, so pin the
+    # assertion to THIS dir rather than a global count.
+    assert stale_dir.exists()
     assert stale_dir.exists()  # active session survives
 
 

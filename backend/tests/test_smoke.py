@@ -1,4 +1,4 @@
-from app.core.security import hash_pin, verify_pin
+from app.core.security import verify_pin
 
 
 def test_smoke(session, make_user):

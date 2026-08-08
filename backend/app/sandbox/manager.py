@@ -6,8 +6,9 @@ READ-ONLY context repos are read-only bind mounts of golden. Worktrees are
 rejected for writable threads (absolute .git pointer, shared object store writes,
 prune lifecycle — three collisions with the mount rules).
 
-Durable session volume: ~/.claude mounts PER-LANE to
-sessions/<run_id>/<thread_id>/ so resume/fork_session survive workspace shredding.
+Durable session volume: sessions/<run_id>/<thread_id>/ mounts PER-LANE at
+/session (custom engine: checkpoint mirror + episodic DB) or /root/.claude
+(legacy SDK runtime) so resume/fork_session survive workspace shredding.
 Retention 30d default; after expiry the run is replay-only.
 """
 
@@ -17,7 +18,7 @@ import json
 import shutil
 import subprocess
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import docker
@@ -25,9 +26,9 @@ from docker.errors import DockerException
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 
 log = get_logger(service="sandbox")
 
@@ -120,12 +121,32 @@ def _engine_autonomy(permission_mode: str) -> str:
     }.get(permission_mode, "supervised")
 
 
+# The custom engine's Mode vocabulary (worker/worker/engine/state.py). Backend
+# run.mode values must reconcile to this set BEFORE the container starts —
+# passing an unknown mode verbatim used to crash the worker at Mode(...)
+# with no diagnosable backend error (C3).
+WORKER_MODES = frozenset({"ask", "plan", "development", "debug", "goal"})
+
+
+class InvalidModeError(ValueError):
+    pass
+
+
 class SandboxManager:
     def __init__(self) -> None:
         self.settings = get_settings()
 
     def thread_env(self, run: Run, thread: Thread, prompt: str, persona_prompt: str,
                  permission_mode: str, writable: bool) -> dict[str, str]:
+        # C3: per-run MODE after vocabulary reconciliation. The old code passed
+        # engine_default_mode to every thread, so ask/plan/goal runs booted
+        # with the development tool surface. Unknown modes fail loudly here.
+        mode = (run.mode or self.settings.engine_default_mode).strip().lower()
+        if mode not in WORKER_MODES:
+            raise InvalidModeError(
+                f"run mode {run.mode!r} is not in the worker engine vocabulary "
+                f"{sorted(WORKER_MODES)} — reconcile the backend Mode row or the "
+                "worker state.Mode enum before spawning")
         env = {
             "RUN_ID": run.id,
             "THREAD_ID": thread.id,
@@ -142,17 +163,45 @@ class SandboxManager:
             "WORKSPACE_DIR": "/workspace",
             # --- Custom engine ---
             "ENGINE": self.settings.engine_runtime,
-            "MODE": self.settings.engine_default_mode,
+            "MODE": mode,
             "AUTONOMY": _engine_autonomy(permission_mode),
             "LITELLM_BASE_URL": self.settings.worker_gateway_url,
             "LITELLM_API_KEY": thread.gateway_key or "",
+            # C8: timeout clocks explicit — the backend's approval expiry and
+            # the engine's BLPOP/idle watchdog must agree.
+            "APPROVAL_TIMEOUT_S": str(self.settings.approval_timeout_seconds),
+            "IDLE_TTL_SECONDS": str(self.settings.idle_ttl_seconds),
+            # F4: budget-reminder pricing parity — the worker's local estimate
+            # prices tokens with THESE rates so its 50%/80% reminders track
+            # real gateway spend instead of a hardcoded guess.
+            "MODEL_PRICE_IN_PER_MTOK": str(self.settings.worker_price_in_per_mtok),
+            "MODEL_PRICE_OUT_PER_MTOK": str(self.settings.worker_price_out_per_mtok),
         }
         if self.settings.engine_canary:
             env["CANARY"] = "1"
         if self.settings.engine_database_url:
             env["DATABASE_URL"] = self.settings.engine_database_url
-        if thread.session_id:
+        if self.settings.engine_runtime == "custom":
+            # B3: the checkpoint mirror + episodic DB live on the DURABLE
+            # session volume (mounted at /session in run_thread_container) so
+            # container removal/replacement never destroys engine state.
+            env["CHECKPOINT_MIRROR_DIR"] = "/session"
+            if thread.session_id:
+                # B2: the engine resumes the SAME checkpoint namespace as the
+                # thread it replaces (LangGraph checkpointer key).
+                env["RESUME_CONTEXT_ID"] = thread.session_id
+        elif thread.session_id:
             env["RESUME_SESSION_ID"] = thread.session_id
+        # C6: env-size ceiling — oversized prompts must fail with a clear
+        # error here, not a truncated container start.
+        total = sum(len(k.encode()) + len(v.encode()) for k, v in env.items())
+        if total > self.settings.max_env_payload_bytes:
+            raise ValueError(
+                f"thread env payload is {total} bytes, over the "
+                f"{self.settings.max_env_payload_bytes}-byte container env ceiling "
+                f"(prompt={len(prompt)} chars, persona_prompt={len(persona_prompt)} "
+                "chars) — shorten the prompt or route the payload through the "
+                "session volume")
         if self.settings.package_proxy_url:
             # Threads install deps through the allowlisting proxy only.
             proxy = self.settings.package_proxy_url
@@ -189,7 +238,14 @@ class SandboxManager:
         # thread still gets a clean volume.
         session_thread_id = resume_from_thread_id or thread.id
         session_path = session_subpath(run.id, session_thread_id)
-        volumes[str(session_path)] = {"bind": "/root/.claude", "mode": "rw"}
+        if self.settings.engine_runtime == "custom":
+            # B3: the custom engine reads/writes ONLY /session
+            # (CHECKPOINT_MIRROR_DIR, episodic DB). The /root/.claude mount was
+            # an SDK leftover — the custom engine never reads it, so mounting
+            # it pretended durability that didn't exist.
+            volumes[str(session_path)] = {"bind": "/session", "mode": "rw"}
+        else:
+            volumes[str(session_path)] = {"bind": "/root/.claude", "mode": "rw"}
 
         if self.settings.package_proxy_url:
             # Shared dependency caches — threads never re-download the world.
@@ -245,18 +301,31 @@ class SandboxManager:
         except DockerException:
             return False
 
-    def wait_for_container_exit(self, container_id: str, timeout_s: float = 15.0) -> None:
+    def wait_for_container_exit(self, container_id: str, timeout_s: float = 15.0) -> bool:
         """Poll until the container is gone or not running (H-37). Used by
         kill_replace_thread to guarantee the old container has released the
         session volume before the replacement mounts it — otherwise two
-        containers write the same session volume (corruption)."""
+        containers write the same session volume (corruption).
+
+        Returns True when the container is confirmed gone/stopped. On timeout
+        it FORCE-STOPS the container and re-checks (A2): a wedged worker must
+        fail the replace/resume, not wave it through to double-mount."""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if not self.container_running(container_id):
-                return
+                return True
             time.sleep(0.25)
-        log.warning("container did not exit in time",
+        log.warning("container did not exit in time — force-stopping",
                    container=container_id[:12], timeout=timeout_s)
+        self.stop_container(container_id)
+        force_deadline = time.monotonic() + 10.0
+        while time.monotonic() < force_deadline:
+            if not self.container_running(container_id):
+                return True
+            time.sleep(0.25)
+        log.error("container survived force-stop",
+                  container=container_id[:12])
+        return False
 
     def shred_workspace(self, run_id: str) -> None:
         """Workspaces are destroyed at run end; survivors are branches/PRs,
@@ -270,19 +339,42 @@ class SandboxManager:
         TTL job handles 12mo = deleted."""
         settings = get_settings()
         days = retention_days or settings.session_retention_days
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         purged = 0
+        # M5: NEVER shred a session volume under a live container — the
+        # retention sweep once ran concurrently with active threads, deleting
+        # the volume a running worker was checkpointing into. Query for
+        # threads that still own this session before touching the dir.
+        from app.db.base import get_session
+        from app.db.models.thread import Thread
+        db = get_session()
+        try:
+            live_sessions = {
+                row[0] for row in db.query(Thread.session_id).filter(
+                    Thread.session_id.is_not(None),
+                    Thread.status.notin_(
+                        ("stopped", "completed", "failed", "replaced"))).all()
+            }
+        except Exception:
+            # If the DB is unreachable, fail SAFE: purge nothing.
+            log.warning("retention sweep skipped: live-session query failed",
+                        exc_info=True)
+            return 0
+        finally:
+            db.close()
         for run_dir in settings.sessions_dir.iterdir() if settings.sessions_dir.exists() else []:
+            if run_dir.name in live_sessions:
+                continue  # live thread owns this volume — hands off
             # M-72: use the NEWEST mtime among the dir and its contents.
             # A dir created long ago but written to today (file mtime fresh,
             # dir mtime stale because adding bytes to a file doesn't update
             # the parent dir's mtime on most filesystems) is ACTIVE and must
             # not be purged. The old dir-only check purged such active
             # sessions.
-            mtimes = [datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc)]
+            mtimes = [datetime.fromtimestamp(run_dir.stat().st_mtime, tz=UTC)]
             for child in run_dir.iterdir():
                 if child.is_file():
-                    mtimes.append(datetime.fromtimestamp(child.stat().st_mtime, tz=timezone.utc))
+                    mtimes.append(datetime.fromtimestamp(child.stat().st_mtime, tz=UTC))
             mtime = max(mtimes)
             if mtime < cutoff:
                 shutil.rmtree(run_dir, ignore_errors=True)

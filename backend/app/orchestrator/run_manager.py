@@ -14,23 +14,24 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Coroutine
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+import sqlalchemy as sa
 from collegium_contracts import RunStage
 
 from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.events.bus import IngestConsumer
 from app.events.control import LaneControl
 from app.events.relay import Relay
 from app.orchestrator.blueprints.base import BlueprintContext
-from app.orchestrator.thread_manager import ThreadManager
 from app.orchestrator.mode_engine import blueprint_for
+from app.orchestrator.thread_manager import ThreadManager
 from app.sandbox.manager import sandbox_manager
 from app.services.runs import TERMINAL_STAGES, transition
 
@@ -47,17 +48,54 @@ def _title_is_generic(task: str, work_item_id: int) -> bool:
 
 class RunManager:
     def __init__(self, ingest: IngestConsumer, relay: Relay, thread_manager: ThreadManager,
-                 control: LaneControl, approvals: Any | None = None) -> None:
+                 control: LaneControl, approvals: Any | None = None,
+                 spawn_bridge: Any | None = None) -> None:
         self.ingest = ingest
         self.relay = relay
         self.thread_manager = thread_manager
         self.control = control
+        # C1: the SpawnBridge consuming spawn_requests:{run_id}. Registered
+        # alongside the ingest stream so a run's workers can request real
+        # fan-out for the run's whole lifetime.
+        self.spawn_bridge = spawn_bridge
         # The ApprovalService consuming approvals:{run_id}. Optional so unit
         # tests can construct a bare manager; production wires it in main.py —
         # without it the approvals consumer idles on an empty stream set and
         # no approval card is ever created.
         self.approvals = approvals
         self._tasks: dict[str, asyncio.Task] = {}
+
+    # ---------------------------------------------------------- lifecycle core
+
+    async def _stop_thread_container(self, thread_id: str) -> None:
+        """Verified stop for one thread: interrupt with ack, then fall back
+        to container-exit verification with a force-stop on timeout (A2).
+        The caller stamps the DB row AFTER this returns — the stamp is no
+        longer a fiction that races the worker's actual death."""
+        session = get_session()
+        try:
+            thread = session.get(Thread, thread_id)
+            container_id = thread.container_id if thread else None
+        finally:
+            session.close()
+        acked = await self.control.interrupt(thread_id, wait_ack=True)
+        if not acked and container_id:
+            exited = await asyncio.to_thread(
+                sandbox_manager.wait_for_container_exit, container_id)
+            if not exited:
+                log.error("container survived interrupt+force-stop; stamping "
+                          "stopped anyway to free the slot",
+                          thread_id=thread_id, container_id=container_id[:12])
+
+    async def shutdown(self) -> None:
+        """E6: drain tracked blueprint tasks on backend shutdown so an
+        in-flight run isn't stranded mid-node (its thread would linger
+        until the next boot's reconcile)."""
+        tasks = [t for t in self._tasks.values() if not t.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _track(self, run_id: str, coro: Coroutine[object, object, object]) -> asyncio.Task:
         # L-21: self._tasks was never pruned — completed tasks accumulated
@@ -81,7 +119,8 @@ class RunManager:
     async def create_run(self, source: str, initiated_by: int, mode_name: str,
                          task: str, repo: str | None = None,
                          work_item_id: int | None = None, autonomy: str | None = None,
-                         fanout: int | None = None, delivery_id: int | None = None) -> Run:
+                         fanout: int | None = None, delivery_id: int | None = None,
+                         idempotency_key: str | None = None) -> Run:
         # Deterministic title hydration (THE one place it happens):
         # a generic typed title resolves from the ADO work item so the inbox
         # card reads the ticket's real title, not "42" or an empty string.
@@ -90,6 +129,16 @@ class RunManager:
             task = await hydration.hydrate_title(work_item_id, task) or task
         session = get_session()
         try:
+            # POST /runs idempotency: a client retry (double-click, network
+            # flap) with the same key returns the ORIGINAL run instead of
+            # minting a duplicate that double-spends budget.
+            if idempotency_key:
+                existing = (session.query(Run)
+                            .filter_by(created_by=initiated_by,
+                                       idempotency_key=idempotency_key)
+                            .one_or_none())
+                if existing is not None:
+                    return existing
             mode = session.query(Mode).filter_by(name=mode_name, enabled=True).one_or_none()
             if mode is None:
                 raise ValueError(f"unknown or disabled mode '{mode_name}'")
@@ -97,18 +146,32 @@ class RunManager:
                 id=str(uuid.uuid4()), created_by=initiated_by, source=source,
                 mode=mode_name, autonomy=autonomy or mode.autonomy_default,
                 title=task[:256], repo=repo, work_item_id=work_item_id,
-                delivery_id=delivery_id,
-                started_at=datetime.now(timezone.utc),
+                delivery_id=delivery_id, idempotency_key=idempotency_key,
+                started_at=datetime.now(UTC),
             )
             transition(run, RunStage.QUEUED)
             session.add(run)
-            session.commit()
+            try:
+                session.commit()
+            except sa.exc.IntegrityError:
+                # Lost the race: another request with the same key committed
+                # first (the partial unique index guarantees exactly one).
+                session.rollback()
+                if not idempotency_key:
+                    raise
+                run = (session.query(Run)
+                       .filter_by(created_by=initiated_by,
+                                  idempotency_key=idempotency_key)
+                       .one())
+                return run
         finally:
             session.close()
 
         self.ingest.register_run(run.id)
         if self.approvals is not None:
             self.approvals.register_run(run.id)
+        if self.spawn_bridge is not None:
+            self.spawn_bridge.register_run(run.id)
         await self.relay.publish_run_stage(run.id, run.stage, run.available_actions)
         self._track(run.id, self._execute(run.id, task, repo, fanout))
         return run
@@ -124,22 +187,59 @@ class RunManager:
         the inherited session + the old session volume mount)."""
         session = get_session()
         try:
-            run = session.get(Run, run_id)
+            # A3: lock the run row so a double-clicked resume serializes
+            # instead of double-executing the blueprint.
+            run = (session.query(Run).filter_by(id=run_id)
+                   .with_for_update().one_or_none())
             if run is None or run.created_by != initiated_by:
                 return None
+            # A3: resume is only meaningful from a terminal stage. Resuming an
+            # ACTIVE run would double-execute it — a second _execute task on
+            # the same row spawning duplicate threads. Idempotent: return the
+            # run unchanged when it is already in flight.
+            if run.stage not in (TERMINAL_STAGES | {RunStage.INTERRUPTED.value}):
+                log.warning("resume refused — run in flight",
+                            run_id=run_id, stage=run.stage)
+                session.expunge(run)
+                return run
             last_thread = (session.query(Thread)
                           .filter_by(run_id=run_id)
                           .order_by(Thread.created_at.desc())
                           .first())
             last_thread_id = last_thread.id if last_thread is not None else None
+            last_container_id = last_thread.container_id if last_thread is not None else None
+            last_thread_live = (last_thread is not None
+                                and last_thread.status in ("running", "idle", "queued",
+                                                           "input_required"))
             transition(run, RunStage.QUEUED, allow_terminal_exit=True)  # H-41
             run.finished_at = None
+            if last_thread is not None and last_thread_live:
+                last_thread.status = "stopped"
+                last_thread.finished_at = datetime.now(UTC)
             session.commit()
         finally:
             session.close()
+        # A3: a "terminal" run can still hold a live container (crashed
+        # control plane, missed kill). Kill + verified-exit before the
+        # replacement mounts the prior session volume.
+        if last_thread is not None and last_thread_live:
+            await self.control.kill(last_thread_id, wait_ack=True)
+            if last_container_id:
+                exited = await asyncio.to_thread(
+                    sandbox_manager.wait_for_container_exit, last_container_id)
+                if not exited:
+                    raise RuntimeError(
+                        f"prior container {last_container_id[:12]} survived "
+                        "kill+force-stop; aborting resume to avoid a "
+                        "double-mounted session volume")
+            # F1: settle + release + clear on the thread being replaced by
+            # the resume, not a bare key release.
+            await self._cleanup_terminal(last_thread_id)
         self.ingest.register_run(run_id)
         if self.approvals is not None:
             self.approvals.register_run(run_id)
+        if self.spawn_bridge is not None:
+            self.spawn_bridge.register_run(run_id)
         await self.relay.publish_run_stage(run_id, run.stage, run.available_actions)
         self._track(
             run_id,
@@ -179,6 +279,9 @@ class RunManager:
         and strand the run in its stage until the next boot reconciliation."""
         try:
             await blueprint.execute(ctx)
+            # F3: success paths settle too — plan/debug/development blueprints
+            # never called settle_cost, so their spend vanished from the run.
+            await self._settle_run_costs(run_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -202,33 +305,91 @@ class RunManager:
                 # fail a run that is still in flight.
                 if row.stage not in TERMINAL_STAGES:
                     transition(row, RunStage.FAILED)
-                    row.finished_at = datetime.now(timezone.utc)
+                    row.finished_at = datetime.now(UTC)
                     session.commit()
             finally:
                 session.close()
             if row.stage == RunStage.FAILED.value:
                 await self.relay.publish_run_stage(run_id, RunStage.FAILED.value, [])
+            # F1/F3: a failed run used to leave its threads "running" (capacity
+            # held until the reaper), keys live, spend unsettled. Terminate
+            # every live thread for real, then run the unified cleanup.
+            session = get_session()
+            try:
+                live = [t.id for t in session.query(Thread).filter_by(run_id=run_id).all()
+                        if t.status in ("running", "idle", "queued", "input_required")]
+            finally:
+                session.close()
+            for tid in live:
+                try:
+                    await self._stop_thread_container(tid)
+                    await self.thread_manager._mark(tid, "failed")
+                    await self.relay.publish_thread_status(run_id, tid, "failed")
+                except Exception:
+                    log.warning("failed-run thread cleanup error",
+                                run_id=run_id, thread_id=tid, exc_info=True)
+
+    async def _settle_run_costs(self, run_id: str) -> None:
+        """F3: settle every terminal-but-unsettled thread of the run and roll
+        the total onto the run row. Idempotent: a cleaned-up thread has no
+        stored key, so settle_cost early-returns without clobbering cost_usd."""
+        session = get_session()
+        try:
+            threads = session.query(Thread).filter_by(run_id=run_id).all()
+            # All threads with a live key — including still-live ones whose
+            # blueprint never settles them (plan/debug/development): record
+            # the interim spend now; the thread's terminal cleanup re-settles.
+            ids = [t.id for t in threads if t.gateway_key]
+        finally:
+            session.close()
+        for tid in ids:
+            try:
+                await self.thread_manager.settle_cost(tid)
+            except Exception:
+                log.warning("run-end cost settle failed", run_id=run_id,
+                            thread_id=tid, exc_info=True)
+
+    async def _cleanup_terminal(self, thread_id: str) -> None:
+        """F1: unified terminal cleanup; falls back to a bare key release for
+        test doubles that predate the unified path."""
+        fn = getattr(self.thread_manager, "_cleanup_terminal", None)
+        if fn is not None:
+            await fn(thread_id)
+        else:
+            await self.thread_manager.release_key(thread_id)
 
     # ------------------------------------------------------------ lifecycle
 
     async def stop_run(self, run_id: str) -> None:
         """One tap, no confirmation — stopping is safe and reversible. Full trace
         retained; banner: 'Stopped by you — all work preserved.'"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         session = get_session()
         try:
             run = session.get(Run, run_id)
             if run.stage in TERMINAL_STAGES:
                 return  # H-41: don't resurrect a terminal run to INTERRUPTED
             threads = session.query(Thread).filter_by(run_id=run_id).all()
-            thread_ids: list[str] = []
+            # E5: include input_required — a thread parked on an approval card
+            # still holds a live container the stop must reach.
+            live_statuses = ("running", "idle", "queued", "input_required")
+            thread_ids: list[str] = [l.id for l in threads if l.status in live_statuses]
+        finally:
+            session.close()
+        # Verified stop BEFORE the DB stamp: the row flips only after the
+        # worker acked or its container is confirmed gone (A1/A2).
+        for thread_id in thread_ids:
+            await self._stop_thread_container(thread_id)
+        session = get_session()
+        try:
+            run = session.get(Run, run_id)
+            if run.stage in TERMINAL_STAGES:
+                return
+            threads = session.query(Thread).filter_by(run_id=run_id).all()
             for l in threads:
-                if l.status in ("running", "idle", "queued"):
-                    thread_ids.append(l.id)
+                if l.status in live_statuses:
                     # Write the Thread DB status so the capacity semaphore
-                    # releases the slot. The relay-only "stopped" publish
-                    # left the row at "running" and the slot leaked forever
-                    # (C-15) — stop_thread already did this, stop_run didn't.
+                    # releases the slot (C-15).
                     l.status = "stopped"
                     l.finished_at = now
             transition(run, RunStage.INTERRUPTED)
@@ -237,10 +398,10 @@ class RunManager:
         finally:
             session.close()
         for thread_id in thread_ids:
-            await self.control.interrupt(thread_id)
             await self.relay.publish_thread_status(run_id, thread_id, "stopped")
-            # H-36: release the minted gateway key for each stopped thread.
-            await self.thread_manager.release_key(thread_id)
+            # F1/F3: unified terminal cleanup — settle cost, release the key,
+            # clear the stored secret — for each stopped thread.
+            await self._cleanup_terminal(thread_id)
         task = self._tasks.get(run_id)
         if task and not task.done():
             task.cancel()
@@ -258,14 +419,33 @@ class RunManager:
             if run.stage in TERMINAL_STAGES:
                 return  # H-41: don't resurrect a terminal run to ABANDONED
             transition(run, RunStage.ABANDONED)
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             session.commit()
         finally:
             session.close()
         for thread_id in thread_ids:
-            await self.control.kill(thread_id)
+            await self.control.kill(thread_id, wait_ack=True)
         for container_id in container_ids:
-            await asyncio.to_thread(sandbox_manager.stop_container, container_id)
+            # Verified exit (force-stop on timeout) — abandon is the shred
+            # path; a live container must never survive a workspace shred.
+            await asyncio.to_thread(
+                sandbox_manager.wait_for_container_exit, container_id)
+        # F1/F3: abandon used to leave thread rows NON-terminal (capacity leak
+        # until the reaper), keys live, and spend unsettled. Stamp + clean up
+        # every thread of the run through the one terminal path.
+        session = get_session()
+        try:
+            now = datetime.now(UTC)
+            for l in session.query(Thread).filter_by(run_id=run_id).all():
+                if l.status not in ("completed", "failed", "stopped", "replaced"):
+                    l.status = "stopped"
+                    l.finished_at = now
+            session.commit()
+        finally:
+            session.close()
+        for thread_id in thread_ids:
+            await self._cleanup_terminal(thread_id)
+            await self.relay.publish_thread_status(run_id, thread_id, "stopped")
         task = self._tasks.get(run_id)
         if task and not task.done():
             task.cancel()
@@ -273,6 +453,8 @@ class RunManager:
         self.ingest.unregister_run(run_id)
         if self.approvals is not None:
             self.approvals.unregister_run(run_id)
+        if self.spawn_bridge is not None:
+            self.spawn_bridge.unregister_run(run_id)
         await self.relay.publish_run_stage(run_id, RunStage.ABANDONED.value, [])
 
     async def nudge_thread(self, run_id: str, thread_id: str, text: str) -> None:
@@ -291,7 +473,7 @@ class RunManager:
         # a control message that could never arrive. Kept OUT of
         # ACTIVE_STATUSES itself so capacity accounting and the heartbeat
         # terminal-stamp guard are untouched.
-        nudgeable = ACTIVE_STATUSES + ("input_required",)
+        nudgeable = (*ACTIVE_STATUSES, "input_required")
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
@@ -315,21 +497,23 @@ class RunManager:
 
     # ------------------------------------------------------------ thread controls
     async def stop_thread(self, run_id: str, thread_id: str) -> None:
-        """Per-thread stop from the swarm view: immediate interrupt, trace kept,
-        the rest of the swarm runs on. Safe + reversible — no confirmation."""
-        await self.control.interrupt(thread_id)
+        """Per-thread stop from the swarm view: verified interrupt (ack or
+        confirmed container exit), trace kept, the rest of the swarm runs on.
+        Safe + reversible — no confirmation. Every stop path (this, stop_run,
+        the /threads/{id}/stop API) funnels here so bookkeeping is identical."""
+        await self._stop_thread_container(thread_id)
         session = get_session()
         try:
             thread = session.get(Thread, thread_id)
             if thread and thread.run_id == run_id:
                 thread.status = "stopped"
-                thread.finished_at = datetime.now(timezone.utc)
+                thread.finished_at = datetime.now(UTC)
                 session.commit()
         finally:
             session.close()
         await self.relay.publish_thread_status(run_id, thread_id, "stopped")
-        # H-36: release the minted gateway key for the stopped thread.
-        await self.thread_manager.release_key(thread_id)
+        # F1: unified terminal cleanup (settle, release, clear) for the stop.
+        await self._cleanup_terminal(thread_id)
 
     async def pin_finding(self, run_id: str, thread_id: str, note: str = "") -> None:
         """Pin a finding from a thread overlay: lands as a run event the
@@ -389,7 +573,7 @@ class RunManager:
             persona = thread.persona
             repo_scope = thread.repo_scope
             old_container_id = thread.container_id
-            # Mount set = stored context_repos (names) ∪ extras. The stored
+            # Mount set = stored context_repos (names) + extras. The stored
             # snapshot is the source of truth — re-deriving from the blueprint
             # would re-resolve @mentions against a possibly-edited task and
             # silently drop a repo the user added mid-conversation.
@@ -400,23 +584,41 @@ class RunManager:
                 if name not in stored_names:
                     stored_names.append(name)
             thread.status = "replaced"
-            thread.finished_at = datetime.now(timezone.utc)
+            thread.finished_at = datetime.now(UTC)
             run = session.get(Run, run_id)
             session.commit()
         finally:
             session.close()
-        await self.control.kill(thread_id)
+        await self.control.kill(thread_id, wait_ack=True)
         await self.relay.publish_thread_status(run_id, thread_id, "replaced")
-        # H-37: WAIT for the old container to actually die before spawning
-        # the replacement. The old control.kill just published a kill message
-        # and returned; the replacement then mounted the old session volume
-        # (resume_from_thread_id) while the old container was still alive and
-        # writing to it — two containers on one session volume = corruption.
-        # Poll the old container until it's gone (or timeout) before spawning.
+        # F1/F5: settle the OLD thread's spend and release/clear its key
+        # (previously leaked — "replaced" wasn't in any cleanup list), then
+        # carry the REMAINING budget to the replacement so repeated replaces
+        # can't silently multiply the run's effective budget.
+        await self._cleanup_terminal(thread_id)
+        session = get_session()
+        try:
+            old = session.get(Thread, thread_id)
+            remaining_budget = max(
+                0.25, (old.budget_usd or 0.0) - (old.cost_usd or 0.0)
+            ) if old else None
+        finally:
+            session.close()
+        # H-37 + A2: WAIT for the old container to actually die before
+        # spawning the replacement — and FAIL the replace when it won't die.
+        # The old control.kill just published a kill message and returned;
+        # the replacement then mounted the old session volume while the old
+        # container was still writing to it — two containers on one session
+        # volume = corruption. wait_for_container_exit force-stops on
+        # timeout and reports the outcome; False aborts before the spawn.
         if old_container_id:
-            await asyncio.to_thread(
+            exited = await asyncio.to_thread(
                 sandbox_manager.wait_for_container_exit, old_container_id,
             )
+            if not exited:
+                raise RuntimeError(
+                    f"old container {old_container_id[:12]} survived kill+force-stop; "
+                    "aborting replace to avoid a double-mounted session volume")
 
         # Resolve the unioned names to Repo rows for the spawn call. The
         # writable target is repo_scope (the run's primary repo); the rest of
@@ -446,6 +648,11 @@ class RunManager:
             persona_prompt=context.get("persona_prompt", ""),
             writable_repo=repo, context_repos=context_repos,
             resume_from_thread_id=thread_id,
+            # K19: carry the workspace-preservation intent across the replace —
+            # the spawn_context stored it, but the replay never read it, so a
+            # "keep my uncommitted work" replace still re-stamped fresh.
+            preserve_workspace=bool(context.get("preserve_workspace")),
+            budget_usd=remaining_budget,
         )
         await self.relay.publish_thread_status(run_id, replacement.id, "running")
         return replacement
@@ -569,8 +776,8 @@ class RunManager:
         workspace path is the develop thread's stamped clone, persisted on
         Run.session_volume_path when the develop thread started (deterministic
         fallback: workspaces_dir/run_id/<repo>)."""
-        from app.services import delivery
         from app.core.config import get_settings
+        from app.services import delivery
         session = get_session()
         try:
             run = session.get(Run, run_id)
@@ -604,7 +811,7 @@ class RunManager:
         try:
             run = session.get(Run, run_id)
             transition(run, RunStage.COMPLETED)
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             session.commit()
         finally:
             session.close()
@@ -614,10 +821,15 @@ class RunManager:
     # -------------------------------------------------------- reconciliation
 
     async def reconcile_on_boot(self) -> int:
-        """Boot-time sweep: every run whose threads are gone is marked
-        interrupted with an Inbox card offering resume — no silent zombies."""
+        """Boot-time sweep: every run whose threads are REALLY gone is marked
+        interrupted with an Inbox card offering resume — no silent zombies.
+
+        Liveness-aware (E1/E2): a run is swept only when NO thread shows a
+        fresh heartbeat AND a live container — a healthy run must survive a
+        backend restart. VERIFYING runs are human-parked by definition and
+        are never swept."""
         session = get_session()
-        reconciled: list[tuple[str, list[str], list[str]]] = []
+        reconciled: list[tuple[str, list[str], list[str], list[str]]] = []
         try:
             active = session.query(Run).filter(
                 Run.stage.in_([RunStage.QUEUED.value,  # H-40: include QUEUED
@@ -625,30 +837,66 @@ class RunManager:
                                RunStage.PLANNING.value, RunStage.DEVELOPING.value,
                                RunStage.VERIFYING.value])
             ).all()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for run in active:
-                # H-40: mark the run's threads stopped so the capacity
-                # semaphore releases their slots. The old code only
-                # transitioned the RUN, leaving threads "running"/"queued"
-                # -> zombie threads + capacity leak. Collect their ids for
-                # key release (H-36).
+                # E2: VERIFYING means the work is done and a HUMAN is
+                # reviewing — sweeping it would interrupt a parked run.
+                if run.stage == RunStage.VERIFYING.value:
+                    continue
                 threads = session.query(Thread).filter_by(run_id=run.id).all()
+                live_threads = [t for t in threads
+                                if t.status in ("running", "idle", "queued",
+                                                "input_required")]
+                # E1: a thread with a fresh heartbeat is alive even while the
+                # backend was down — its run is healthy, skip the sweep.
+                def _fresh(t) -> bool:
+                    return (t.heartbeat_at is not None
+                            and (now - t.heartbeat_at).total_seconds() < 180)
+                # E1: a run with any sign of life — a fresh thread heartbeat
+                # OR a still-running container — is healthy; the sweep must
+                # not touch it (backend restart mid-work is not a zombie).
+                container_ids = [t.container_id for t in live_threads if t.container_id]
+                containers_running = False
+                for cid in container_ids:
+                    if await asyncio.to_thread(sandbox_manager.container_running, cid):
+                        containers_running = True
+                        break
+                if any(_fresh(t) for t in live_threads) or containers_running:
+                    # D4: the run is ALIVE but this process just booted — its
+                    # ingest stream and spawn bridge are in-memory registries,
+                    # empty after a restart. Re-register or the surviving
+                    # workers' events pile up unconsumed (the pre-fix silent
+                    # stall).
+                    self.ingest.register_run(run.id)
+                    if self.approvals is not None:
+                        self.approvals.register_run(run.id)
+                    if getattr(self, "spawn_bridge", None) is not None:
+                        self.spawn_bridge.register_run(run.id)
+                    continue
+                # Genuinely dead: stop any leftover containers for real so the
+                # sweep isn't a DB-only fiction and session volumes are free.
+                for cid in container_ids:
+                    await asyncio.to_thread(
+                        sandbox_manager.wait_for_container_exit, cid)
                 thread_ids = []
                 for t in threads:
-                    if t.status in ("running", "idle", "queued"):
+                    if t.status in ("running", "idle", "queued", "input_required"):
                         t.status = "stopped"
                         t.finished_at = now
                     thread_ids.append(t.id)
                 transition(run, RunStage.INTERRUPTED)
-                reconciled.append((run.id, list(run.available_actions), thread_ids))
+                reconciled.append((run.id, list(run.available_actions),
+                                   thread_ids, container_ids))
             session.commit()
         finally:
             session.close()
         # H-40/H-36: release keys for stopped threads and publish the stage
         # change so the UI reflects INTERRUPTED (the old code never published).
-        for run_id, available, thread_ids in reconciled:
+        for run_id, available, thread_ids, _container_ids in reconciled:
             for tid in thread_ids:
-                await self.thread_manager.release_key(tid)
+                # F1/F3: settle spend and clear the secret too, not just
+                # release — a boot-reconciled thread's cost used to vanish.
+                await self._cleanup_terminal(tid)
             await self.relay.publish_run_stage(
                 run_id, RunStage.INTERRUPTED.value, available)
         return len(reconciled)

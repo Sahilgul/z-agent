@@ -1,12 +1,11 @@
-import asyncio
 
 import pytest
 from collegium_contracts import RunStage
 
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.ask import AskBlueprint
 from app.orchestrator.blueprints.base import BlueprintContext

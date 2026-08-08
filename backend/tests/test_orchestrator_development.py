@@ -4,10 +4,10 @@ import pytest
 from collegium_contracts import RunStage
 
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
+from app.db.models.thread import Thread
 from app.orchestrator.blueprints.base import BlueprintContext
 from app.orchestrator.blueprints.development import DevelopmentBlueprint
 

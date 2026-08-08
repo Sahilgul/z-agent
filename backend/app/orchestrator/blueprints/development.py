@@ -25,21 +25,20 @@ evaluate  (agentic evaluator thread, FRESH context): a SEPARATE thread/session â
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from collegium_contracts import RunStage
 
+from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
 from app.services import delivery, evidence
-
-from app.core.logging import get_logger
 
 log = get_logger(service="blueprint_development")
 
@@ -95,7 +94,7 @@ class DevelopmentBlueprint(Blueprint):
             branch = delivery.branch_name_for(run)
             workspace = str(_workspaces_root()) + "/" + run.id + "/" + (repo.name or "")
             run.session_volume_path = workspace
-            run.last_active_at = datetime.now(timezone.utc)
+            run.last_active_at = datetime.now(UTC)
             session.commit()
             ctx.artifacts["repo_row"] = repo
             ctx.artifacts["context_repos"] = context
@@ -207,7 +206,7 @@ class DevelopmentBlueprint(Blueprint):
                 ))
             if thread:
                 thread.next_seq = seq + (2 if screenshots else 1)
-            run.last_active_at = datetime.now(timezone.utc)
+            run.last_active_at = datetime.now(UTC)
             session.commit()
             ctx.run = run
         finally:
@@ -389,7 +388,8 @@ class DevelopmentBlueprint(Blueprint):
             finally:
                 session.close()
             if status in ("idle", "completed", "failed", "stopped",
-                          "interrupted", "replaced"):  # H-38
+                          "interrupted", "replaced", "input_required"):  # H-38 + A4:
+                          # approval-parked is terminal for the blueprint await
                 return
             await asyncio.sleep(poll_seconds)
 

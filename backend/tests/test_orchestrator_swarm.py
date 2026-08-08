@@ -5,16 +5,16 @@ import json
 
 import pytest
 
+from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import BlueprintContext
 from app.orchestrator.blueprints.swarm import SwarmBlueprint, _await_thread
 from app.orchestrator.mode_engine import blueprint_for
-from app.db.base import get_session
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,6 +31,16 @@ class _FakeLaneMgr:
         self.spawned: list[dict] = []
         self.spawn_many_calls: list[dict] = {}
         self.settled: list[str] = []
+        self.finished: list[str] = []
+
+    async def finish_thread(self, thread_id, final_status="completed"):
+        # E4: mirror the real finish_thread's terminal stamp so blueprint
+        # awaits/tests observe the status change.
+        self.finished.append(thread_id)
+        t = self.session.get(Thread, thread_id)
+        if t is not None and t.status not in ("completed", "failed", "stopped", "replaced"):
+            t.status = final_status
+            self.session.commit()
 
     def _thread(self, run_id, persona, status="idle"):
         thread = Thread(id=f"thread-{persona}-{len(self.spawned)}", run_id=run_id,
@@ -228,7 +238,7 @@ async def test_fanout_spawns_one_read_only_thread_per_slice(session, make_user):
 
 async def test_collect_gathers_notebooks_from_events(session, make_user):
     run = _seed(session, make_user)
-    lm = _FakeLaneMgr(session)
+    _FakeLaneMgr(session)
     # two idle threads with notebook events, as spawn_many would leave them
     for i in range(2):
         session.add(Thread(id=f"explorer-{i}", run_id=run.id, persona="explorer", status="idle"))
@@ -339,7 +349,7 @@ async def test_await_thread_polls_until_settled(session, make_user):
         finally:
             s.close()
 
-    asyncio.create_task(settle())
+    settle_task = asyncio.create_task(settle())  # noqa: F841, RUF006 — fire-and-forget; the await below synchronizes on its effect
     # poll_seconds=0.01 so the loop spins several times before the flip lands.
     await _await_thread("e0", poll_seconds=0.01)
     session.expire_all()
@@ -349,6 +359,6 @@ async def test_await_thread_polls_until_settled(session, make_user):
 async def test_await_thread_missing_thread_is_failed(session, make_user):
     """H-51: a missing thread must read as `failed` (swarm.py:259), not hang
     the poll loop forever waiting for a row that will never exist."""
-    run = _seed(session, make_user)
+    _seed(session, make_user)
     # No Thread row for "ghost" — _await_thread must treat it as failed/terminal.
     await _await_thread("ghost", poll_seconds=0.01)

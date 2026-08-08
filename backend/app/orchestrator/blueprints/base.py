@@ -10,8 +10,8 @@ misreport tests. A new mode = one blueprint file + one DB row.
 from __future__ import annotations
 
 import abc
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
 
 from collegium_contracts import RunStage
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from collegium_contracts import Decomposition, RunStage
 
@@ -28,12 +28,13 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo, RepoStatus
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 from app.orchestrator.blueprints.base import Blueprint, BlueprintContext, Node
+from app.orchestrator.blueprints.goal import THREAD_MAX_WAIT_S
 from app.orchestrator.blueprints.plan import PlanBlueprint
 from app.services.runs import transition
 
@@ -175,7 +176,23 @@ class SwarmBlueprint(Blueprint):
     # --------------------------------------------------------------- collect
     async def _collect(self, ctx: BlueprintContext) -> None:
         thread_ids = ctx.artifacts["explorer_thread_ids"]
-        await asyncio.gather(*(_await_thread(lid) for lid in thread_ids))
+        # E4: per-slice isolation — a wedged explorer raises inside its own
+        # await instead of parking the gather; the surviving notebooks still
+        # synthesize and the wedged thread is finished + counted.
+        outcomes = await asyncio.gather(
+            *(_await_thread(lid) for lid in thread_ids), return_exceptions=True)
+        wedged = [lid for lid, o in zip(thread_ids, outcomes, strict=True)
+                  if isinstance(o, Exception)]
+        if wedged:
+            log.warning("swarm explorers wedged — continuing without them",
+                        run_id=ctx.run.id, thread_ids=wedged)
+            ctx.artifacts["wedged_explorer_ids"] = wedged
+            thread_manager = ctx.services["thread_manager"]
+            for lid in wedged:
+                try:
+                    await thread_manager.finish_thread(lid, "failed")
+                except Exception:
+                    log.warning("wedged explorer finish failed", thread_id=lid)
         notebooks: list[dict] = []
         for lid in thread_ids:
             notebooks.append({"thread_id": lid, "notebook": _notebook_for(lid),
@@ -251,11 +268,15 @@ class SwarmBlueprint(Blueprint):
             if failed:
                 run.auto_summary = ((run.auto_summary or "")
                                     + f"\n\n{len(failed)} explorer thread(s) failed")[:2000]
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             session.commit()
         finally:
             session.close()
         for lid in thread_ids:
+            # E4/F1: explorers idle-lingered until the TTL, holding capacity
+            # after the run completed. finish_thread stamps terminal, stops
+            # the container, and runs the unified settle/release/clear.
+            await thread_manager.finish_thread(lid)
             await thread_manager.settle_cost(lid)
         # M-47: the decompose (Lead) and synthesis threads were never
         # cost-settled — their gateway keys and spend leaked (never
@@ -269,7 +290,9 @@ class SwarmBlueprint(Blueprint):
 
 
 # ------------------------------------------------------------------- helpers
-async def _await_thread(thread_id: str, poll_seconds: float = 2.0) -> None:
+async def _await_thread(thread_id: str, poll_seconds: float = 2.0,
+                        max_wait_s: float = THREAD_MAX_WAIT_S) -> None:
+    waited = 0.0
     while True:
         session = get_session()
         try:
@@ -278,9 +301,19 @@ async def _await_thread(thread_id: str, poll_seconds: float = 2.0) -> None:
         finally:
             session.close()
         if status in ("idle", "completed", "failed", "stopped",
-                      "interrupted", "replaced"):  # H-38
+                      "interrupted", "replaced",
+                      "input_required"):  # H-38 + A4: approval-parked threads
+                      # end the blueprint await — the run stage tracks the
+                      # human wait; polling forever wedged the run.
             return
+        if waited >= max_wait_s:
+            # E4: without a bound, ONE wedged explorer parked the gather
+            # forever and its finished siblings idled with capacity + locks
+            # held until the idle TTL.
+            raise RuntimeError(
+                f"thread {thread_id} wedged in '{status}' for {max_wait_s:.0f}s")
         await asyncio.sleep(poll_seconds)
+        waited += poll_seconds
 
 
 def _last_message_text(thread_id: str) -> str | None:

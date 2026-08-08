@@ -3,9 +3,9 @@ import asyncio
 import pytest
 from collegium_contracts import RunStage
 
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Plan, Run
+from app.db.models.thread import Thread
 from app.orchestrator import run_manager
 from app.orchestrator.run_manager import RunManager
 
@@ -36,8 +36,12 @@ class _FakeControl:
         self.interrupted = []
         self.killed = []
         self.nudged = []
-    async def interrupt(self, thread_id): self.interrupted.append(thread_id)
-    async def kill(self, thread_id): self.killed.append(thread_id)
+    async def interrupt(self, thread_id, *, wait_ack=False, ack_timeout_s=10.0):
+        self.interrupted.append(thread_id)
+        return False
+    async def kill(self, thread_id, *, wait_ack=False, ack_timeout_s=10.0):
+        self.killed.append(thread_id)
+        return False
     async def nudge(self, thread_id, text): self.nudged.append((thread_id, text))
 
 
@@ -182,7 +186,8 @@ async def test_abandon_run_kills_and_shreds(session, make_user, monkeypatch):
     session.commit()
     stopped = []
     shredded = []
-    monkeypatch.setattr(run_manager.sandbox_manager, "stop_container", lambda cid: stopped.append(cid))
+    monkeypatch.setattr(run_manager.sandbox_manager, "wait_for_container_exit",
+                        lambda cid, timeout_s=15.0: stopped.append(cid) or True)
     monkeypatch.setattr(run_manager.sandbox_manager, "shred_workspace", lambda rid: shredded.append(rid))
     rm._tasks["r1"] = asyncio.create_task(asyncio.sleep(100))
     await rm.abandon_run("r1")
@@ -315,9 +320,12 @@ async def test_reconcile_on_boot_interrupts_active_runs(session, make_user):
         session.add(r)
     session.commit()
     count = await rm.reconcile_on_boot()
-    assert count == 4  # completed is not in the active set
+    # completed is not in the active set; E2: VERIFYING is human-parked and
+    # is never swept.
+    assert count == 3
     session.expire_all()
     assert session.get(Run, f"r-{RunStage.COMPLETED.value}").stage == RunStage.COMPLETED.value
+    assert session.get(Run, f"r-{RunStage.VERIFYING.value}").stage == RunStage.VERIFYING.value
     assert session.get(Run, f"r-{RunStage.INVESTIGATING.value}").stage == RunStage.INTERRUPTED.value
 
 
@@ -600,7 +608,8 @@ async def test_kill_replace_respawns_with_original_context(session, make_user, m
         id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_thread_id=None):
+                         resume_session=False, resume_from_thread_id=None,
+                         preserve_workspace=False, budget_usd=None):
         captured.update({"persona": persona, "prompt": prompt,
                          "persona_prompt": persona_prompt,
                          "resume_from_thread_id": resume_from_thread_id})
@@ -634,7 +643,8 @@ async def test_kill_replace_passes_resume_from_thread_id(session, make_user, mon
         id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_thread_id=None):
+                         resume_session=False, resume_from_thread_id=None,
+                         preserve_workspace=False, budget_usd=None):
         captured["resume_from_thread_id"] = resume_from_thread_id
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn
@@ -663,13 +673,15 @@ async def test_kill_replace_waits_for_old_container_before_spawn(session, make_u
         id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_thread_id=None):
+                         resume_session=False, resume_from_thread_id=None,
+                         preserve_workspace=False, budget_usd=None):
         order.append("spawn")
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn
 
-    def _wait(cid):
+    def _wait(cid, timeout_s=15.0):
         order.append("wait_for_exit")
+        return True
     monkeypatch.setattr(run_manager.sandbox_manager, "wait_for_container_exit", _wait)
 
     await rm.kill_replace_thread("r1", "l1")
@@ -711,7 +723,8 @@ async def test_remount_thread_unions_extra_repos_onto_stored_set(session, make_u
         id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_thread_id=None):
+                         resume_session=False, resume_from_thread_id=None,
+                         preserve_workspace=False, budget_usd=None):
         captured["writable_repo"] = writable_repo
         captured["context_repos"] = context_repos
         captured["resume_from_thread_id"] = resume_from_thread_id
@@ -751,7 +764,8 @@ async def test_remount_thread_dedupes_already_mounted_names(session, make_user, 
         id = "thread-new"
 
     async def fake_spawn(run, persona, prompt, persona_prompt, writable_repo, context_repos,
-                         resume_session=False, resume_from_thread_id=None):
+                         resume_session=False, resume_from_thread_id=None,
+                         preserve_workspace=False, budget_usd=None):
         captured["context_repos"] = context_repos
         return _Replacement()
     rm.thread_manager.spawn = fake_spawn

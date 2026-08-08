@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from app.events import control as control_mod
 
 
@@ -14,25 +12,38 @@ def _control(fake_redis):
 async def test_interrupt_publishes_correct_channel(fake_redis):
     c = _control(fake_redis)
     await c.interrupt("thread-1")
-    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "interrupt"}))
+    channel, payload = fake_redis.published[-1]
+    assert channel == "thread:thread-1:control"
+    data = json.loads(payload)
+    assert data["type"] == "interrupt"
+    assert data["id"]  # K14: critical controls carry an ack id
 
 
 async def test_nudge_publishes_text(fake_redis):
     c = _control(fake_redis)
     await c.nudge("thread-1", "go faster")
-    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "nudge", "text": "go faster"}))
+    channel, payload = fake_redis.published[-1]
+    assert channel == "thread:thread-1:control"
+    data = json.loads(payload)
+    assert data["type"] == "nudge" and data["text"] == "go faster"
 
 
 async def test_set_mode_publishes_mode(fake_redis):
     c = _control(fake_redis)
     await c.set_mode("thread-1", "acceptEdits")
-    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "mode", "mode": "acceptEdits"}))
+    channel, payload = fake_redis.published[-1]
+    assert channel == "thread:thread-1:control"
+    data = json.loads(payload)
+    assert data["type"] == "mode" and data["mode"] == "acceptEdits"
 
 
 async def test_kill_publishes_kill(fake_redis):
     c = _control(fake_redis)
     await c.kill("thread-1")
-    assert fake_redis.published[-1] == ("thread:thread-1:control", json.dumps({"type": "kill"}))
+    channel, payload = fake_redis.published[-1]
+    assert channel == "thread:thread-1:control"
+    data = json.loads(payload)
+    assert data["type"] == "kill" and data["id"]
 
 
 async def test_resolve_approval_rpushes_decision(fake_redis):

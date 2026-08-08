@@ -30,16 +30,21 @@ class Relay:
         # run_id -> set of asyncio.Queue, one per subscribed socket
         self.subscribers: dict[str, set[asyncio.Queue]] = {}
         self._delta_tasks: dict[str, asyncio.Task] = {}
+        # D7: queue -> owning user id, so tenant-scoped broadcasts fan out
+        # ONLY to that tenant's sockets.
+        self._queue_owner: dict[asyncio.Queue, int | None] = {}
 
-    def subscribe(self, run_id: str) -> asyncio.Queue:
+    def subscribe(self, run_id: str, user_id: int | None = None) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self.subscribers.setdefault(run_id, set()).add(queue)
+        self._queue_owner[queue] = user_id
         if run_id not in self._delta_tasks:
             self._delta_tasks[run_id] = asyncio.create_task(self._delta_loop(run_id))
         return queue
 
     def unsubscribe(self, run_id: str, queue: asyncio.Queue) -> None:
         self.subscribers.get(run_id, set()).discard(queue)
+        self._queue_owner.pop(queue, None)
         if not self.subscribers.get(run_id):
             task = self._delta_tasks.pop(run_id, None)
             if task:
@@ -119,9 +124,24 @@ class Relay:
         await self._fanout(run_id, {"type": "delta", "delta": delta})
 
     # repo_added WS event: invalidates the repo-list query, no refresh.
-    async def publish_global(self, message: dict) -> None:
-        for run_id in list(self.subscribers):
-            await self._fanout(run_id, message)
+    async def publish_global(self, message: dict,
+                             user_id: int | None = None) -> None:
+        # D7: with user_id set, ONLY that tenant's sockets receive it — the
+        # old unconditional broadcast leaked tenant-scoped facts (e.g. repo
+        # names in repo_added) to every connected user. None stays a true
+        # broadcast for genuinely fleet-wide notices.
+        with_targets = [
+            (run_id, q)
+            for run_id, qs in self.subscribers.items() for q in qs
+            if user_id is None or self._queue_owner.get(q) == user_id
+        ]
+        for run_id, q in with_targets:
+            try:
+                q.put_nowait(message)
+            except asyncio.QueueFull:
+                self.subscribers.get(run_id, set()).discard(q)
+                self._queue_owner.pop(q, None)
+                self._send_drop_sentinel(q)
 
     async def close(self) -> None:
         for task in self._delta_tasks.values():
