@@ -65,9 +65,14 @@ export function IdeasScreen() {
     // error too, so a failed POST silently wiped the user's text. Keep the
     // invalidation in onSettled (refreshing on success or error is harmless)
     // and surface the failure so the user knows their text was NOT sent.
-    onSuccess: () => setComment(""),
-    onError: (err) => {
-      toast.error("comment failed", {
+    onSuccess: (_d, vars) => {
+      if (vars.kind === "comment") setComment("");
+    },
+    // W9-L11: the toast used to say "comment failed" for ALL kinds, so a
+    // failed promote looked like a lost comment. Label by the real action.
+    onError: (err, vars) => {
+      const label = vars.kind === "comment" ? "comment" : vars.kind === "promote" ? "promotion" : "counsel request";
+      toast.error(`${label} failed`, {
         description: err instanceof Error ? err.message : undefined,
       });
     },
@@ -138,13 +143,25 @@ export function IdeasScreen() {
                     variant="secondary"
                     size="sm"
                     className="font-mono"
+                    disabled={send.isPending}
                     onClick={() => send.mutate({ id: t.id, kind: "ask-counsel" })}
                   >
-                    ask counsel
+                    {/* W9-L12: pending state (promote already had one). */}
+                    {send.isPending && send.variables?.kind === "ask-counsel" ? "asking…" : "ask counsel"}
                   </Button>
-                  <Button size="sm" className="font-mono" onClick={() => send.mutate({ id: t.id, kind: "promote" })}>
-                    promote to plan
-                  </Button>
+                  {/* W9-H1: promote mints a run — hide once promoted, disable
+                      while pending so a double-click can't mint two. The
+                      backend claim guard is the backstop (409). */}
+                  {detail.status !== "promoted" && detail.status !== "promoting" && (
+                    <Button
+                      size="sm"
+                      className="font-mono"
+                      disabled={send.isPending}
+                      onClick={() => send.mutate({ id: t.id, kind: "promote" })}
+                    >
+                      {send.isPending && send.variables?.kind === "promote" ? "promoting…" : "promote to plan"}
+                    </Button>
+                  )}
                 </div>
                 <div className="mt-s3 flex gap-s2">
                   <input
@@ -158,7 +175,7 @@ export function IdeasScreen() {
                     variant="secondary"
                     size="sm"
                     className="font-mono"
-                    disabled={!comment.trim()}
+                    disabled={!comment.trim() || send.isPending}
                     onClick={() => send.mutate({ id: t.id, kind: "comment" })}
                   >
                     comment

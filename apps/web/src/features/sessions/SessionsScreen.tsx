@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { FilterChips } from "@/components/ui/filter-chips";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,35 @@ export function SessionsScreen() {
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
+  // W-B5: deep links — push notifications target /app?run=<id>&card=<id>.
+  // Consume ONCE (open the run, then strip the params so a later re-render
+  // or tab switch doesn't re-open it); the card id rides state so the
+  // approval dock can scroll to it after its fetch lands.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [focusCardId, setFocusCardId] = useState<string | null>(null);
+  const deepLinkConsumed = useRef(false);
+  useEffect(() => {
+    if (deepLinkConsumed.current) return;
+    const runId = searchParams.get("run");
+    if (!runId) return;
+    deepLinkConsumed.current = true;
+    const cardId = searchParams.get("card");
+    if (cardId) setFocusCardId(cardId);
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.delete("run");
+      p.delete("card");
+      return p;
+    }, { replace: true });
+    if (runId !== current?.id) void openRun(runId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // W-B4: one idempotency key per composer draft — a double-clicked or
+  // retried "route it" mints ONE run server-side. Regenerated after a
+  // successful start (the next draft is a new intent).
+  const draftIdemKey = useRef<string>(crypto.randomUUID());
+
   useEffect(() => {
     void loadRuns();
   }, [loadRuns]);
@@ -107,7 +137,30 @@ export function SessionsScreen() {
     retry: false,
   });
 
+  // W-B2b: edit-and-resend. When armed, the composer holds the last user
+  // message and Send fires edit_and_resend (replace the thread on its
+  // session volume + deliver the edited text) instead of a plain nudge into
+  // a terminal thread (which the backend now 409s).
+  const [editingResend, setEditingResend] = useState(false);
+  useEffect(() => {
+    setEditingResend(false);
+  }, [current?.id, current?.stage]);
+
+  const lastUserMessage = events.reduce<string | null>(
+    (found, e) => (e.kind === "message" && e.detail?.role === "user" && typeof e.detail?.text === "string"
+      ? e.detail.text
+      : found),
+    null,
+  );
+
+  const startEditResend = () => {
+    if (lastUserMessage) setTask(lastUserMessage);
+    setEditingResend(true);
+    document.getElementById("session-composer")?.focus();
+  };
+
   const start = async (repo?: string, title?: string) => {
+    if (busy) return; // W-B4: a second Enter/click during the POST must not double-start
     setBusy(true);
     try {
       const run = await createRun({
@@ -115,7 +168,9 @@ export function SessionsScreen() {
         task: title ?? task,
         repo,
         fanout: fanout === "" || Number.isNaN(fanout) ? undefined : fanout,
+        idempotency_key: draftIdemKey.current,
       });
+      draftIdemKey.current = crypto.randomUUID(); // the next draft is a new intent
       setTask("");
       await openRun(run.id);
     } finally {
@@ -124,17 +179,26 @@ export function SessionsScreen() {
   };
 
   const send = async () => {
-    if (!task.trim()) return;
+    if (!task.trim() || !current) return;
     setBusy(true);
     try {
+      if (editingResend) {
+        await sendIntent("edit_and_resend", { text: task.trim() });
+        setEditingResend(false);
+        setTask("");
+        return;
+      }
       // A mode switch takes effect on the next message, not immediately: the
       // current turn finishes undisturbed, and this send runs the new
       // blueprint (which respawns the thread on the prior session volume).
-      if (current && pendingMode && pendingMode !== current.mode) {
+      if (pendingMode && pendingMode !== current.mode) {
         await sendIntent("switch_mode", { payload: { mode: pendingMode } });
         setPendingMode(null);
       }
-      await sendIntent("send_message", { text: task.trim() });
+      // W6-M10: intent-LESS text — the backend classifies it against the
+      // run's current legal moves (a typed "approve plan" becomes a real
+      // approve_plan; anything else is a lead nudge).
+      await sendIntent(null, { text: task.trim() });
       setTask("");
     } finally {
       setBusy(false);
@@ -142,11 +206,22 @@ export function SessionsScreen() {
   };
 
   const working = current ? agentWorking(current.stage) : false;
+  // W-H14: the composer is a message path into a LIVE run. On a
+  // terminal/interrupted stage a plain send would vanish (backend 409s) —
+  // route the user to resume / edit-and-resend instead of pretending.
+  const stage = current?.stage;
+  const composerBlocked =
+    !!current && (stage === "completed" || stage === "failed" || stage === "abandoned" ||
+      (stage === "interrupted" && !editingResend));
   const submit = () => void (current ? send() : start());
   const placeholder = current
-    ? working
-      ? "nudge the lead — it hears you mid-work…"
-      : "message the lead…"
+    ? editingResend
+      ? "edit the last message, then send — the old turn never runs…"
+      : composerBlocked
+        ? `run is ${current.stage} — resume or edit & resend from the card above`
+        : working
+          ? "nudge the lead — queued for the next turn…"
+          : "message the lead…"
     : mode === "agent-rnd"
       ? 'investigate across the fleet… ("spawn 5 explorers on ClientApp")'
       : "describe the task…";
@@ -314,27 +389,52 @@ export function SessionsScreen() {
         className="flex-none bg-bg-panel"
         aria-label={current ? "message the lead" : "new run"}
       >
-        {current && <ApprovalQueue runId={current.id} />}
+        {current && <ApprovalQueue runId={current.id} focusCardId={focusCardId} />}
         {current && (
-          <SessionResume run={current} working={working} onResumed={(runId) => void openRun(runId)} />
+          <SessionResume
+            run={current}
+            working={working}
+            onResumed={(runId) => void openRun(runId)}
+            onEdit={startEditResend}
+          />
         )}
         {current && (
           <ActionCard
             stage={current.stage}
             actions={current.available_actions}
             working={working}
-            onFire={(intent, confirmed) => void sendIntent(intent, { confirmed })}
+            onFire={(intent, confirmed) => {
+              // edit_and_resend needs the edited text — route it through the
+              // composer instead of firing a textless intent (a 422).
+              if (intent === "edit_and_resend") {
+                startEditResend();
+                return;
+              }
+              void sendIntent(intent, { confirmed });
+            }}
           />
         )}
         <div className="mx-auto w-full max-w-canvas px-s5 py-s2">
+          {current?.stage === "failed" && current.failure_reason && (
+            <div
+              data-testid="failure-banner"
+              role="alert"
+              className="mb-s2 rounded-md border border-red/40 bg-danger-soft px-s3 py-s2 text-[12.5px] text-danger-bright"
+            >
+              run failed — {current.failure_reason}
+            </div>
+          )}
           <MentionTextarea
             id="session-composer"
             rows={1}
             placeholder={placeholder}
             value={task}
+            disabled={composerBlocked}
             onChange={(e) => setTask(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && task.trim()) {
+              // W-B4: gate on !busy — an Enter during the in-flight POST used
+              // to mint a second run/message.
+              if (e.key === "Enter" && !e.shiftKey && !busy && task.trim()) {
                 e.preventDefault();
                 submit();
               }

@@ -102,14 +102,19 @@ function Ledger({ title, buckets, loading }: { title: string; buckets?: Record<s
 export function DashboardScreen() {
   const [days, setDays] = useState("30");
 
+  // W8-L3: cost now settles on EVERY terminal path, so the dashboard is
+  // truthful-ish but only for the mount-time fetch. Poll so a run finishing
+  // while the tab sits open shows up without a manual refresh.
   const stats = useQuery({
     queryKey: qk.costStats(Number(days)),
     queryFn: () => api.get<Dashboard>(`/stats/cost?days=${days}`),
     placeholderData: (prev) => prev,
+    refetchInterval: 30_000,
   });
   const deliveries = useQuery({
     queryKey: qk.deliveries,
     queryFn: () => api.get<{ items: Delivery[] }>("/deliveries"),
+    refetchInterval: 30_000,
   });
 
   const dash = stats.data;

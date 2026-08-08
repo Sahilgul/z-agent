@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHead } from "@/components/ui/page-head";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/sonner";
 import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
 
@@ -78,7 +79,15 @@ export function ProposalsScreen() {
       );
       return { prev };
     },
-    onError: (_e, _v, ctx) => qc.setQueryData(qk.proposals(showAll), ctx?.prev),
+    // W9-M3: rollback alone looked like success (the card vanished and the
+    // refetch brought it back with no explanation). Toast the real reason —
+    // spend-ceiling and already-decided 422s are the common ones.
+    onError: (err, vars, ctx) => {
+      qc.setQueryData(qk.proposals(showAll), ctx?.prev);
+      toast.error(`${vars.action} failed`, {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    },
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.proposals(showAll) }),
   });
 

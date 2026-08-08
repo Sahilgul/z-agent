@@ -23,6 +23,10 @@ interface EvidencePackage {
 export function PROverlay() {
   const { current, sendIntent } = useRuns();
   const [handoff, setHandoff] = useState<string | null>(null);
+  // W5-L4: a service-account merge returns NO handoff_url (nothing for the
+  // human to complete) — the button used to stay live, inviting a second
+  // merge POST against an already-merged PR.
+  const [merged, setMerged] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -40,6 +44,8 @@ export function PROverlay() {
       const res = await sendIntent("merge_pr", { confirmed: true });
       if (typeof res.handoff_url === "string" && res.handoff_url) {
         setHandoff(res.handoff_url);
+      } else {
+        setMerged(true);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "merge failed");
@@ -81,6 +87,10 @@ export function PROverlay() {
           )}
           {handoff ? (
             <Button render={<a href={handoff} target="_blank" rel="noreferrer" />}>complete the merge in ADO →</Button>
+          ) : merged ? (
+            <div className="font-mono text-[12.5px] text-ok-bright" data-testid="merge-done">
+              merged by the service account — your approval is on record
+            </div>
           ) : (
             <Button disabled={busy} onClick={() => void merge()}>
               {busy ? "merging…" : "approve & merge — my identity is the record"}

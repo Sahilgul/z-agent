@@ -154,6 +154,12 @@ export function LoginScreen() {
         <p className="text-center font-mono text-[11px] tracking-[0.04em] text-ink-faint">
           {t("login.footerOrg")}
         </p>
+        <p className="text-center font-mono text-[11px] text-ink-faint">
+          have an invite code?{" "}
+          <a href="/first-login" className="text-ink-secondary underline underline-offset-2 hover:text-ink-primary">
+            first-time setup
+          </a>
+        </p>
       </div>
     </div>
   );

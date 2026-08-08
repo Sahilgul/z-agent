@@ -35,7 +35,11 @@ export function ReposScreen() {
   const [branches, setBranches] = useState<string[] | null>(null);
   const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  // W9-L13: one shared `error` state misattributed failures — an archive
+  // failure rendered inside the ADD form (or vanished when it was closed).
+  // formError is add-form-scoped; listError is row-action-scoped.
+  const [formError, setFormError] = useState("");
+  const [listError, setListError] = useState("");
   const [editing, setEditing] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -60,16 +64,20 @@ export function ReposScreen() {
 
   async function fetchBranches() {
     setBusy(true);
-    setError("");
+    setFormError("");
     setBranches(null);
     try {
       const data = await api.get<{ branches: string[] }>(
         `/repos/remote-branches?name=${encodeURIComponent(name.trim())}`
       );
       setBranches(data.branches);
-      setBranch(data.branches[0] ?? "");
+      // W9-M7: prefer the integration line over an arbitrary first branch —
+      // the backend already sorts HEAD-first, this is the belt-and-braces
+      // half for any proxy/cached list that didn't.
+      const head = data.branches.find((b) => ["main", "master", "develop", "development"].includes(b));
+      setBranch(head ?? data.branches[0] ?? "");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "could not reach remote");
+      setFormError(e instanceof Error ? e.message : "could not reach remote");
     } finally {
       setBusy(false);
     }
@@ -77,7 +85,7 @@ export function ReposScreen() {
 
   async function addRepo() {
     setBusy(true);
-    setError("");
+    setFormError("");
     try {
       await api.post("/repos", { name: name.trim(), integration_branch: branch });
       setAdding(false);
@@ -85,7 +93,7 @@ export function ReposScreen() {
       setBranches(null);
       await refetch();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "add failed");
+      setFormError(e instanceof Error ? e.message : "add failed");
     } finally {
       setBusy(false);
     }
@@ -94,12 +102,12 @@ export function ReposScreen() {
   async function removeRepo(repo: Repo) {
     // Archiving shreds the golden clone — irreversible enough to confirm.
     if (!window.confirm(`remove ${repo.name}? the golden clone is deleted.`)) return;
-    setError("");
+    setListError("");
     try {
       await api.post(`/repos/${repo.id}/archive`);
       await refetch();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "remove failed");
+      setListError(e instanceof Error ? e.message : "remove failed");
     }
   }
 
@@ -159,11 +167,15 @@ export function ReposScreen() {
               </Button>
             )}
           </div>
-          {error && <p className="mt-s3 text-[12.5px] text-danger-bright">{error}</p>}
+          {formError && <p className="mt-s3 text-[12.5px] text-danger-bright">{formError}</p>}
         </div>
       )}
 
-      {!adding && error && <p className="mb-s3 text-[12.5px] text-danger-bright">{error}</p>}
+      {listError && (
+        <p role="alert" className="mb-s3 text-[12.5px] text-danger-bright" data-testid="repo-list-error">
+          {listError}
+        </p>
+      )}
 
       {/* A rack reads as stacked rails, not as a grid of loose tiles: one row per
           repo, columns aligned so branch and HEAD scan vertically down the list. */}

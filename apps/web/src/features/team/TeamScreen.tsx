@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@/components/ui/sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHead } from "@/components/ui/page-head";
 import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
+import { useSession } from "../../stores/session";
 
 interface TeamUser {
   id: number;
@@ -91,14 +93,35 @@ export function TeamScreen() {
   }
 
   async function regen(id: number) {
-    const res = await api.post<{ setup_code: string }>(`/team/users/${id}/regenerate-code`, {});
-    setOneTimeCode(res.setup_code);
-    setCopied(false);
+    // W-H16: was an uncaught promise — a 4xx/5xx died silently and the admin
+    // stared at an unchanged table.
+    try {
+      const res = await api.post<{ setup_code: string }>(`/team/users/${id}/regenerate-code`, {});
+      setOneTimeCode(res.setup_code);
+      setCopied(false);
+    } catch (e) {
+      toast.error("code regeneration failed", { description: e instanceof Error ? e.message : undefined });
+    }
   }
 
+  const me = useSession((s) => s.me);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
   async function deactivate(id: number) {
-    await api.post(`/team/users/${id}/deactivate`, {});
-    await qc.invalidateQueries({ queryKey: qk.team });
+    // W-H16: confirm + busy-guard + toast on failure. Deactivation is
+    // reversible by an admin but revokes access instantly — no bare click.
+    setBusyId(id);
+    try {
+      await api.post(`/team/users/${id}/deactivate`, {});
+      toast.success("teammate deactivated", { description: "their setup code and sessions are revoked" });
+      setConfirmingId(null);
+      await qc.invalidateQueries({ queryKey: qk.team });
+    } catch (e) {
+      toast.error("deactivate failed", { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setBusyId(null);
+    }
   }
 
   if (denied) {
@@ -188,9 +211,41 @@ export function TeamScreen() {
                     <Button variant="ghost" size="sm" className="font-mono" onClick={() => void regen(u.id)}>
                       new code
                     </Button>
-                    <Button variant="destructive" size="sm" className="font-mono" onClick={() => void deactivate(u.id)}>
-                      deactivate
-                    </Button>
+                    {u.id === me?.id ? (
+                      // W-H16: never offer self-deactivation — the backend
+                      // 422s it and locking out the last admin is a
+                      // recover-only-from-db state.
+                      <span
+                        className="self-center font-mono text-[10.5px] text-ink-faint"
+                        title="you can't deactivate your own account"
+                      >
+                        you
+                      </span>
+                    ) : confirmingId === u.id ? (
+                      <>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="font-mono"
+                          disabled={busyId === u.id}
+                          onClick={() => void deactivate(u.id)}
+                        >
+                          {busyId === u.id ? "working…" : "confirm?"}
+                        </Button>
+                        <Button variant="ghost" size="sm" className="font-mono" onClick={() => setConfirmingId(null)}>
+                          keep
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="font-mono"
+                        onClick={() => setConfirmingId(u.id)}
+                      >
+                        deactivate
+                      </Button>
+                    )}
                   </div>
                 )}
               </td>

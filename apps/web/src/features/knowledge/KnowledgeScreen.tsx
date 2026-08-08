@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
 import { PageHead } from "@/components/ui/page-head";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/sonner";
@@ -18,6 +17,13 @@ interface KnowledgeEntry {
   repo: string | null;
   status: string;
   source_run_id: string | null;
+  proposed_scope: string | null;
+}
+
+interface RepoRow {
+  id: number;
+  name: string;
+  status?: string;
 }
 
 function ScopeBadge({ entry }: { entry: KnowledgeEntry }) {
@@ -30,10 +36,15 @@ function ScopeBadge({ entry }: { entry: KnowledgeEntry }) {
 
 /** Draft inbox card: the PHI checkpoint — a human decides where the
  *  distilled lesson may live (user / global / repo) before it's shared. */
-function DraftCard({ entry }: { entry: KnowledgeEntry }) {
+function DraftCard({ entry, repos }: { entry: KnowledgeEntry; repos: RepoRow[] }) {
   const qc = useQueryClient();
-  const [scope, setScope] = useState("global");
-  const [repo, setRepo] = useState("");
+  // W9-M5: default the selector to what the distiller/proposer suggested
+  // (was a flat "global" every time, silently overriding the suggestion).
+  const proposed = entry.proposed_scope && ["global", "user", "repo"].includes(entry.proposed_scope)
+    ? entry.proposed_scope
+    : "global";
+  const [scope, setScope] = useState(proposed);
+  const [repo, setRepo] = useState(entry.repo ?? "");
 
   const approve = useMutation({
     mutationFn: () => api.post(`/knowledge/${entry.id}/approve`, { scope, repo: scope === "repo" ? repo : null }),
@@ -41,6 +52,20 @@ function DraftCard({ entry }: { entry: KnowledgeEntry }) {
     // approve didn't land and can retry instead of assuming it worked.
     onError: (err) => {
       toast.error("approve failed", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.knowledgeDrafts });
+      void qc.invalidateQueries({ queryKey: qk.knowledge() });
+    },
+  });
+
+  // W9-M4: the missing reject path — the endpoint existed, the UI didn't.
+  const reject = useMutation({
+    mutationFn: () => api.post(`/knowledge/${entry.id}/reject`, {}),
+    onError: (err) => {
+      toast.error("reject failed", {
         description: err instanceof Error ? err.message : undefined,
       });
     },
@@ -76,23 +101,41 @@ function DraftCard({ entry }: { entry: KnowledgeEntry }) {
           <option value="repo">share: repo</option>
         </select>
         {scope === "repo" && (
-          <Input
+          // W9-M6: picker over the registry, not free text — a typo'd name
+          // black-holed the lesson (it retrieved for a repo string no run
+          // ever carries). The backend re-validates the same list.
+          <select
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
-            placeholder="repo name"
-            className="w-40"
             aria-label="repo name"
-          />
+            className="h-8 rounded-md border border-hairline bg-bg-raised px-s3 text-[12.5px] text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-jack"
+          >
+            <option value="">pick a repo…</option>
+            {repos.map((r) => (
+              <option key={r.id} value={r.name}>
+                {r.name}
+              </option>
+            ))}
+          </select>
         )}
         <Button
           size="sm"
           className="font-mono"
           // M-85: guard against double-submit while the POST is in flight
           // (was no isPending check, so a second click sent a duplicate).
-          disabled={(scope === "repo" && !repo.trim()) || approve.isPending}
+          disabled={(scope === "repo" && !repo.trim()) || approve.isPending || reject.isPending}
           onClick={() => approve.mutate()}
         >
           {approve.isPending ? "approving…" : "approve"}
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="font-mono"
+          disabled={approve.isPending || reject.isPending}
+          onClick={() => reject.mutate()}
+        >
+          {reject.isPending ? "rejecting…" : "reject"}
         </Button>
       </div>
     </article>
@@ -102,13 +145,18 @@ function DraftCard({ entry }: { entry: KnowledgeEntry }) {
 /** Knowledge: a draft inbox (PHI checkpoint) above the shared corpus.
  *  Own drafts appear in both — the inbox is where you decide their scope. */
 export function KnowledgeScreen() {
-  const { data: drafts = [], isLoading: loadingDrafts } = useQuery({
+  const { data: drafts = [], isLoading: loadingDrafts, error: draftsError } = useQuery({
     queryKey: qk.knowledgeDrafts,
     queryFn: () => api.get<KnowledgeEntry[]>("/knowledge/pending"),
   });
-  const { data: corpus = [], isLoading: loadingCorpus } = useQuery({
+  const { data: corpus = [], isLoading: loadingCorpus, error: corpusError } = useQuery({
     queryKey: qk.knowledge(),
     queryFn: () => api.get<KnowledgeEntry[]>("/knowledge"),
+  });
+  // W9-M6: the repo-scope picker is backed by the registry query.
+  const { data: repos = [] } = useQuery({
+    queryKey: qk.repos,
+    queryFn: () => api.get<RepoRow[]>("/repos"),
   });
 
   return (
@@ -117,11 +165,17 @@ export function KnowledgeScreen() {
 
       {loadingDrafts ? (
         <Skeleton className="mb-s6 h-32 w-full rounded-lg" />
+      ) : draftsError ? (
+        // W9-L16: a failed inbox fetch used to render as a silently EMPTY
+        // inbox — indistinguishable from "nothing to review".
+        <p role="alert" className="mb-s6 font-mono text-[12.5px] text-danger-bright">
+          drafts failed to load — {draftsError instanceof Error ? draftsError.message : "unknown error"}
+        </p>
       ) : (
         drafts.length > 0 && (
           <div className="mb-s6 flex flex-col gap-s3">
             {drafts.map((d) => (
-              <DraftCard key={d.id} entry={d} />
+              <DraftCard key={d.id} entry={d} repos={repos} />
             ))}
           </div>
         )
@@ -134,6 +188,10 @@ export function KnowledgeScreen() {
             <Skeleton key={i} className="h-20 w-full rounded-lg" />
           ))}
         </div>
+      ) : corpusError ? (
+        <p role="alert" className="font-mono text-[12.5px] text-danger-bright">
+          corpus failed to load — {corpusError instanceof Error ? corpusError.message : "unknown error"}
+        </p>
       ) : corpus.length === 0 ? (
         <EmptyState hint="nothing distilled yet" />
       ) : (
