@@ -210,15 +210,22 @@ class ThreadManager:
         if images and option.vision:
             # Stage attachments into the session dir the container will
             # actually mount — the PRIOR thread's when resuming (that volume
-            # is what gets bind-mounted at /session).
-            import shutil
-            from pathlib import Path
+            # is what gets bind-mounted at /session). Fail-safe like the
+            # key-mint and container-start blocks around it: an unguarded
+            # copy error here would leave the thread "queued" (capacity held)
+            # and the minted key live at the gateway.
+            try:
+                import shutil
+                from pathlib import Path
 
-            from app.sandbox.manager import session_subpath
-            dest = session_subpath(run.id, resume_from_thread_id or thread.id) / "images"
-            dest.mkdir(parents=True, exist_ok=True)
-            for src in images:
-                shutil.copy2(src, dest / Path(src).name)
+                from app.sandbox.manager import session_subpath
+                dest = session_subpath(run.id, resume_from_thread_id or thread.id) / "images"
+                dest.mkdir(parents=True, exist_ok=True)
+                for src in images:
+                    shutil.copy2(src, dest / Path(src).name)
+            except Exception as exc:
+                await self._mark(thread.id, "failed")
+                raise ThreadSpawnError(f"image staging failed: {exc}") from exc
 
         permission_mode = permission_mode_for(run.autonomy)
         try:

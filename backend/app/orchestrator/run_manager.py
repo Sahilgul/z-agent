@@ -126,9 +126,11 @@ class RunManager:
                          models: list[str] | None = None,
                          reasoning: dict[str, str] | None = None,
                          images: list[str] | None = None,
+                         swarm_model: str | None = None,
                          idempotency_key: str | None = None) -> Run:
         models = self._validate_models(models, mode_name)
         reasoning = self._validate_reasoning(reasoning, models)
+        swarm_model = self._validate_swarm_model(swarm_model)
         # Attachments validated BEFORE the run row exists: a bad upload must
         # 422 without leaving a queued run behind.
         if images:
@@ -198,12 +200,61 @@ class RunManager:
         artifacts_extra = {
             **({"models": models} if models else {}),
             **({"reasoning": reasoning} if reasoning else {}),
-            **(await self._prepare_images(run.id, images, task, models) if images else {}),
+            **({"swarm_model": swarm_model} if swarm_model else {}),
         }
+        if images:
+            try:
+                artifacts_extra.update(
+                    await self._prepare_images(run.id, images, task, models))
+            except Exception as exc:
+                # The run row, streams, and QUEUED stage already exist — an
+                # attachment prep failure (disk write, vision pre-pass HTTP
+                # error/timeout) must NOT strand the run as a QUEUED zombie
+                # with no _execute task. Fail it through the same terminal
+                # path a blueprint failure would take, then surface the error.
+                log.error("image preparation failed", run_id=run.id,
+                          error=str(exc)[:300])
+                await self._fail_pre_execute(run.id, exc)
+                raise
         self._track(run.id, self._execute(
             run.id, task, repo, fanout,
             artifacts_extra=artifacts_extra or None))
         return run
+
+    async def _fail_pre_execute(self, run_id: str, exc: Exception) -> None:
+        """Terminal stamp for failures between row-commit and _track(_execute)
+        (e.g. image prep). _guarded_execute never runs for these, so mirror
+        its failure path: FAILED row + reason, relay note + stage, stream
+        unregister, best-effort attachments cleanup."""
+        try:
+            await self.relay.publish_note(
+                run_id, f"run failed: {redact(str(exc))[:500]}")
+        except Exception:
+            pass
+        session = get_session()
+        try:
+            row = session.get(Run, run_id)
+            if row is not None and row.stage not in TERMINAL_STAGES:
+                transition(row, RunStage.FAILED)
+                row.finished_at = datetime.now(UTC)
+                row.failure_reason = redact(str(exc))[:500]
+                session.commit()
+        finally:
+            session.close()
+        await self.relay.publish_run_stage(run_id, RunStage.FAILED.value, [])
+        self.ingest.unregister_run(run_id)
+        if self.approvals is not None:
+            self.approvals.unregister_run(run_id)
+        if self.spawn_bridge is not None:
+            self.spawn_bridge.unregister_run(run_id)
+        try:
+            from app.core.config import get_settings
+            import shutil
+            shutil.rmtree(get_settings().sessions_dir / run_id / "_attachments",
+                          ignore_errors=True)
+        except Exception:
+            log.warning("attachments cleanup failed", run_id=run_id,
+                        exc_info=True)
 
     async def _prepare_images(self, run_id: str, images: list[str], task: str,
                               models: list[str] | None) -> dict:
@@ -260,6 +311,20 @@ class RunManager:
                 f"multi-model compare is ask-mode only — pick one model for "
                 f"mode '{mode_name}'")
         return picked
+
+    def _validate_swarm_model(self, swarm_model: str | None) -> str | None:
+        """The settings-level default model for swarm/subagent lanes. Same
+        fail-closed registry check as the composer selection — an unknown
+        alias must 422, never silently fall back to the deployment default."""
+        if not swarm_model:
+            return None
+        from app.core.config import get_settings
+        settings = get_settings()
+        known = {m.alias for m in settings.available_models}
+        if swarm_model not in known:
+            raise ValueError(
+                f"unknown swarm model '{swarm_model}' — pick from {sorted(known)}")
+        return swarm_model
 
     def _validate_reasoning(self, reasoning: dict[str, str] | None,
                             models: list[str] | None) -> dict[str, str] | None:
@@ -361,8 +426,68 @@ class RunManager:
         self._track(
             run_id,
             self._execute(run_id, run.title, run.repo,
-                          artifacts_extra={"resume_from_thread_id": last_thread_id}))
+                          artifacts_extra=await self._resume_artifacts(
+                              run_id, last_thread_id, run.title)))
         return run
+
+    async def _resume_artifacts(self, run_id: str, last_thread_id: str | None,
+                                task: str) -> dict:
+        """Re-hydrate the composer's choices for a resumed run. Model/
+        reasoning/images live only in the ephemeral artifacts dict at
+        creation, so without this a resumed run silently falls back to the
+        deployment default model and drops its attachments mid-conversation.
+        The last thread's spawn_context is the durable record."""
+        extra: dict = {"resume_from_thread_id": last_thread_id}
+        if last_thread_id is None:
+            return extra
+        session = get_session()
+        try:
+            row = session.get(Thread, last_thread_id)
+            spawn_ctx = dict(row.spawn_context or {}) if row is not None else {}
+        finally:
+            session.close()
+        from app.core.config import get_settings
+        settings = get_settings()
+        model = spawn_ctx.get("model")
+        reasoning = spawn_ctx.get("reasoning")
+        if model:
+            extra["models"] = [model]
+        if reasoning:
+            extra["reasoning"] = {model or settings.gateway_model: reasoning}
+        # Attachments: only carry files that still exist (an abandoned run's
+        # shredded workspace has none — resume then proceeds text-only).
+        from pathlib import Path
+        images = [p for p in spawn_ctx.get("images") or [] if Path(p).exists()]
+        if not images:
+            return extra
+        extra["image_paths"] = images
+        option = settings.model_option(model or settings.gateway_model)
+        if option is not None and option.vision:
+            return extra  # vision lane re-stages the files natively
+        # Blind lane: rebuild the pre-pass notes from the persisted files.
+        try:
+            import base64
+            from app.services import vision
+            mime = {"png": "image/png", "jpg": "image/jpeg",
+                    "webp": "image/webp", "gif": "image/gif"}
+            uris = [
+                f"data:{mime.get(Path(p).suffix.lstrip('.'), 'image/png')};base64,"
+                + base64.b64encode(Path(p).read_bytes()).decode()
+                for p in images
+            ]
+            descriptions = await vision.describe_images(uris, task)
+            extra["image_notes"] = vision.notes_block(descriptions)
+        except Exception:
+            # Degrade, never strand: the lane resumes with the files' paths
+            # and an honest note rather than the resume dying on a pre-pass flap.
+            log.warning("resume image pre-pass failed; degrading",
+                        run_id=run_id, exc_info=True)
+            extra["image_notes"] = (
+                "\n\n<attached-images>\nThe user attached image(s) earlier in "
+                "this run. This model cannot see images directly and the "
+                "vision description is unavailable; say so rather than "
+                "inventing image content.\n</attached-images>")
+        return extra
 
     async def _execute(self, run_id: str, task: str, repo: str | None,
                        fanout: int | None = None,
