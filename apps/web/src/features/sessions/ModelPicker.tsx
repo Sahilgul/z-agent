@@ -5,10 +5,10 @@ import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
 import type { ModelOption } from "../../types";
 
-/** Composer model selector. Ask mode is multi-select (compare: one lane per
- *  model answers the same prompt); every other mode is single-select (the
- *  run's threads all use it). Empty selection = the deployment default, so
- *  the control always reads as a statement of what will run.
+/** Composer model selector. Single-select: picking a model deselects the
+ *  others (the `multi` prop is retained for tests/future compare mode but
+ *  the app always passes false). Empty selection = the deployment default,
+ *  so the control always reads as a statement of what will run.
  *
  *  Each ACTIVE row also carries a reasoning control: "auto" sends no override
  *  (provider default), "off" disables thinking (reasoning_effort=none on the

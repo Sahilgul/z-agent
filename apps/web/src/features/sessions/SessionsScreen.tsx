@@ -79,15 +79,14 @@ export function SessionsScreen() {
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [fanout, setFanout] = useState<number | "">("");
   // Composer model selection (gateway aliases). Empty = deployment default.
-  // Ask mode allows several (compare: one lane per model); other modes take
-  // at most one — enforced by trimming here when the mode changes.
+  // Single-select everywhere — picking one deselects the others.
   const [models, setModels] = useState<string[]>([]);
   // Per-model reasoning choice (alias -> "off" | effort). Pruned to the
   // selection whenever it changes so the contract never carries an entry for
   // a model the run won't use (the backend rejects those).
   const [reasoning, setReasoning] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (mode !== "ask" && models.length > 1) {
+    if (models.length > 1) {
       const trimmed = models.slice(0, 1);
       setModels(trimmed);
       // Prune reasoning to the trimmed selection — otherwise a stale entry
@@ -585,7 +584,7 @@ export function SessionsScreen() {
               onChange={onModelsChange}
               reasoning={reasoning}
               onReasoningChange={onReasoningChange}
-              multi={!current && mode === "ask"}
+              multi={false}
             />
             {!current && mode === "agent-rnd" && (
               <Input
