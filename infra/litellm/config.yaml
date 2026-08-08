@@ -29,7 +29,12 @@ model_list:
       input_cost_per_token: 0.00000095       # $0.95 / 1M input
       output_cost_per_token: 0.000004        # $4.00 / 1M output
       cache_read_input_token_cost: 0.00000016  # $0.16 / 1M cached input
-      max_tokens: 8192
+      # Declared output ceiling: 200k per response. This is METADATA for
+      # LiteLLM's registry (nothing in the stack sends max_tokens on the wire —
+      # omitting it lets the provider generate to its own limit; explicitly
+      # requesting 200k would 400 on deployments whose true cap is lower).
+      max_tokens: 200000
+      max_output_tokens: 200000
       mode: chat
       # K2.6 is a reasoning model, but LiteLLM's internal model registry
       # (model_prices_and_context_window.json) doesn't flag it with
@@ -51,7 +56,12 @@ model_list:
       # here + backend/app/core/models.py + the worker fallback together.
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
-      max_tokens: 8192
+      # Declared output ceiling: 200k per response. This is METADATA for
+      # LiteLLM's registry (nothing in the stack sends max_tokens on the wire —
+      # omitting it lets the provider generate to its own limit; explicitly
+      # requesting 200k would 400 on deployments whose true cap is lower).
+      max_tokens: 200000
+      max_output_tokens: 200000
       mode: chat
       # K3 always thinks; reasoning_content must flow like K2.6 (see above).
       supports_reasoning: true
@@ -71,7 +81,12 @@ model_list:
       input_cost_per_token: 0.00000154
       output_cost_per_token: 0.00000484
       cache_read_input_token_cost: 0.00000015
-      max_tokens: 8192
+      # Declared output ceiling: 200k per response. This is METADATA for
+      # LiteLLM's registry (nothing in the stack sends max_tokens on the wire —
+      # omitting it lets the provider generate to its own limit; explicitly
+      # requesting 200k would 400 on deployments whose true cap is lower).
+      max_tokens: 200000
+      max_output_tokens: 200000
       mode: chat
       # Preserve reasoning_content like kimi-foundry (see above) — GLM
       # thinking models emit it and stock LiteLLM strips it.
@@ -88,7 +103,12 @@ model_list:
       input_cost_per_token: 0.00000174
       output_cost_per_token: 0.00000348
       cache_read_input_token_cost: 0.000000145
-      max_tokens: 8192
+      # Declared output ceiling: 200k per response. This is METADATA for
+      # LiteLLM's registry (nothing in the stack sends max_tokens on the wire —
+      # omitting it lets the provider generate to its own limit; explicitly
+      # requesting 200k would 400 on deployments whose true cap is lower).
+      max_tokens: 200000
+      max_output_tokens: 200000
       mode: chat
       supports_reasoning: true
 
@@ -103,7 +123,12 @@ model_list:
       input_cost_per_token: 0.00000019
       output_cost_per_token: 0.00000051
       cache_read_input_token_cost: 0.000000028
-      max_tokens: 8192
+      # Declared output ceiling: 200k per response. This is METADATA for
+      # LiteLLM's registry (nothing in the stack sends max_tokens on the wire —
+      # omitting it lets the provider generate to its own limit; explicitly
+      # requesting 200k would 400 on deployments whose true cap is lower).
+      max_tokens: 200000
+      max_output_tokens: 200000
       mode: chat
       # Cheap compare lane; if a Flash variant emits reasoning_content the
       # flag keeps it flowing instead of stripping it.

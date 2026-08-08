@@ -51,13 +51,13 @@ _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
     # with non-default values makes Azure Foundry return 400. supports_temperature
     # = False so make_llm omits the param entirely (don't rely on drop_params).
     "kimi-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=8192, supports_temperature=False,
+        vision=False, reasoning=True, max_tokens=200000, supports_temperature=False,
         # Live-probed through the gateway (2026-08-08): Foundry's K2.6 accepts
         # low/high/max and emits reasoning_content at every level.
         reasoning_efforts=("low", "high", "max"),
     ),
     "kimi3-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=8192, supports_temperature=False,
+        vision=False, reasoning=True, max_tokens=200000, supports_temperature=False,
         reasoning_efforts=("low", "high", "max"),
         # K3 always thinks (Moonshot docs, 2026-08): no disabled state exists,
         # and sending thinking.type=disabled 400s. Same fixed-param family as
@@ -72,15 +72,15 @@ _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
     # Efforts per provider docs (2026-08): GLM maps low/medium→high so only the
     # real two are offered; V4 Pro treats low as high; V4 Flash has all three.
     "glm-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=8192,
+        vision=False, reasoning=True, max_tokens=200000,
         reasoning_efforts=("high", "max"),
     ),
     "deepseek-pro-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=8192,
+        vision=False, reasoning=True, max_tokens=200000,
         reasoning_efforts=("high", "max"),
     ),
     "deepseek-flash-foundry": ModelCapabilities(
-        vision=False, reasoning=True, max_tokens=8192,
+        vision=False, reasoning=True, max_tokens=200000,
         reasoning_efforts=("low", "high", "max"),
     ),
 }
@@ -400,6 +400,10 @@ def make_llm(
     # the param entirely instead of relying on the gateway's drop_params.
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
+    # max_tokens is deliberately NOT sent: omitting it lets the deployment
+    # generate to its own output limit, while explicitly asking for the
+    # declared 200k ceiling would 400 on any deployment whose true cap is
+    # lower. caps.max_tokens is bookkeeping for future budget math only.
     if reasoning == "off":
         if not caps.supports_thinking_off:
             raise RuntimeError(
