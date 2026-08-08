@@ -295,10 +295,11 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
         intent = classify_text(run, body.text)
         if intent is None:
             # Plain conversation: a nudge to the Lead thread (typed Lead-nudges
-            # stay enabled while the agent works — carve-out).
+            # stay enabled while the agent works — carve-out). payload carries
+            # the composer's mid-conversation model switch through.
             intent = UserIntent(run_id=run_id, intent=ActionKind.SEND_MESSAGE,
                                 source=IntentSource.TEXT, text=body.text,
-                                thread_id=body.thread_id)
+                                thread_id=body.thread_id, payload=body.payload)
     else:
         # The frontend always sends intent="send_message" with the text as a
         # SEPARATE field — this branch must carry body.text through or every
@@ -372,6 +373,7 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
             try:
                 thread = session.get(Thread, thread_id)
                 spawned_mode = (thread.spawn_context or {}).get("mode") if thread else None
+                spawned_model = (thread.spawn_context or {}).get("model") if thread else None
                 run_mode = session.get(Run, run_id).mode if session.get(Run, run_id) else None
                 thread_status = thread.status if thread else None
             finally:
@@ -380,30 +382,55 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
             mode_switch = bool(
                 kind == ActionKind.SEND_MESSAGE and spawned_mode and run_mode
                 and spawned_mode != run_mode)
+            # Mid-conversation model switch: the composer sends payload.model
+            # when the picker's selection differs from the lane's model. Same
+            # semantics as a mode switch — the next message chains a fresh
+            # lane on the prior session volume instead of nudging the old one.
+            requested_model = None
+            requested_reasoning = None
+            if kind == ActionKind.SEND_MESSAGE and intent.payload:
+                requested_model = intent.payload.get("model") or None
+                requested_reasoning = intent.payload.get("reasoning") or None
+            model_switch = bool(requested_model and requested_model != spawned_model)
+            if requested_model:
+                try:
+                    run_manager._validate_models([requested_model], run_mode or "ask")
+                    if requested_reasoning:
+                        run_manager._validate_reasoning(
+                            {requested_model: requested_reasoning}, [requested_model])
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
             # W-H14: nudging a TERMINAL thread used to be log-only — the
             # composer kept accepting text into a dead session and the
-            # message vanished. A mode switch survives (it chains a fresh
-            # blueprint on the prior session volume); a plain nudge is a 409.
-            if not mode_switch and thread_status in (
+            # message vanished. A mode/model switch survives (it chains a
+            # fresh blueprint on the prior session volume); a plain nudge is
+            # a 409.
+            if not (mode_switch or model_switch) and thread_status in (
                     "completed", "failed", "stopped", "replaced"):
                 raise HTTPException(
                     status_code=409,
                     detail=(f"thread is {thread_status} — the session is over; "
                             "resume the run or start a new one"))
-            if (
-                kind == ActionKind.SEND_MESSAGE
-                and spawned_mode
-                and run_mode
-                and spawned_mode != run_mode
-            ):
+            if kind == ActionKind.SEND_MESSAGE and run_mode and (mode_switch or model_switch):
                 # The user's message is the task for the new blueprint's
                 # first thread; persist it as a user event so the transcript
-                # shows the question before the new mode's answer.
+                # shows the question before the new lane's answer.
                 if intent.text:
                     _persist_user_message(run_id, thread_id, intent.text)
                 extra = {"resume_from_thread_id": thread_id}
                 if intent.text:
                     extra["task"] = intent.text
+                if model_switch:
+                    extra["models"] = [requested_model]
+                    if requested_reasoning:
+                        extra["reasoning"] = {requested_model: requested_reasoning}
+                elif spawned_model:
+                    # Pure mode switch: keep the lane's model — the chain used
+                    # to drop it and silently revert to the deployment default.
+                    extra["models"] = [spawned_model]
+                    prior_reasoning = (thread.spawn_context or {}).get("reasoning") if thread else None
+                    if prior_reasoning:
+                        extra["reasoning"] = {spawned_model: prior_reasoning}
                 await run_manager._run_blueprint(run_id, run_mode, extra_artifacts=extra)
             elif intent.text:
                 user_event = _persist_user_message(run_id, thread_id, intent.text)

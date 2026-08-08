@@ -254,7 +254,16 @@ export function SessionsScreen() {
       // W6-M10: intent-LESS text — the backend classifies it against the
       // run's current legal moves (a typed "approve plan" becomes a real
       // approve_plan; anything else is a lead nudge).
-      await sendIntent(null, { text: task.trim() });
+      // A changed picker selection rides the payload — the backend compares
+      // it to the lane's model and chains a fresh lane on the prior session
+      // when they differ (no-op when unchanged).
+      const payload: Record<string, unknown> = {};
+      if (models.length === 1) {
+        payload.model = models[0];
+        const eff = reasoning[models[0]];
+        if (eff) payload.reasoning = eff;
+      }
+      await sendIntent(null, { text: task.trim(), payload });
       setTask("");
     } finally {
       setBusy(false);
@@ -563,19 +572,21 @@ export function SessionsScreen() {
                 </button>
               </>
             )}
-            {current ? (
+            {current && (
               <ThreadChips threads={threads} onOpen={(threadId) => pushOverlay({ kind: "thread", threadId })} />
-            ) : (
-              // Model is chosen at run creation — once a run is open its
-              // lanes are fixed, so the picker yields to the thread chips.
-              <ModelPicker
-                selected={models}
-                onChange={onModelsChange}
-                reasoning={reasoning}
-                onReasoningChange={onReasoningChange}
-                multi={mode === "ask"}
-              />
             )}
+            {/* The picker is ALWAYS available: at draft time it chooses the
+                run's model(s); with a run open it stages a mid-conversation
+                switch — the next message chains a fresh lane on the prior
+                session volume (backend SEND_MESSAGE payload.model path).
+                Multi-select compare only makes sense at run creation. */}
+            <ModelPicker
+              selected={models}
+              onChange={onModelsChange}
+              reasoning={reasoning}
+              onReasoningChange={onReasoningChange}
+              multi={!current && mode === "ask"}
+            />
             {!current && mode === "agent-rnd" && (
               <Input
                 type="number"
