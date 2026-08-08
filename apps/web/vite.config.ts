@@ -10,7 +10,8 @@ import { defineConfig } from "vitest/config";
 const API_PREFIXES = [
   "/auth", "/runs", "/threads", "/sessions", "/repos", "/modes", "/hydration",
   "/approvals", "/team", "/knowledge", "/ideas", "/proposals", "/push", "/me",
-  "/campaigns", "/deliveries", "/stats", "/bench", "/webhooks", "/health",
+  "/campaigns", "/deliveries", "/stats", "/bench", "/webhooks", "/models",
+  "/health",
 ];
 
 export default defineConfig({

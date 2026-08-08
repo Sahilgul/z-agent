@@ -27,7 +27,7 @@ self.addEventListener("fetch", (e) => {
     ["/auth", "/runs", "/threads", "/sessions", "/repos", "/modes",
      "/hydration", "/approvals", "/team", "/knowledge", "/ideas", "/proposals",
      "/push", "/me", "/campaigns", "/deliveries", "/stats", "/bench",
-     "/webhooks", "/health"].some((p) => url.pathname.startsWith(p));
+     "/webhooks", "/models", "/health"].some((p) => url.pathname.startsWith(p));
   if (isApi || e.request.method !== "GET") return; // network, untouched
   // index.html / navigations are NETWORK-FIRST: they were cache-first, so a
   // redeploy left the browser running the previous bundle (with yesterday's
