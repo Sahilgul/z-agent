@@ -3,7 +3,7 @@ connectionData identity proof (fail-closed), 90-day expiry, 7-day warning,
 write-only status. The ADO verify call is injected — no sockets.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -74,7 +74,7 @@ async def test_store_rejects_empty_pat(session, make_user):
 def test_status_is_write_only_and_warns_near_expiry(session, make_user):
     u = make_user()
     u.byo_pat_encrypted = byo_pat.encrypt("secret")
-    u.byo_pat_expires_at = datetime.now(timezone.utc) + timedelta(days=5)
+    u.byo_pat_expires_at = datetime.now(UTC) + timedelta(days=5)
     session.commit()
     status = byo_pat.pat_status(u.id)
     assert status == {
@@ -95,10 +95,10 @@ def test_status_unconfigured(session, make_user):
 def test_pat_for_push_returns_secret_until_expiry(session, make_user):
     u = make_user()
     u.byo_pat_encrypted = byo_pat.encrypt("push-secret")
-    u.byo_pat_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    u.byo_pat_expires_at = datetime.now(UTC) + timedelta(days=30)
     session.commit()
     assert byo_pat.pat_for_push(u.id) == "push-secret"
-    u.byo_pat_expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    u.byo_pat_expires_at = datetime.now(UTC) - timedelta(days=1)
     session.commit()
     assert byo_pat.pat_for_push(u.id) is None  # expired → fall back to FLEET_PAT
 
@@ -106,7 +106,7 @@ def test_pat_for_push_returns_secret_until_expiry(session, make_user):
 def test_revoke_clears_everything(session, make_user):
     u = make_user()
     u.byo_pat_encrypted = byo_pat.encrypt("x")
-    u.byo_pat_expires_at = datetime.now(timezone.utc) + timedelta(days=90)
+    u.byo_pat_expires_at = datetime.now(UTC) + timedelta(days=90)
     session.commit()
     byo_pat.revoke(u.id)
     session.expire(u)  # service wrote through its own session — drop the stale copy

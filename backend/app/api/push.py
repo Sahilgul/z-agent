@@ -7,8 +7,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.core.deps import current_user
 from app.core.config import get_settings
+from app.core.deps import current_user
 from app.db.models.user import User
 from app.services import autonomy, push
 

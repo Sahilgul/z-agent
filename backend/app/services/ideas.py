@@ -253,7 +253,7 @@ def plan_task_for(thread_id: int) -> str:
             parts.append("Open questions: " + "; ".join(s["open_questions"]))
     voices = [f"- {c['author_name']}: {c['body'][:400]}" for c in detail["comments"][:20]]
     if voices:
-        parts += ["", "## Thread voices"] + voices
+        parts += ["", "## Thread voices", *voices]
     return "\n".join(parts)
 
 

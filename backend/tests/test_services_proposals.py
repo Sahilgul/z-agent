@@ -1,5 +1,5 @@
 """Improvement Inbox tests: emit validation (evidence required),
-impact×confidence ranking, accept → gated Development run with weekly spend
+impact*confidence ranking, accept → gated Development run with weekly spend
 ceiling, dismiss → user-scoped flywheel preference draft. run_manager is a fake.
 """
 

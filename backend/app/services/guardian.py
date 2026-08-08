@@ -12,14 +12,15 @@ Verdicts are recorded on the trigger_events log like every engine outcome.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
+from collegium_contracts.triggers import TriggerEvent
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.trigger import TriggerEventLog
 from app.services import identity
-from collegium_contracts.triggers import TriggerEvent
 
 log = get_logger(service="guardian")
 
@@ -36,7 +37,7 @@ def should_attempt(pr_id: int, signature: str, trigger_name: str) -> tuple[bool,
     """The circuit breaker. Returns (allowed, halt_reason)."""
     session = get_session()
     try:
-        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        since = datetime.now(UTC) - timedelta(hours=24)
         logs = (session.query(TriggerEventLog)
                 .filter(TriggerEventLog.status == "matched",
                         TriggerEventLog.received_at >= since)

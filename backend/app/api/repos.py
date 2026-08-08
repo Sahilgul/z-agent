@@ -17,7 +17,11 @@ from app.db.base import get_session
 from app.db.models.repo import Repo, RepoStatus
 from app.db.models.user import User
 from app.services.repos import (
-    OnboardingError, archive_repo, onboard, register_repo, validate_remote,
+    OnboardingError,
+    archive_repo,
+    onboard,
+    register_repo,
+    validate_remote,
 )
 
 router = APIRouter(prefix="/repos", tags=["repos"])
@@ -87,7 +91,10 @@ async def add_repo(body: AddRepoBody, request: Request, user: User = Depends(cur
         session.close()
     repo = register_repo(body.name, url, body.integration_branch, added_by=user.id)
     relay = request.app.state.relay
-    asyncio.create_task(onboard(repo.id, relay))
+    task = asyncio.create_task(onboard(repo.id, relay))
+    request.app.state.background_tasks = getattr(request.app.state, 'background_tasks', set())
+    request.app.state.background_tasks.add(task)
+    task.add_done_callback(request.app.state.background_tasks.discard)
     return _serialize(repo)
 
 

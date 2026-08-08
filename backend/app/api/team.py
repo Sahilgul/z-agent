@@ -19,7 +19,7 @@ from app.services.team import add_teammate, deactivate_user, regenerate_code
 try:
     from app.ado.client import IdentityResolutionError
 except ImportError:  # ado client optional in some test envs
-    class IdentityResolutionError(Exception):  # noqa: N818
+    class IdentityResolutionError(Exception):
         """Local fallback when the ado client isn't importable."""
 
 log = logging.getLogger(__name__)

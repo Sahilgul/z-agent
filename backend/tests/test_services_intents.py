@@ -3,8 +3,11 @@ from collegium_contracts import ActionKind, IntentSource, RunStage, UserIntent
 
 from app.db.models.run import Run
 from app.services.intents import (
-    IntentNeedsConfirmation, classify_text, gate_intent, load_run_for_user,
     READ_ONLY_INTENTS,
+    IntentNeedsConfirmation,
+    classify_text,
+    gate_intent,
+    load_run_for_user,
 )
 
 

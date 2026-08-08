@@ -73,14 +73,18 @@ async def launch(task: str, repo_names: list[str] | None, user_id: int,
     finally:
         session.close()
 
-    run_ids = []
+    # J6: independent repos — fan out CONCURRENTLY. Each create_run targets
+    # a distinct writable repo (own repo lock), so there is no shared-state
+    # race; serializing multiplied launch latency by the repo count.
     try:
-        for repo in repos:
-            run = await run_manager.create_run(
+        import asyncio
+        runs = await asyncio.gather(*(
+            run_manager.create_run(
                 source="campaign", initiated_by=user_id, mode_name="development",
-                task=f"[campaign #{delivery_id}] {task}", repo=repo, autonomy="gated",
-                delivery_id=delivery_id)
-            run_ids.append(run.id)
+                task=f"[campaign #{delivery_id}] {task}", repo=repo,
+                autonomy="gated", delivery_id=delivery_id)
+            for repo in repos))
+        run_ids = [r.id for r in runs]
     except Exception:
         # H-34: fanout failed partway — the old code had already committed
         # the Delivery row, leaving an orphaned campaign (a Delivery with

@@ -1,11 +1,14 @@
-import subprocess
-from datetime import datetime, timezone
 
 import pytest
 
 from app.db.models.repo import Repo, RepoProfile, RepoStatus
 from app.services import repos
-from app.services.repos import OnboardingError, archive_repo, register_repo, validate_remote
+from app.services.repos import (
+    OnboardingError,
+    archive_repo,
+    register_repo,
+    validate_remote,
+)
 
 
 def test_register_repo_creates_new(session, make_user):
@@ -106,8 +109,9 @@ async def test_onboard_happy_path(session, monkeypatch, tmp_path):
     monkeypatch.setattr(repos.subprocess, "run", fake_run)
 
     class FakeRelay:
-        async def publish_global(self, msg):
+        async def publish_global(self, msg, user_id=None):
             self.msg = msg
+            self.msg_user_id = user_id
     relay = FakeRelay()
     await repos.onboard(r.id, relay)
 

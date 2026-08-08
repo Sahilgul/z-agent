@@ -166,7 +166,8 @@ async def test_list_repos_raises_on_http_error(monkeypatch):
     routes = {"/_apis/git/repositories": FakeResponse(status_code=401)}
     install_fake_httpx(monkeypatch, ado_mod, routes)
     c = AdoClient(pat="p", org="o")
-    with pytest.raises(Exception):
+    import httpx
+    with pytest.raises(httpx.HTTPStatusError):
         await c.list_repos()
 
 

@@ -1,12 +1,11 @@
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.ado.client import IdentityResolutionError
-from app.db.models.user import SetupCode, User
+from app.db.models.user import SetupCode
 from app.services import team
-
 
 CODE_TTL = team.CODE_TTL_HOURS
 
@@ -154,7 +153,7 @@ async def test_redeem_setup_code_expired(session, make_user, monkeypatch):
     monkeypatch.setattr("app.ado.client.AdoClient.resolve_identity", fake_resolve)
     user, code = await team.add_teammate("redeem4", "R", "r@x.com")
     row = session.query(SetupCode).filter_by(user_id=user.id).one()
-    row.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    row.expires_at = datetime.now(UTC) - timedelta(hours=1)
     session.commit()
     from app.core.security import hash_pin
     with pytest.raises(ValueError):

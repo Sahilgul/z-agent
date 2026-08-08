@@ -19,21 +19,21 @@ Four non-negotiable guardrails:
 
 from __future__ import annotations
 
-import hmac
 import hashlib
-from datetime import datetime, timedelta, timezone
+import hmac
+from datetime import UTC, datetime, timedelta
 
+from collegium_contracts.triggers import TriggerEvent, TriggerSource
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import get_session
-from app.db.models.thread import Thread
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.trigger import Trigger, TriggerEventLog, TriggerEventVerdict
 from app.services import identity
 from app.services.runs import TERMINAL_STAGES
-from collegium_contracts.triggers import TriggerEvent, TriggerSource
 
 log = get_logger(service="triggers")
 
@@ -248,7 +248,7 @@ def _is_loop(event: TriggerEvent) -> bool:
 def _recent_active_run(trigger: Trigger, event: TriggerEvent) -> str | None:
     """Guardrail 2: an active run started by this trigger for this work item
     within the flap window -> coalesce into a nudge."""
-    window = datetime.now(timezone.utc) - timedelta(
+    window = datetime.now(UTC) - timedelta(
         minutes=get_settings().trigger_flap_window_minutes)
     session = get_session()
     try:
@@ -293,7 +293,7 @@ def _rate_limited(trigger) -> bool:
     started verdict is its own row. The window is the event's received_at
     (joined from the log row), matching the original semantic; the
     server-side COUNT keeps the work off the Python loop."""
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    since = datetime.now(UTC) - timedelta(hours=1)
     cap = trigger.rate_limit_per_hour
     session = get_session()
     try:
@@ -317,8 +317,12 @@ async def process(event: TriggerEvent, run_manager) -> dict:
     row = _log_event(event)
     if row is None:
         return {"status": "duplicate"}
-    log_id = row.id
+    return await _dispatch(event, row.id, run_manager)
 
+
+async def _dispatch(event: TriggerEvent, log_id: int, run_manager) -> dict:
+    """Everything AFTER the dedupe log insert. Split out so crash recovery can
+    re-drive a stuck 'received' row without tripping the idempotency dedupe."""
     if _is_loop(event):  # guardrail 1
         _set_log(log_id, status="ignored")
         return {"status": "ignored", "reason": "loop_prevention"}
@@ -526,6 +530,61 @@ async def drain_queued(run_manager, limit: int = 5) -> list[dict]:
         _set_log(item["log_id"], status="matched", run_id=run.id)
         started.append({"log_id": item["log_id"], "run_id": run.id})
     return started
+
+
+async def recover_stuck(run_manager, grace_seconds: int = 120,
+                        limit: int = 25) -> list[dict]:
+    """External-write recovery: an event whose log row is still 'received'
+    past the grace window means the process crashed mid-dispatch (log
+    committed, verdict never stamped). Re-drive it from the durable row —
+    the dedupe key (source, external_id, revision) means a redelivered
+    webhook that already processed can't double-fire, and the nudge/active
+    guardrails make the re-dispatch itself safe."""
+    cutoff = datetime.now(UTC) - timedelta(seconds=grace_seconds)
+    session = get_session()
+    try:
+        stuck = (session.query(TriggerEventLog)
+                 .filter(TriggerEventLog.status == "received",
+                         TriggerEventLog.received_at <= cutoff)
+                 .order_by(TriggerEventLog.id).limit(limit).all())
+        items = [{"id": s.id, "source": s.source, "external_id": s.external_id,
+                  "revision": s.revision, "event_type": s.event_type,
+                  "changed_by_descriptor": s.changed_by_descriptor,
+                  "payload": s.payload} for s in stuck]
+    finally:
+        session.close()
+    recovered = []
+    for item in items:
+        # Cross-replica claim: only ONE recoverer may flip the row out of
+        # 'received'; the loser's conditional update matches zero rows.
+        session = get_session()
+        try:
+            claimed = (session.query(TriggerEventLog)
+                       .filter(TriggerEventLog.id == item["id"],
+                               TriggerEventLog.status == "received")
+                       .update({"status": "recovering"},
+                               synchronize_session=False))
+            session.commit()
+        finally:
+            session.close()
+        if claimed != 1:
+            continue
+        try:
+            event = TriggerEvent(
+                source=TriggerSource(item["source"]),
+                external_id=item["external_id"], revision=item["revision"],
+                event_type=item["event_type"] or "work_item.updated",
+                changed_by_descriptor=item["changed_by_descriptor"],
+                payload=item["payload"] or {})
+            verdict = await _dispatch(event, item["id"], run_manager)
+            recovered.append({"log_id": item["id"], "status": verdict["status"]})
+        except Exception:
+            # Back to 'received' so the NEXT sweep retries — never leave a
+            # row wedged in 'recovering'.
+            _set_log(item["id"], status="received")
+            log.exception("stuck trigger recovery failed; will retry",
+                          log_id=item["id"])
+    return recovered
 
 
 # ------------------------------------------------------------------ signature

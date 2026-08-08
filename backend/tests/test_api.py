@@ -1,15 +1,13 @@
 import json
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from app.db.models.approval import Approval
 from app.db.models.event import Event
 from app.db.models.knowledge import KnowledgeItem
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, Run
+from app.db.models.thread import Thread
 from app.db.models.user import User
 
 
@@ -83,7 +81,7 @@ def test_login_inactive(app_client, session, make_user):
 
 def test_login_locked_out(auth_client, session, make_user):
     client, _, _, user = auth_client
-    user.locked_until = datetime.now(timezone.utc) + timedelta(hours=1)
+    user.locked_until = datetime.now(UTC) + timedelta(hours=1)
     session.commit()
     r = client.post("/auth/login", json={"username": "alice", "pin": "1234"})
     assert r.status_code == 429
@@ -726,7 +724,9 @@ def test_thread_stop(auth_client, session, make_user):
     session.add_all([run, thread]); session.commit()
     r = client.post("/threads/l1/stop", json={"run_id": "r1"})
     assert r.status_code == 200
-    assert any(msg.get("type") == "interrupt" for _, msg in services["control"].calls)
+    # C12: the API stop routes through run_manager.stop_thread so every stop
+    # path performs identical bookkeeping.
+    assert services["run_manager"].stopped_threads[-1] == ("r1", "l1")
 
 
 def test_thread_pin(auth_client, session, make_user):
@@ -840,7 +840,7 @@ def test_pending_approvals_hides_expired_cards(auth_client, session, make_user):
     from datetime import timedelta
     client, _, _, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="ask", stage="investigating"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session.add_all([
         Approval(id="a-dead", run_id="r1", thread_id="l1", kind="bash", payload={},
                  expires_at=now - timedelta(minutes=1)),
@@ -1099,7 +1099,7 @@ def test_post_intent_merge_pr_confirmed(auth_client, session, make_user):
     # H-48: the response carries the merge handoff_url (deep-link to the ADO
     # merge UI under merge_native_ui); the old test never inspected it, so a
     # handler that dropped the url still passed.
-    assert r.json()["handoff_url"] == f"https://ado/merge/r1"
+    assert r.json()["handoff_url"] == "https://ado/merge/r1"
 
 
 # --------------------------------------------------------------- thread controls
@@ -1184,11 +1184,11 @@ def test_post_intent_kill_replace_returns_replacement(auth_client, session, make
 
 
 def test_threads_serializer_includes_heartbeat_and_container(auth_client, session, make_user):
-    from datetime import datetime, timezone
+    from datetime import datetime
     client, _, _, user = auth_client
     session.add(Run(id="r1", created_by=user.id, mode="agent-rnd", stage="investigating"))
     session.add(Thread(id="l1", run_id="r1", persona="explorer", status="running",
-                     heartbeat_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                     heartbeat_at=datetime(2026, 8, 1, tzinfo=UTC),
                      container_id="cid-1"))
     session.commit()
     r = client.get("/runs/r1/threads")
@@ -1281,7 +1281,6 @@ def test_ideas_thread_lifecycle(auth_client, monkeypatch):
 
 
 def test_ideas_ask_counsel_uses_injected_completion(auth_client, monkeypatch):
-    import app.api.ideas as ideas_api
     import app.services.ideas as ideas_svc
     client, _, _, _ = auth_client
     tid = client.post("/ideas", json={"title": "t", "body": "b"}).json()["id"]

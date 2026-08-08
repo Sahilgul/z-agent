@@ -23,6 +23,9 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
+
+log = get_logger(service="gateway.litellm")
 
 
 @dataclass
@@ -40,11 +43,17 @@ class GatewayClient:
         self._headers = {"Authorization": f"Bearer {self.master_key}"}
 
     async def mint_key(self, alias: str, max_budget_usd: float, models: list[str] | None = None) -> VirtualKey:
+        settings = get_settings()
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers, timeout=30) as client:
             resp = await client.post("/key/generate", json={
                 "key_alias": alias,
                 "max_budget": max_budget_usd,
-                "models": models or [get_settings().gateway_model],
+                "models": models or [settings.gateway_model],
+                # A minted key is never meant to outlive its thread. The TTL is
+                # the backstop for every cleanup path that could miss (process
+                # crash between mint and persist, gateway drift) — an orphaned
+                # key self-destructs instead of holding budget forever.
+                "duration": settings.gateway_key_ttl,
             })
             resp.raise_for_status()
             data = resp.json()
@@ -53,6 +62,12 @@ class GatewayClient:
     async def delete_key(self, key: str) -> None:
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers, timeout=30) as client:
             resp = await client.post("/key/delete", json={"keys": [key]})
+            # F6: deleting an already-deleted/expired key is SUCCESS for our
+            # purposes — the goal state (key unusable) holds. Only propagate
+            # real gateway errors.
+            if resp.status_code in (400, 404) and "not" in resp.text.lower():
+                log.info("gateway key already gone", tail=key[-4:])
+                return
             resp.raise_for_status()
 
     async def key_spend(self, key: str) -> float:

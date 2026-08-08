@@ -12,7 +12,7 @@ approves, nothing auto-ships.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -40,7 +40,7 @@ class DistillerError(ValueError):
 def unmined_since(days: int = 1, limit: int = 100) -> list[dict]:
     """Summaries written in the window that have no distiller candidate yet —
     a summary is mined if a knowledge item carries source_run_id of its run."""
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
     session = get_session()
     try:
         rows = (session.query(TrajectorySummary)
@@ -72,12 +72,16 @@ async def distill(summaries: list[dict], complete=None) -> list[dict]:
                                model=get_settings().ideas_model)
         data = json.loads(reply)
         if not isinstance(data, list):
-            return []
+            raise ValueError("distiller reply was not a list")
         return [d for d in data
                 if isinstance(d, dict) and d.get("content") and d.get("trigger_description")][:5]
-    except Exception as exc:  # noqa: BLE001 — the night shift fails silently
-        log.warning("distill failed", error=str(exc))
-        return []
+    except Exception as exc:
+        # A transient gateway/parse failure must NOT mark runs mined — the
+        # lessons would be lost permanently. Propagate so run_nightly aborts
+        # before any marking; the next night's sweep retries the same runs.
+        log.warning("distill failed — runs left unmined for retry",
+                    error=str(exc))
+        raise
 
 
 def _held_out_cases() -> list[int]:
@@ -111,14 +115,36 @@ async def run_nightly(complete=None, scorer=None, days: int = 1) -> dict:
     summaries = unmined_since(days=days)
     if not summaries:
         return {"mined": 0, "candidates": 0, "cards": 0}
-    candidates = await distill(summaries, complete=complete)
+    try:
+        candidates = await distill(summaries, complete=complete)
+    except Exception:
+        # Distillation failed transiently: mark NOTHING mined so tonight's
+        # lessons are retried, and surface the failure in the result.
+        return {"mined": 0, "candidates": 0, "cards": 0,
+                "error": "distill_failed"}
+    if not candidates:
+        # Legitimately no candidates (model said nothing generalizable) —
+        # safe to mark mined below; nothing was lost.
+        log.info("distiller returned no candidates", summaries=len(summaries))
     drafted = 0
     mined_run_ids: set[str] = set()
     for i, cand in enumerate(candidates):
         label = cand["content"][:60]
         delta = bench_delta(label, scorer=scorer)
         if delta.get("passes") is False:
-            log.info("distiller candidate regressed bench, dropped", label=label)
+            # No silent skip: a bench-regressing candidate disappears without
+            # a trace unless we RECORD the rejection — draft it with status
+            # "rejected" so the inbox shows it was considered and why.
+            src = summaries[i % len(summaries)]
+            log.info("distiller candidate regressed bench, rejected", label=label)
+            knowledge.draft(content=cand["content"],
+                            trigger_description=cand["trigger_description"],
+                            created_by=src["user_id"], proposed_scope="user",
+                            source_run_id=src["run_id"],
+                            status="rejected",
+                            extra_payload={"bench_delta": delta,
+                                           "rejection_reason": "bench_regression"})
+            mined_run_ids.add(src["run_id"])
             continue
         # H-31: attribute each candidate round-robin to a REAL summary's
         # user/run — the old code attributed every candidate to summaries[0],

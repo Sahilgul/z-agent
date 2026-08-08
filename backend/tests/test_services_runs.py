@@ -2,7 +2,10 @@ from collegium_contracts import ActionKind, RunStage
 
 from app.db.models.run import Run
 from app.services.runs import (
-    ACTIONS_BY_STAGE, TERMINAL_STAGES, compute_available_actions, transition,
+    ACTIONS_BY_STAGE,
+    TERMINAL_STAGES,
+    compute_available_actions,
+    transition,
 )
 
 

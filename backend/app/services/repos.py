@@ -16,7 +16,9 @@ import asyncio
 import base64
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -104,17 +106,34 @@ def register_repo(name: str, remote_url: str, integration_branch: str,
         repo = Repo(name=name, remote_url=remote_url, integration_branch=integration_branch,
                     added_by=added_by, status=RepoStatus.REGISTERED)
         session.add(repo)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # J5: the unique indexes are the backstop for the TOCTOU window
+            # above — a concurrent register of the same name/URL loses here
+            # and returns the winner's row instead of a second identity.
+            session.rollback()
+            winner = session.query(Repo).filter(
+                (Repo.remote_url == remote_url) | (Repo.name == name)
+            ).first()
+            if winner is not None:
+                return winner
+            raise
         session.refresh(repo)
         return repo
     finally:
         session.close()
 
 
+# J5: one clone per name at a time — two concurrent POSTs for the same
+# remote used to race cloning into the same golden_dir (guarded only by
+# dest.exists(), which both can pass before either clone lands).
+_ONBOARD_LOCKS: dict[str, asyncio.Lock] = {}
+
+
 async def onboard(repo_id: int, relay=None) -> None:
     """The pipeline itself. Runs as a background task; progress streams as
     system events; repo_added closes it out."""
-    settings = get_settings()
     session = get_session()
     try:
         repo = session.get(Repo, repo_id)
@@ -124,6 +143,14 @@ async def onboard(repo_id: int, relay=None) -> None:
     finally:
         session.close()
 
+    lock = _ONBOARD_LOCKS.setdefault(name, asyncio.Lock())
+    async with lock:
+        await _onboard_locked(repo_id, name, url, branch, relay=relay)
+
+
+async def _onboard_locked(repo_id: int, name: str, url: str, branch: str,
+                          relay=None) -> None:
+    settings = get_settings()
     try:
         _set_status(repo_id, RepoStatus.VALIDATING)
         branches = await asyncio.to_thread(validate_remote, url, settings.fetch_pat)
@@ -160,7 +187,7 @@ async def onboard(repo_id: int, relay=None) -> None:
         try:
             row = session.get(Repo, repo_id)
             row.status = RepoStatus.READY_NO_MAP
-            row.last_fetch_at = datetime.now(timezone.utc)
+            row.last_fetch_at = datetime.now(UTC)
             head = subprocess.run(["git", "-C", str(dest), "rev-parse", "HEAD"],
                                   capture_output=True, text=True)
             row.last_fetch_head = head.stdout.strip() if head.returncode == 0 else None
@@ -181,7 +208,16 @@ async def onboard(repo_id: int, relay=None) -> None:
     # non-fatal and will be re-sent on the next fetch.
     if relay:
         try:
-            await relay.publish_global({"type": "repo_added", "repo": name})
+            # D7: scope the notice to the tenant that added the repo — an
+            # unconditional broadcast leaked repo names cross-tenant.
+            session = get_session()
+            try:
+                owner = session.get(Repo, repo_id)
+                user_id = owner.added_by if owner else None
+            finally:
+                session.close()
+            await relay.publish_global({"type": "repo_added", "repo": name},
+                                       user_id=user_id)
         except Exception as exc:
             log.warning("repo_added relay failed (non-fatal)",
                        repo=name, error=str(exc)[:200])
@@ -198,7 +234,7 @@ def archive_repo(repo_id: int) -> None:
         if repo is None:
             return
         repo.status = RepoStatus.ARCHIVED
-        repo.archived_at = datetime.now(timezone.utc)
+        repo.archived_at = datetime.now(UTC)
         name = repo.name
         session.commit()
     finally:

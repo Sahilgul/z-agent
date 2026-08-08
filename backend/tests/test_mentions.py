@@ -8,7 +8,6 @@ bare @word in prose is conversation, not a mount request.
 from app.db.models.repo import Repo
 from app.services.mentions import MENTION_RE, extract_mentions, resolve_run_repos
 
-
 # ----------------------------------------------------------- extract_mentions
 
 

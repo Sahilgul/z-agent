@@ -13,7 +13,7 @@ candidates are scored against these BEFORE their approval card is written.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.db.base import get_session
 from app.db.models.eval import EvalCase, EvalRun
@@ -183,7 +183,7 @@ def before_after(split: datetime) -> dict:
     # naive UTC; comparing offset-aware vs offset-naive raises TypeError ->
     # 500. Normalize split to naive UTC before the comparison.
     if split.tzinfo is not None:
-        split = split.astimezone(timezone.utc).replace(tzinfo=None)
+        split = split.astimezone(UTC).replace(tzinfo=None)
     return {"before": report(before=split), "after": report(after=split),
             "split": split.isoformat()}
 

@@ -4,7 +4,7 @@ to the worker's blocking BLPOP (services/approvals.py).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
@@ -23,13 +23,25 @@ router = APIRouter(prefix="/approvals", tags=["approvals"])
 # landed in the audit row and was replayed to the worker's blocking BLPOP,
 # where the worker's own guard silently denied "unknown decision". Validate
 # at the API boundary so a typo returns 422, not a silent deny or a 500.
-_VALID_DECISIONS = {"allow", "allow_once", "always_allow", "deny", "deny_tool",
-                    "approved", "rejected"}
+# G1: edited_allow (with edited_args) was supported worker-side but
+# unreachable from the API — dead vocabulary. Round-trips safely now.
+_VALID_DECISIONS = {"allow", "allow_once", "always_allow", "edited_allow",
+                    "deny", "deny_tool", "approved", "rejected"}
 
 
 class DecideBody(BaseModel):
-    decision: str  # allow_once | always_allow | deny | deny_tool | approved | rejected
+    decision: str  # allow_once | always_allow | edited_allow | deny | deny_tool | approved | rejected
     reason: str = ""
+    edited_args: dict | None = None  # required payload for edited_allow
+
+    @field_validator("edited_args")
+    @classmethod
+    def _validate_edited(cls, v, info):
+        # G1: an edited_allow without edited_args would deny worker-side —
+        # reject at the boundary instead.
+        if info.data.get("decision") == "edited_allow" and not v:
+            raise ValueError("edited_allow requires edited_args")
+        return v
 
     @field_validator("decision")
     @classmethod
@@ -57,7 +69,7 @@ def pending(run_id: str | None = None, user: User = Depends(current_user)):
         # The sweep in services/approvals.py stamps decision=timeout, but it runs
         # on its own tick — never hand the console a card the worker has already
         # stopped waiting on.
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [{
             "id": a.id, "run_id": a.run_id, "thread_id": a.thread_id, "kind": a.kind,
             "payload": a.payload, "created_at": a.created_at.isoformat(),
@@ -72,7 +84,7 @@ def _expired(approval: Approval, now: datetime) -> bool:
         return False
     expires = approval.expires_at
     if expires.tzinfo is None:  # SQLite hands back naive UTC
-        expires = expires.replace(tzinfo=timezone.utc)
+        expires = expires.replace(tzinfo=UTC)
     return expires <= now
 
 
@@ -91,7 +103,10 @@ async def decide(approval_id: str, body: DecideBody, request: Request,
         session.close()
     service = request.app.state.approval_service
     try:
-        await service.decide(approval_id, body.decision, user.id, body.reason)
+        decided = await service.decide(approval_id, body.decision, user.id,
+                                       body.reason, body.edited_args)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"ok": True}
+    # G6: echo the recorded decision so a stale card's re-drive (idempotent
+    # 200, or a "timeout" stamp) is visible to the caller.
+    return {"ok": True, "decision": decided.decision}

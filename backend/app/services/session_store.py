@@ -11,8 +11,8 @@ replay-only afterwards (events remain to their TTL).
 
 from __future__ import annotations
 
-import tarfile
 import io
+import tarfile
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -70,7 +70,7 @@ def unpack(blob: bytes, dest: Path) -> None:
             try:
                 target.relative_to(dest_resolved)
             except ValueError:
-                raise ValueError(f"unsafe member path: {member.name}")
+                raise ValueError(f"unsafe member path: {member.name}") from None
         tar.extractall(dest, filter="data")
 
 
@@ -82,7 +82,7 @@ def upload(run_id: str, thread_id: str, volume: Path, client=None) -> bool:
     try:
         (client or _BlobClient()).put(_key(run_id, thread_id), pack(volume))
         return True
-    except Exception as exc:  # noqa: BLE001 — mirror must not fail the thread
+    except Exception as exc:
         log.warning("session upload failed", run_id=run_id, error=str(exc))
         return False
 
@@ -93,7 +93,7 @@ def materialize(run_id: str, thread_id: str, dest: Path, client=None) -> bool:
         blob = (client or _BlobClient()).get(_key(run_id, thread_id))
         unpack(blob, dest)
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.info("session materialize missed", run_id=run_id, error=str(exc))
         return False
 
@@ -103,5 +103,5 @@ def purge(run_id: str, thread_id: str, client=None) -> bool:
     try:
         (client or _BlobClient()).delete(_key(run_id, thread_id))
         return True
-    except Exception:  # noqa: BLE001 — absent blob counts as purged
+    except Exception:
         return True

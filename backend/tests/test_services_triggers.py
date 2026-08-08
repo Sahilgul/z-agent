@@ -3,13 +3,15 @@ identity, and all four guardrails — loop prevention, state flapping, bulk-edit
 rate limit (queue + drain), gated-only trust. run_manager is a fake.
 """
 
-import pytest
+from datetime import UTC
 
-from app.db.models.thread import Thread
+import pytest
+from collegium_contracts.triggers import TriggerEvent, TriggerSource
+
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.trigger import Trigger, TriggerEventLog
 from app.services import triggers
-from collegium_contracts.triggers import TriggerEvent, TriggerSource
 
 
 class FakeRM:
@@ -202,9 +204,9 @@ async def test_drain_queued_starts_when_capacity_returns(session, bound_user):
     await triggers.process(_event(revision=3), rm)
     await triggers.process(_event(revision=4), rm)  # queued
     # time passes → the hourly window slides (simulate by aging the matched log)
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     log = session.query(TriggerEventLog).filter_by(status="matched").one()
-    log.received_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    log.received_at = datetime.now(UTC) - timedelta(hours=2)
     session.commit()
     started = await triggers.drain_queued(rm)
     assert len(started) == 1
@@ -222,9 +224,9 @@ async def test_drain_queued_passes_original_resolved_user_id(session, bound_user
     rm = FakeRM()
     await triggers.process(_event(revision=3), rm)   # matched (rate=1)
     await triggers.process(_event(revision=4), rm)   # queued (rate-limited)
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     log = session.query(TriggerEventLog).filter_by(status="matched").one()
-    log.received_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    log.received_at = datetime.now(UTC) - timedelta(hours=2)
     session.commit()
     await triggers.drain_queued(rm)
     # The drained run was initiated_by the original resolved_user_id.
@@ -248,3 +250,61 @@ def test_signature_verification(monkeypatch):
 def test_signature_fail_closed_without_secret(monkeypatch):
     monkeypatch.setattr(triggers.get_settings(), "ado_webhook_secret", "")
     assert not triggers.verify_signature(b"{}", "anything")
+
+
+# ------------------------------------------------ external-write recovery
+
+async def test_recover_stuck_redrives_received_rows(session, bound_user):
+    """A crash mid-dispatch leaves the dedupe row in 'received'. The sweep
+    re-drives it from the durable row (guardrails still apply) instead of
+    losing the event."""
+    _trigger(session)
+    ev = _event()
+    row = triggers._log_event(ev)
+    # Simulate the crash: row committed 'received', dispatch never ran, and
+    # enough time passed for the grace window.
+    session.execute(
+        __import__("sqlalchemy").text(
+            "UPDATE trigger_events SET received_at = datetime('now', '-1 hour') "
+            "WHERE id = :id"), {"id": row.id})
+    session.commit()
+    rm = FakeRM()
+    out = await triggers.recover_stuck(rm, grace_seconds=120)
+    assert out and out[0]["log_id"] == row.id
+    session.expire_all()
+    assert session.get(TriggerEventLog, row.id).status in ("matched", "queued")
+    assert rm.created or rm.nudges  # the event actually dispatched
+
+
+async def test_recover_stuck_ignores_fresh_rows(session, bound_user):
+    """A row still inside the grace window is mid-dispatch, not stuck."""
+    _trigger(session)
+    row = triggers._log_event(_event())
+    rm = FakeRM()
+    out = await triggers.recover_stuck(rm, grace_seconds=120)
+    assert out == []
+    session.expire_all()
+    assert session.get(TriggerEventLog, row.id).status == "received"
+    assert not rm.created
+
+
+async def test_recover_stuck_failed_dispatch_returns_to_received(session, bound_user):
+    """A failing dispatch must not wedge the row in 'recovering' — it goes
+    back to 'received' for the next sweep."""
+    _trigger(session)
+    ev = _event()
+    row = triggers._log_event(ev)
+    session.execute(
+        __import__("sqlalchemy").text(
+            "UPDATE trigger_events SET received_at = datetime('now', '-1 hour') "
+            "WHERE id = :id"), {"id": row.id})
+    session.commit()
+
+    class BoomRM(FakeRM):
+        async def create_run(self, *a, **k):
+            raise RuntimeError("capacity blown")
+
+    out = await triggers.recover_stuck(BoomRM(), grace_seconds=120)
+    assert out == []
+    session.expire_all()
+    assert session.get(TriggerEventLog, row.id).status == "received"

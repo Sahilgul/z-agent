@@ -47,7 +47,11 @@ async def stop_thread(thread_id: str, body: LaneActionBody, request: Request,
     # interrupt another user's thread.
     if load_thread_for_run(body.run_id, thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
-    await request.app.state.control.interrupt(thread_id)
+    # C12: route through run_manager.stop_thread so EVERY stop path performs
+    # the same bookkeeping (verified interrupt, DB stamp, relay, key
+    # release) — the old route only fired a raw interrupt and left the row
+    # at "running", leaking the capacity slot and the gateway key.
+    await request.app.state.run_manager.stop_thread(body.run_id, thread_id)
     return {"ok": True}
 
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -42,7 +42,7 @@ SCOPES = {"global", "repo", "user"}
 # never invalidated, so a run kept serving a stale block after an item it
 # included/excluded was approved/rejected.
 _BLOCK_CACHE_MAX = 256
-_block_cache: "OrderedDict[str, tuple[str, int]]" = OrderedDict()
+_block_cache: OrderedDict[str, tuple[str, int]] = OrderedDict()
 _block_cache_version = 0
 
 
@@ -69,7 +69,7 @@ def _serialize(item: KnowledgeItem) -> dict:
 
 def draft(content: str, trigger_description: str, created_by: int,
           repo: str | None = None, source_run_id: str | None = None,
-          proposed_scope: str = "global",
+          proposed_scope: str = "global", status: str = "draft",
           extra_payload: dict | None = None) -> KnowledgeItem:
     """Create a draft item. The PHI checkpoint is enforced HERE, not at the
     API: whatever scope the caller asks for, a draft is stored scope=user and
@@ -77,14 +77,24 @@ def draft(content: str, trigger_description: str, created_by: int,
     if proposed_scope not in SCOPES:
         raise KnowledgeError(f"scope must be one of {sorted(SCOPES)}")
     session = get_session()
+    if status not in ("draft", "rejected"):
+        raise KnowledgeError(f"draft status must be draft|rejected, got {status!r}")
     try:
         item = KnowledgeItem(
             content=content, trigger_description=trigger_description,
             scope="user", repo=repo, created_by=created_by,
-            source_run_id=source_run_id, status="draft",
+            source_run_id=source_run_id, status=status,
         )
         session.add(item)
         session.flush()  # item.id for the approval payload
+        if status == "rejected":
+            # No-silent-skip record (distiller bench regression): persisted
+            # WITH its reason for audit but never surfaces a card — nothing
+            # to decide.
+            item.payload = dict(extra_payload or {})
+            session.commit()
+            session.refresh(item)
+            return item
         # M-36: a draft WITHOUT a source_run_id (a user-authored draft from
         # the knowledge UI) used to get NO approval card — orphaned from the
         # card flow (stuck in "draft", never surfaced for review). Create the
@@ -158,7 +168,11 @@ def corpus_for(user_id: int) -> list[dict]:
                   .filter(KnowledgeItem.status == "approved",
                           KnowledgeItem.scope.in_(["global", "repo"])).all())
         own = (session.query(KnowledgeItem)
-               .filter(KnowledgeItem.created_by == user_id).all())
+               .filter(KnowledgeItem.created_by == user_id,
+                       # L5: mining markers and bench-regression records are
+                       # bookkeeping, not browsable corpus — exclude them.
+                       KnowledgeItem.content != "(distiller mined — no candidate)",
+                       KnowledgeItem.status != "rejected").all())
         seen = {r.id for r in shared}
         rows = list(shared) + [r for r in own if r.id not in seen]
         rows.sort(key=lambda r: r.id, reverse=True)
@@ -184,7 +198,7 @@ def _resolve_linked_approval(session, item: KnowledgeItem, decision: str,
         if card.payload.get("item_id") == item.id:
             card.decision = decision
             card.decided_by = decided_by
-            card.decided_at = datetime.now(timezone.utc)
+            card.decided_at = datetime.now(UTC)
             break
 
 
@@ -196,7 +210,9 @@ def approve(item_id: int, scope: str, decided_by: int,
         raise KnowledgeError(f"scope must be one of {sorted(SCOPES)}")
     session = get_session()
     try:
-        item = session.get(KnowledgeItem, item_id)
+        # Row lock: two concurrent decides used to BOTH pass the draft check.
+        item = (session.query(KnowledgeItem)
+                .filter_by(id=item_id).with_for_update().one_or_none())
         if item is None or item.status != "draft":
             raise KnowledgeError("knowledge item not found or already decided")
         if scope == "repo" and not (repo or item.repo):
@@ -218,7 +234,8 @@ def approve(item_id: int, scope: str, decided_by: int,
 def reject(item_id: int, decided_by: int) -> dict:
     session = get_session()
     try:
-        item = session.get(KnowledgeItem, item_id)
+        item = (session.query(KnowledgeItem)
+                .filter_by(id=item_id).with_for_update().one_or_none())
         if item is None or item.status != "draft":
             raise KnowledgeError("knowledge item not found or already decided")
         item.status = "rejected"
@@ -370,3 +387,14 @@ async def prompt_block_for_run(run_id: str, task_text: str, user_id: int,
 
 def clear_run_cache(run_id: str) -> None:
     _block_cache.pop(run_id, None)
+
+
+async def search(user_id: int, repo: str | None, query: str, *,
+                 limit: int = 10, ranker=None) -> list[dict]:
+    """L4: the INTENTIONAL non-pinned corpus query path. Agents' pinned block
+    (render_for_run) injects only what the reranker selected for the task;
+    this is the on-demand query surface for anything beyond that selection
+    — same search space, same ranking, caller chooses the query. Previously
+    reachable only through render_for_run's side channel."""
+    ranked = await rerank(query, _search_space(user_id, repo), ranker=ranker)
+    return ranked[:limit]

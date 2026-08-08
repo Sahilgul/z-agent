@@ -1,10 +1,8 @@
-from pathlib import Path
 
 import pytest
 
 from app.db.models.knowledge import Playbook
 from app.services import playbooks
-
 
 VALID = """---
 name: plan/fleet-scoping

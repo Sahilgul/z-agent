@@ -8,7 +8,6 @@ admin-vs-member boundary checks into separate tests."""
 
 from __future__ import annotations
 
-from app.db.models.eval import EvalCase
 from app.db.models.proposal import Proposal
 from app.db.models.repo import Repo
 

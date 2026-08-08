@@ -92,7 +92,6 @@ def test_critic_notes_empty_returns_blank(session, make_user):
 
 def test_latest_plan_returns_most_recent(session, make_user):
     run, plan, u = _seed_plan(session, make_user)
-    import datetime as _dt
     plan2 = Plan(run_id="r1", structured={"title": "P2", "steps": []}, status="draft")
     session.add(plan2); session.commit()
     assert plans.latest_plan("r1").id == plan2.id

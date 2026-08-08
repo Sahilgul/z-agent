@@ -30,7 +30,7 @@ def test_send_tallies_and_prunes_expired(session, make_user):
     push.save_subscription(u.id, "https://push.example/dead", {})
 
     def fake_sender(endpoint, keys, payload):
-        assert payload["url"] == "/?screen=approvals&run=r1&card=a1"
+        assert payload["url"] == "/app?screen=approvals&run=r1&card=a1"
         return "expired" if "dead" in endpoint else "sent"
 
     tally = push.send_to_user(u.id, "Approval needed", "tool: do thing",
@@ -47,7 +47,7 @@ def test_send_without_subscriptions_is_a_noop(make_user):
 
 def test_deep_link_points_at_the_card():
     assert push.approval_deep_link("run-9", "card-3") == \
-        "/?screen=approvals&run=run-9&card=card-3"
+        "/app?screen=approvals&run=run-9&card=card-3"
 
 
 # -------------------------------------------------------------------- autonomy

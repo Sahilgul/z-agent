@@ -2,6 +2,8 @@
 semantics, mining shape, eval runner bookkeeping, report math, before/after.
 """
 
+from datetime import UTC
+
 import pytest
 
 from app.db.models.eval import EvalCase, EvalRun
@@ -108,14 +110,14 @@ def test_report_resolution_rate_and_cost(session, make_user):
 
 
 def test_before_after_split(session):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     case = _case()
     old = EvalRun(case_id=case["id"], resolved=False,
-                  created_at=datetime.now(timezone.utc) - timedelta(days=10))
+                  created_at=datetime.now(UTC) - timedelta(days=10))
     new = EvalRun(case_id=case["id"], resolved=True)
     session.add_all([old, new])
     session.commit()
-    split = datetime.now(timezone.utc) - timedelta(days=5)
+    split = datetime.now(UTC) - timedelta(days=5)
     out = bench.before_after(split)
     assert out["before"]["resolution_rate"] == 0.0
     assert out["after"]["resolution_rate"] == 1.0

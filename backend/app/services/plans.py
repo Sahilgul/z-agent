@@ -9,7 +9,7 @@ the run back to PLANNING for a fresh planner pass with the critic's notes.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from collegium_contracts import RunStage
 
@@ -61,7 +61,7 @@ def approve_plan(run_id: str, user_id: int) -> Plan:
             raise ValueError(f"plan is '{plan.status}', not awaiting decision")
         plan.status = "approved"
         plan.decided_by = user_id
-        plan.decided_at = datetime.now(timezone.utc)
+        plan.decided_at = datetime.now(UTC)
         for step in plan.steps:
             step.status = "pending"
         run = session.get(Run, run_id)
@@ -92,7 +92,7 @@ def reject_plan(run_id: str, user_id: int, notes: str = "") -> Plan:
             raise ValueError(f"plan is '{plan.status}', not awaiting decision")
         plan.status = "rejected"
         plan.decided_by = user_id
-        plan.decided_at = datetime.now(timezone.utc)
+        plan.decided_at = datetime.now(UTC)
         if notes:
             structured = dict(plan.structured or {})
             # Normalize legacy shapes (a bare string from older rows) before

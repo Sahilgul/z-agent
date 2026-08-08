@@ -4,19 +4,22 @@ points; every query hard-scopes by created_by = requesting user.
 
 from __future__ import annotations
 
+from collegium_contracts import ActionKind, IntentSource, UserIntent
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from collegium_contracts import ActionKind, IntentSource, UserIntent
 
 from app.core.deps import current_user
 from app.db.base import get_session
-from app.db.models.thread import Thread
 from app.db.models.run import Plan, Run
+from app.db.models.thread import Thread
 from app.db.models.user import User
 from app.services import autonomy as autonomy_dial
 from app.services import plans as plan_service
 from app.services.intents import (
-    IntentNeedsConfirmation, classify_text, gate_intent, load_run_for_user,
+    IntentNeedsConfirmation,
+    classify_text,
+    gate_intent,
+    load_run_for_user,
     load_thread_for_run,
 )
 from app.services.sessions import replay_events
@@ -67,6 +70,9 @@ class CreateRunBody(BaseModel):
     work_item_id: int | None = None
     autonomy: str | None = None
     fanout: int | None = None  # user-requested swarm width (Lead still decomposes)
+    # Client dedupe key: a retried POST with the same key returns the
+    # original run instead of minting a duplicate.
+    idempotency_key: str | None = None
 
 
 class IntentBody(BaseModel):
@@ -97,6 +103,7 @@ async def create_run(body: CreateRunBody, request: Request, user: User = Depends
             source="button", initiated_by=user.id, mode_name=body.mode,
             task=body.task, repo=body.repo, work_item_id=body.work_item_id,
             autonomy=autonomy_dial.clamp(body.autonomy, user.id), fanout=body.fanout,
+            idempotency_key=body.idempotency_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -455,6 +462,27 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok", "intent": kind.value, "mode": mode_name}
+    elif kind == ActionKind.EDIT_AND_RESEND:
+        # Advertised for INTERRUPTED runs but previously unhandled. Semantics:
+        # replace the lead thread (resume its session volume, preserving the
+        # workspace) and deliver the EDITED message as the replacement's
+        # first nudge — the discarded turn never executes.
+        if not intent.text:
+            raise HTTPException(status_code=422,
+                                detail="edit_and_resend needs the edited text")
+        thread_id = _lead_thread_id(run_id)
+        if thread_id is None:
+            raise HTTPException(status_code=404,
+                                detail="no thread available for this run")
+        if intent.thread_id and load_thread_for_run(run_id, intent.thread_id) is not None:
+            thread_id = intent.thread_id
+        replacement = await run_manager.kill_replace_thread(run_id, thread_id)
+        # The replacement's control subscription isn't up until its first
+        # heartbeat — a nudge sent earlier is lost.
+        await run_manager._wait_for_heartbeat(replacement.id)
+        await run_manager.nudge_thread(run_id, replacement.id, intent.text)
+        return {"status": "ok", "intent": kind.value,
+                "replacement_thread_id": replacement.id}
     elif kind == ActionKind.LET_IT_RUN:
         # Watchdog card dismissal: no thread action — the card clears and the
         # thread keeps working; recorded so the UI's dismissal is intentional.

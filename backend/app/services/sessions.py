@@ -10,11 +10,10 @@ CONVERSATION; un-pushed file changes are lost by design (workspace shredding).
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC
 
 from app.db.base import get_session
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.run import Run
 from app.sandbox.manager import session_subpath
 
@@ -23,7 +22,7 @@ def _ts_key(ts) -> float:
     # SQLite/Postgres round-trips can return naive datetimes while the default
     # is aware utcnow — normalize before comparison or a mixed set crashes min().
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     return ts.timestamp()
 
 

@@ -4,7 +4,7 @@ metering lands on Run.cost_usd/tokens; this is the read side."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.db.base import get_session
 from app.db.models.run import Run
@@ -12,7 +12,7 @@ from app.db.models.user import User
 
 
 def cost_dashboard(days: int = 30) -> dict:
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
     session = get_session()
     try:
         runs = (session.query(Run).filter(Run.created_at >= since)

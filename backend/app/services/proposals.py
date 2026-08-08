@@ -2,7 +2,7 @@
 (hygiene patrol) and Perfector (product research).
 
 Both patrol threads are READ-ONLY and emit proposals — NEVER unsolicited PRs.
-Ranking is impact × confidence (deterministic, no model in the sort). Accept
+Ranking is impact * confidence (deterministic, no model in the sort). Accept
 turns a proposal into a normal gated Development run (weekly spend ceiling
 enforced HERE, in code); Dismiss feeds a preference signal into the flywheel
 as a user-scoped knowledge draft — the personalization loop on top of the
@@ -11,7 +11,7 @@ knowledge loop. Team-wide readable: proposals cite code, not sessions.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -67,7 +67,7 @@ def emit(source: str, title: str, body: str, evidence: list[str] | None = None,
 
 
 def inbox(status: str | None = "proposed") -> list[dict]:
-    """Ranked: impact × confidence desc, newest first on ties."""
+    """Ranked: impact * confidence desc, newest first on ties."""
     session = get_session()
     try:
         q = session.query(Proposal)
@@ -82,7 +82,7 @@ def inbox(status: str | None = "proposed") -> list[dict]:
 
 
 def _weekly_spend() -> float:
-    since = datetime.now(timezone.utc) - timedelta(days=7)
+    since = datetime.now(UTC) - timedelta(days=7)
     session = get_session()
     try:
         runs = (session.query(Run).filter_by(source="proposal")
@@ -149,9 +149,22 @@ async def accept(proposal_id: int, user_id: int, run_manager) -> dict:
             session.close()
         raise ProposalError(
             f"weekly proposal spend ceiling reached (${spend:.2f} >= ${ceiling:.2f})")
-    run = await run_manager.create_run(
-        source="proposal", initiated_by=user_id, mode_name="development",
-        task=task_for(p), repo=p.repo, autonomy="gated")
+    try:
+        run = await run_manager.create_run(
+            source="proposal", initiated_by=user_id, mode_name="development",
+            task=task_for(p), repo=p.repo, autonomy="gated")
+    except Exception:
+        # Rollback: a failed create used to strand the proposal in
+        # 'accepting' forever — neither retryable nor visible. Release the
+        # claim (same release path as the spend-ceiling bail).
+        session = get_session()
+        try:
+            session.query(Proposal).filter_by(
+                id=proposal_id, status="accepting").update({"status": "proposed"})
+            session.commit()
+        finally:
+            session.close()
+        raise
     session = get_session()
     try:
         row = session.get(Proposal, proposal_id)

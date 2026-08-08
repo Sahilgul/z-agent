@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import re
 
-from collegium_contracts import IRREVERSIBLE_INTENTS, ActionKind, IntentSource, UserIntent
+from collegium_contracts import (
+    IRREVERSIBLE_INTENTS,
+    ActionKind,
+    IntentSource,
+    UserIntent,
+)
 
 from app.db.base import get_session
 from app.db.models.run import Run

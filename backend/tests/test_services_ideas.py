@@ -4,7 +4,7 @@ Lead synthesis, promote-to-Plan brief. Completions are injected — no sockets.
 
 import pytest
 
-from app.db.models.idea import IdeaComment, IdeaThread
+from app.db.models.idea import IdeaThread
 from app.services import ideas
 
 

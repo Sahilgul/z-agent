@@ -168,6 +168,18 @@ class AdoClient:
 
     # ------------------------------------------------------------- pull requests
 
+    async def _find_active_pr(self, c: httpx.AsyncClient, repo_id: str,
+                              source_branch: str, target_branch: str) -> dict | None:
+        r = await c.get(
+            f"{self._base}/{self.project}/_apis/git/repositories/{repo_id}/pullrequests",
+            params={"api-version": "7.1", "searchCriteria.status": "active",
+                    "searchCriteria.sourceRefName": f"refs/heads/{source_branch}",
+                    "searchCriteria.targetRefName": f"refs/heads/{target_branch}"},
+        )
+        r.raise_for_status()
+        prs = r.json().get("value", [])
+        return prs[0] if prs else None
+
     async def create_pull_request(self, repo_id: str, source_branch: str, target_branch: str,
                                   title: str, description: str, work_item_id: int | None = None) -> dict:
         body = {
@@ -179,10 +191,23 @@ class AdoClient:
         if work_item_id:
             body["workItemRefs"] = [{"id": str(work_item_id)}]
         async with self._client() as c:
+            # Idempotency: a retry (or a prior create whose response was lost
+            # to a network flap) must not mint a duplicate PR. Check for the
+            # active PR first; on a raced create, ADO's conflict falls back
+            # to returning the existing one.
+            existing = await self._find_active_pr(c, repo_id, source_branch,
+                                                  target_branch)
+            if existing is not None:
+                return existing
             r = await c.post(
                 f"{self._base}/{self.project}/_apis/git/repositories/{repo_id}/pullrequests",
                 params={"api-version": "7.1"}, json=body,
             )
+            if r.status_code in (400, 409) and "exist" in r.text.lower():
+                existing = await self._find_active_pr(c, repo_id, source_branch,
+                                                      target_branch)
+                if existing is not None:
+                    return existing
             r.raise_for_status()
             return r.json()
 
@@ -196,5 +221,19 @@ class AdoClient:
                 params={"api-version": "7.1"},
                 json={"status": "completed", "completionOptions": {"mergeCommitMessage": merge_commit_message}},
             )
+            # Idempotent retry: a PATCH whose response was lost used to error
+            # on the second attempt even though the goal state holds.
+            if r.status_code in (400, 409) and "complet" in r.text.lower():
+                r = await c.get(
+                    f"{self._base}/{self.project}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}",
+                    params={"api-version": "7.1"},
+                )
+                r.raise_for_status()
+                pr = r.json()
+                if pr.get("status") == "completed":
+                    return pr
+                import httpx
+                raise httpx.HTTPStatusError(
+                    "PR completion rejected", request=r.request, response=r)
             r.raise_for_status()
             return r.json()

@@ -9,8 +9,12 @@ from pydantic import BaseModel
 
 from app.core.deps import current_user
 from app.core.security import (
-    check_lockout, hash_pin, issue_token, record_failed_attempt,
-    record_success, verify_pin,
+    check_lockout,
+    hash_pin,
+    issue_token,
+    record_failed_attempt,
+    record_success,
+    verify_pin,
 )
 from app.db.base import get_session
 from app.db.models.user import User

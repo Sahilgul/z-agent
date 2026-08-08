@@ -1,9 +1,8 @@
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.services import sessions
 
 
@@ -44,7 +43,7 @@ def test_replay_events_merged_interleaves_thread_generations_by_time(session, ma
     t2 = Thread(id="bbbb-2", run_id=run.id, persona="lead", status="replaced")
     t3 = Thread(id="cccc-3", run_id=run.id, persona="lead", status="completed")
     session.add_all([t1, t2, t3])
-    base = datetime(2026, 8, 6, 22, 53, 7, tzinfo=timezone.utc)
+    base = datetime(2026, 8, 6, 22, 53, 7, tzinfo=UTC)
 
     def ev(thread_id, seq, at_seconds, title):
         session.add(Event(run_id=run.id, thread_id=thread_id, seq=seq, type="message",

@@ -10,14 +10,15 @@ thread's durable session volume, then pushes the update.
 
 from __future__ import annotations
 
+from collegium_contracts.triggers import TriggerEvent
+
 from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.delivery import PrLink
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.services.runs import TERMINAL_STAGES
-from collegium_contracts.triggers import TriggerEvent
 
 log = get_logger(service="responder")
 

@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import math
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -60,7 +60,7 @@ def encrypt(plaintext: str) -> str:
     key = _key()
     nonce = os.urandom(16)
     data = plaintext.encode()
-    ct = bytes(a ^ b for a, b in zip(data, _keystream(key, nonce, len(data))))
+    ct = bytes(a ^ b for a, b in zip(data, _keystream(key, nonce, len(data)), strict=True))
     tag = hmac.new(key, nonce + ct, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(nonce + tag + ct).decode()
 
@@ -72,7 +72,7 @@ def decrypt(blob: str) -> str:
     expected = hmac.new(key, nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected):
         raise ByoPatError("stored PAT failed integrity check")
-    data = bytes(a ^ b for a, b in zip(ct, _keystream(key, nonce, len(ct))))
+    data = bytes(a ^ b for a, b in zip(ct, _keystream(key, nonce, len(ct)), strict=True))
     return data.decode()
 
 
@@ -115,7 +115,7 @@ async def store_pat(user_id: int, pat: str, verify=None) -> dict:
         if descriptor != user.ado_descriptor:
             raise ByoPatError("PAT identity does not match the bound ADO identity")
         user.byo_pat_encrypted = encrypt(pat)
-        user.byo_pat_expires_at = datetime.now(timezone.utc) + timedelta(days=PAT_TTL_DAYS)
+        user.byo_pat_expires_at = datetime.now(UTC) + timedelta(days=PAT_TTL_DAYS)
         session.commit()
         return pat_status(user_id)
     finally:
@@ -141,7 +141,7 @@ def pat_status(user_id: int) -> dict:
         user = session.get(User, user_id)
         if user is None or not user.byo_pat_encrypted:
             return {"configured": False}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         days = (max(0, math.ceil((user.byo_pat_expires_at - now).total_seconds() / 86400))
                 if user.byo_pat_expires_at else 0)
         return {
@@ -162,7 +162,7 @@ def pat_for_push(user_id: int) -> str | None:
         user = session.get(User, user_id)
         if user is None or not user.byo_pat_encrypted:
             return None
-        if user.byo_pat_expires_at and user.byo_pat_expires_at <= datetime.now(timezone.utc):
+        if user.byo_pat_expires_at and user.byo_pat_expires_at <= datetime.now(UTC):
             return None
         return decrypt(user.byo_pat_encrypted)
     finally:

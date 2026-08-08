@@ -3,7 +3,10 @@ consolidation (injected), bench gate (drop regressions, neutral without pool),
 nightly orchestration drafting user-scoped knowledge with bench deltas.
 """
 
-from datetime import datetime, timedelta, timezone
+import json
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from app.db.models.approval import Approval
 from app.db.models.eval import EvalCase, EvalRun
@@ -18,7 +21,7 @@ def _summary(session, run_id, user_id, lessons=("retry with smaller diff",),
         run_id=run_id, thread_id="thread-1", user_id=user_id,
         summary="run fixed the billing rounding bug after two failed attempts",
         key_decisions=["chose half-up rounding"], lessons=list(lessons),
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_old))
+        created_at=datetime.now(UTC) - timedelta(days=days_old))
     session.add(s)
     session.commit()
     return s
@@ -63,17 +66,34 @@ async def test_distill_parses_json_and_filters(session, make_user):
     assert all("content" in c and "trigger_description" in c for c in out)
 
 
-async def test_distill_never_crashes_on_bad_reply(session, make_user):
+async def test_distill_raises_on_bad_reply_so_runs_stay_unmined(session, make_user):
+    """A malformed/gateway-failed reply must NOT be confused with 'no
+    candidates': distill raises so run_nightly aborts before marking anything
+    mined — the lessons are retried the next night."""
     u = make_user()
 
     async def bad(persona, corpus, model=None):
         return "not json"
 
     s = _summary(session, "run-a", u.id)
-    out = await distiller.distill([{"id": s.id, "run_id": "run-a", "user_id": u.id,
-                                    "summary": "x", "lessons": [], "key_decisions": []}],
-                                  complete=bad)
-    assert out == []
+    with pytest.raises(json.JSONDecodeError):
+        await distiller.distill([{"id": s.id, "run_id": "run-a", "user_id": u.id,
+                                  "summary": "x", "lessons": [], "key_decisions": []}],
+                                complete=bad)
+
+
+async def test_run_nightly_gateway_failure_marks_nothing_mined(session, make_user):
+    u = make_user()
+    _summary(session, "run-a", u.id)
+
+    async def boom(persona, corpus, model=None):
+        raise RuntimeError("gateway down")
+
+    out = await distiller.run_nightly(complete=boom)
+    assert out["error"] == "distill_failed"
+    assert out["mined"] == 0
+    # No mined marker rows — the run WILL be re-mined next night.
+    assert session.query(KnowledgeItem).count() == 0
 
 
 # ------------------------------------------------------------------ bench gate
@@ -124,9 +144,15 @@ async def test_run_nightly_drops_regressing_candidates(session, make_user):
     # mined (a marker KnowledgeItem, status=rejected) so it isn't
     # re-mined every night. The old code left it unmined (infinite re-mining).
     items = session.query(KnowledgeItem).all()
-    assert len(items) == 1
-    assert items[0].source_run_id == "run-a"
-    assert items[0].status == "rejected"  # mining marker, not a reviewable draft
+    # No silent skip: each regressing candidate leaves a rejected RECORD
+    # carrying the bench delta + reason — which ALSO serves as the mining
+    # marker (source_run_id set), so the run isn't re-mined nightly.
+    assert len(items) == 2
+    assert all(i.status == "rejected" for i in items)
+    assert {i.source_run_id for i in items} == {"run-a"}
+    recorded = [i for i in items if (i.payload or {}).get("rejection_reason")
+                == "bench_regression"]
+    assert len(recorded) == 2  # both candidates recorded with their reason
 
 
 async def test_run_nightly_no_summaries_noop(session):

@@ -270,12 +270,19 @@ async def verify_suite(workspace: str, repo: str,
     every check that RAN to pass; skipped checks (tool or deps unavailable on
     the control plane) are reported but never block. The tests check always
     runs, so the suite is never vacuously green."""
-    checks: list[dict] = []
-    tests = await run_test_commands(workspace, repo, test_cmds)
-    checks.append({"name": "tests", "skipped": False, **tests})
-    checks.append(await _ruff_check(workspace, check_timeout))
+    # L3: the checks are independent gates over the same workspace — run the
+    # three pure checks concurrently (tests, ruff, node lint) instead of
+    # summing their timeouts. Build and dev-boot smoke stay sequential AFTER
+    # lint: a build racing a lint over the same node_modules is fine, but a
+    # dev server racing the build produces flaky boot-smoke results.
+    tests, ruff, lint = await asyncio.gather(
+        run_test_commands(workspace, repo, test_cmds),
+        _ruff_check(workspace, check_timeout),
+        _node_check("lint", _node_scripts(Path(workspace)), workspace,
+                    check_timeout),
+    )
     scripts = _node_scripts(Path(workspace))
-    checks.append(await _node_check("lint", scripts, workspace, check_timeout))
+    checks: list[dict] = [{"name": "tests", "skipped": False, **tests}, ruff, lint]
     checks.append(await _node_check("build", scripts, workspace, check_timeout))
     checks.append(await _boot_smoke(scripts, workspace, smoke_seconds))
     ran = [c for c in checks if not c["skipped"]]

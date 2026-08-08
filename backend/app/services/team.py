@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.ado.client import AdoClient, IdentityResolutionError
 from app.core.config import get_settings
@@ -59,11 +59,11 @@ async def add_teammate(username: str, display_name: str, ado_email: str) -> tupl
 
 def _issue_code(session, user: User) -> str:
     for old in session.query(SetupCode).filter_by(user_id=user.id, used_at=None):
-        old.invalidated_at = datetime.now(timezone.utc)
+        old.invalidated_at = datetime.now(UTC)
     code = f"{secrets.randbelow(10**8):08d}"
     session.add(SetupCode(
         user_id=user.id, code_hash=_hash_code(code),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=CODE_TTL_HOURS),
+        expires_at=datetime.now(UTC) + timedelta(hours=CODE_TTL_HOURS),
     ))
     session.commit()
     return code
@@ -103,7 +103,7 @@ def redeem_setup_code(username: str, code: str, new_pin_hash: str) -> User:
         user = session.query(User).filter_by(username=username).one_or_none()
         if user is None:
             raise ValueError("unknown username")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         row = (
             session.query(SetupCode)
             .filter_by(user_id=user.id, used_at=None, code_hash=_hash_code(code))

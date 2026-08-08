@@ -1,24 +1,23 @@
 import asyncio
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.db.models.approval import Approval
 from app.db.models.run import Run
-from app.db.models.user import User
 from app.services.approvals import ApprovalService
 
 
 def _svc(fake_redis, relay=None, control=None):
-    from tests.conftest import FakeRelay, FakeControl
+    from tests.conftest import FakeControl, FakeRelay
     svc = ApprovalService.__new__(ApprovalService)
     svc.relay = relay or FakeRelay()
     svc.control = control or FakeControl()
     svc.redis = fake_redis
     svc.run_streams = set()
     svc._task = None
-    svc._last_sweep = datetime.now(timezone.utc)
+    svc._last_sweep = datetime.now(UTC)
+    svc._claimed = set()
     return svc
 
 
@@ -108,7 +107,7 @@ async def test_start_stop_lifecycle(fake_redis):
 async def test_init_constructs_redis_client():
     """Cover ApprovalService.__init__ — redis.from_url builds a client without
     opening a connection, so this is network-free."""
-    from tests.conftest import FakeRelay, FakeControl
+    from tests.conftest import FakeControl, FakeRelay
     svc = ApprovalService(FakeRelay(), FakeControl())
     try:
         assert svc.relay is not None
@@ -162,14 +161,14 @@ async def test_expire_stale_times_out_and_fans_out(session, make_user, fake_redi
     u = make_user("a")
     session.add(Run(id="r-st", created_by=u.id, mode="ask"))
     session.commit()
-    past = datetime.now(timezone.utc) - timedelta(minutes=5)
+    past = datetime.now(UTC) - timedelta(minutes=5)
     session.add(Approval(id="ap-old", run_id="r-st", kind="tool", expires_at=past))
     session.add(Approval(id="ap-live", run_id="r-st", kind="tool",
-                         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5)))
+                         expires_at=datetime.now(UTC) + timedelta(minutes=5)))
     session.commit()
 
     svc = _svc(fake_redis)
-    svc._last_sweep = datetime.now(timezone.utc) - timedelta(hours=1)
+    svc._last_sweep = datetime.now(UTC) - timedelta(hours=1)
     await svc._expire_stale()
 
     session.expire_all()
@@ -183,7 +182,7 @@ async def test_expire_stale_throttles_between_sweeps(session, make_user, fake_re
     session.add(Run(id="r-th", created_by=u.id, mode="ask"))
     session.commit()
     session.add(Approval(id="ap-th", run_id="r-th", kind="tool",
-                         expires_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+                         expires_at=datetime.now(UTC) - timedelta(minutes=5)))
     session.commit()
     svc = _svc(fake_redis)  # _last_sweep = now, so this tick is a no-op
     await svc._expire_stale()
@@ -196,6 +195,7 @@ async def test_expire_stale_swallows_db_error(fake_redis, monkeypatch):
     consumer — it's logged and swallowed (a sweep hiccup is transient;
     the next tick retries). Covers the except-SQLAlchemyError branch."""
     from sqlalchemy.exc import SQLAlchemyError
+
     import app.services.approvals as approvals_mod
 
     class _BoomSession:
@@ -206,7 +206,7 @@ async def test_expire_stale_swallows_db_error(fake_redis, monkeypatch):
 
     monkeypatch.setattr(approvals_mod, "get_session", lambda: _BoomSession())
     svc = _svc(fake_redis)
-    svc._last_sweep = datetime.now(timezone.utc) - timedelta(hours=1)
+    svc._last_sweep = datetime.now(UTC) - timedelta(hours=1)
     # Must not raise — the SQLAlchemyError is swallowed (logged + return).
     await svc._expire_stale()
 

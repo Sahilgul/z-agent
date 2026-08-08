@@ -1,9 +1,9 @@
 from app.auth import seed_users
 from app.db.models.event import Event
 from app.db.models.idea import IdeaComment, IdeaThread
-from app.db.models.thread import Thread
 from app.db.models.mode import Mode
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 from app.db.models.user import User
 
 

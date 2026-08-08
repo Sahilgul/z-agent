@@ -1,5 +1,4 @@
 from app.db.models.repo import Repo
-from app.db.models.run import Run
 
 
 def test_my_tickets_returns_bound_tickets(auth_client, session, make_user, monkeypatch):

@@ -3,15 +3,15 @@
 active thread, resume finished thread from session volume). run_manager is a fake.
 """
 
-import pytest
+
+from collegium_contracts.triggers import TriggerEvent, TriggerSource
 
 from app.db.models.delivery import PrLink
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Run
-from app.db.models.trigger import Trigger, TriggerEventLog
-from app.services import guardian, responder, triggers
-from collegium_contracts.triggers import TriggerEvent, TriggerSource
+from app.db.models.thread import Thread
+from app.db.models.trigger import Trigger
+from app.services import guardian, triggers
 
 
 class FakeThreadMgr:

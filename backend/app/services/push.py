@@ -68,7 +68,7 @@ def _default_sender(endpoint: str, keys: dict, payload: dict) -> str:
                 vapid_private_key=settings.vapid_private_key,
                 vapid_claims={"sub": settings.vapid_subject})
         return "sent"
-    except WebPushException as exc:  # noqa: BLE001 — library's own error type
+    except WebPushException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", 0)
         return "expired" if status in (404, 410) else "skipped"
 
@@ -86,7 +86,15 @@ def send_to_user(user_id: int, title: str, body: str, url: str = "/", sender=Non
     payload = {"title": title, "body": body[:180], "url": url}
     tally = {"sent": 0, "skipped": 0, "expired": 0}
     for sub_id, endpoint, keys in subs:
-        outcome = send(endpoint, keys, payload)
+        try:
+            outcome = send(endpoint, keys, payload)
+        except Exception:
+            # M8: a misbehaving sender (network blip, pywebpush edge) must not
+            # escape the fan-out and kill the caller's flow — one dead
+            # subscription skips, the rest still deliver.
+            log.warning("push send failed", sub_id=sub_id, exc_info=True)
+            tally["error"] = tally.get("error", 0) + 1
+            continue
         tally[outcome] = tally.get(outcome, 0) + 1
         if outcome == "expired":
             session = get_session()

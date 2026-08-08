@@ -4,9 +4,9 @@ import pytest
 
 from app.db.models.delivery import PrLink
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 from app.services import delivery
 
@@ -178,7 +178,7 @@ def test_git_failure_raises(monkeypatch):
     async def fake_exec(*args, **kwargs):
         return _FakeProc(returncode=1, out=b"", err=b"boom")
     monkeypatch.setattr(delivery.asyncio, "create_subprocess_exec", fake_exec)
-    with pytest.raises(delivery.DeliveryError, match="git .* failed"):
+    with pytest.raises(delivery.DeliveryError, match=r"git .* failed"):
         asyncio.run(delivery._git(["push", "origin"], cwd="/ws", env_extra={}))
 
 

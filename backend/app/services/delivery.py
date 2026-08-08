@@ -19,9 +19,7 @@ import asyncio
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
-
-import sqlalchemy as sa
+from datetime import UTC, datetime
 
 from app.ado.client import AdoClient
 from app.core.config import get_settings
@@ -29,9 +27,9 @@ from app.core.logging import get_logger
 from app.db.base import get_session
 from app.db.models.delivery import PrLink
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.repo import Repo
 from app.db.models.run import Plan, PlanStep, Run
+from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
 
 log = get_logger(service="delivery")
@@ -112,7 +110,7 @@ def build_evidence_package(run_id: str) -> dict:
         return {
             "schema_version": 1,
             "run_id": run_id,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "plan_title": (plan_row.structured or {}).get("title", "") if plan_row else "",
             "plan_steps": steps,
             "threads": [
@@ -334,7 +332,7 @@ async def merge_pr(run_id: str, user_id: int,
         link = session.query(PrLink).filter_by(run_id=run_id, status="open").order_by(
             PrLink.created_at.desc()).first()
         link.status = "merged"
-        link.merged_at = datetime.now(timezone.utc)
+        link.merged_at = datetime.now(UTC)
         link.merged_by = user_id
         session.commit()
         log.info("pr merged", run_id=run_id, pr=pr_id, merged_by=user_id)
@@ -374,7 +372,7 @@ def mark_merged(run_id: str, user_id: int) -> dict:
         if link is None:
             raise DeliveryError("no open PR for this run")
         link.status = "merged"
-        link.merged_at = datetime.now(timezone.utc)
+        link.merged_at = datetime.now(UTC)
         link.merged_by = user_id
         session.commit()
         log.info("pr marked merged (native-UI handoff closed)", run_id=run_id,
