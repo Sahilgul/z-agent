@@ -27,7 +27,7 @@ flowchart LR
   TH -->|StepEvents + heartbeats| RD
   RD -->|nudges, approvals, control| TH
   TH -->|LLM only| GW[LiteLLM gateway<br/>virtual keys + budgets]
-  GW --> Foundry[Azure AI Foundry]
+  GW --> LLM[LLM providers]
   BE --> ADO[Azure DevOps<br/>repos, PRs, work items]
 ```
 
@@ -123,7 +123,7 @@ UI, auth, and run metadata all work without them.
 
 ```bash
 cd infra
-cp .env.example .env      # fill LITELLM_MASTER_KEY, GATEWAY_DB_PASSWORD, Foundry key
+cp .env.example .env      # fill LITELLM_MASTER_KEY, GATEWAY_DB_PASSWORD, provider keys
 docker compose up -d      # backend on :8000
 ```
 
@@ -178,6 +178,9 @@ The ones that matter most:
 | `COLLEGIUM_FETCH_PAT` / `COLLEGIUM_FLEET_PAT` | empty | ADO: read-only fetcher, and read/write for pushes and PRs |
 | `COLLEGIUM_ADO_WEBHOOK_SECRET` | empty | Empty means webhook ingress rejects everything (fail-closed) |
 | `COLLEGIUM_DEFAULT_THREAD_BUDGET_USD` | `5.0` | Enforced by the gateway virtual key |
+| `COLLEGIUM_GATEWAY_MODEL` | `kimi-k2.6` | Default model when a run doesn't pick one |
+| `COLLEGIUM_GATEWAY_UI_URL` | derived from gateway URL | Public LiteLLM proxy UI address opened by the admin Usage button |
+| `COLLEGIUM_AVAILABLE_MODELS` | built-in fleet | JSON array overriding the composer model registry |
 | `COLLEGIUM_GLOBAL_THREAD_CAP` | `12` | Concurrent threads across the whole system |
 | `COLLEGIUM_APPROVAL_TIMEOUT_SECONDS` | `900` | After this the worker denies and the card expires |
 | `COLLEGIUM_ENGINE_RUNTIME` | `custom` | `sdk` keeps the legacy fallback alive through the RE soak |
@@ -188,6 +191,39 @@ The Compose files accept the ADO and gateway secrets under short aliases
 (`FETCH_PAT`, `FLEET_PAT`, `ADO_ORG`, `LITELLM_MASTER_KEY`, …) and map them onto
 the prefixed settings — fill in the `.env.example` names, not the table names,
 when deploying.
+
+## Models
+
+The composer has a **model picker** fed by the backend registry
+(`backend/app/core/models.py`, overridable via `COLLEGIUM_AVAILABLE_MODELS`).
+Pick none and the run uses the deployment default; pick one and every lane of
+the run uses it; pick several in **ask** mode and the run fans out into a
+compare — one lane per model answering the same prompt side by side. Each
+selected model also gets a per-lane **reasoning control** (off / low / medium /
+high / max, per what that model actually accepts — validated fail-closed at
+run creation, never silently clamped).
+
+Every lane's virtual key is scoped to exactly its model, so spend attribution
+stays exact at the gateway, and a kill/replace replays the original lane's
+model and reasoning choice.
+
+The settings sidebar (gear in the rail) holds a **swarm agent model**: when
+set, subagent lanes — goal explorers and swarm slices — always spawn on it,
+regardless of the composer's lane selection. Lead/planner/synthesis lanes are
+unaffected. Unset, subagents follow the run's lane/default model.
+
+**Image attachments** (up to 10 per message, 5 MB each) ride the same
+composer. Vision-capable models receive the images natively — they live in
+the lane's first message, so image+text is present at every step of the turn.
+For text-only models, a vision model first produces a detailed description
+conditioned on the user's own words, and that description is embedded in the
+lane's prompt instead — attach a screenshot of a bug and even a text-only
+lane reasons about the actual error text. An image with no text is a legal
+run; the lane is asked to examine the attachments.
+
+Every agent message carries a **metrics footer** — time-to-first-token, total
+latency, input/output/reasoning token counts, and cached-token reads when the
+provider reports them.
 
 ## Modes and autonomy
 
