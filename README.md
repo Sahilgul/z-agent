@@ -112,6 +112,9 @@ npm run dev        # http://localhost:5173, proxies API + WS to :8000
 
 Sign in with `COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME` / `COLLEGIUM_BOOTSTRAP_ADMIN_PIN`
 (defaults `sahil` / `4545` — override both before any shared deployment).
+Teammates join without a shared password: an admin generates a per-user setup
+code on the team screen, and the new user claims it at `/first-login` with
+their own pin.
 
 Runs will reach the point of needing a real LLM gateway and ADO credentials; the
 UI, auth, and run metadata all work without them.
@@ -209,14 +212,25 @@ applies them verbatim.
 
 ```bash
 cd backend && uv run pytest          # control-plane suite, 90% coverage gate
-cd worker && uv run pytest           # engine suite — 212 tests incl. RC/RD/RF contract tests
-cd apps/web && npm test              # vitest — 118 tests incl. console-parity
+cd worker && uv run pytest           # engine suite — contract, resume, redaction tests
+cd apps/web && npm test              # vitest — store WS handler, approvals, deep links, …
 cd apps/web && npm run build         # typecheck + production build
 ```
 
-Tests are mock-only per the repo's testing standard: no live ADO, gateway, Docker,
-or Redis. `memory://` Redis and SQLite make the backend suite hermetic; the
-engine suite runs against a mock gateway and fixture events.
+Tests are mock-only by default: no live ADO, gateway, Docker, or Redis.
+`memory://` Redis and SQLite make the backend suite hermetic; the engine suite
+runs against a mock gateway and fixture events. On top of that sits an opt-in
+**integration tier** — `backend/tests/integration/` (pg race conditions, Redis
+stream redelivery) runs only when pointed at live infra:
+
+```bash
+COLLEGIUM_INTEGRATION=1 \
+INTEGRATION_DATABASE_URL=postgresql+psycopg://postgres:test@localhost:55432/postgres \
+INTEGRATION_REDIS_URL=redis://localhost:6379/9 \
+uv run pytest backend/tests/integration -q
+```
+
+CI provisions throwaway Postgres/Redis services and runs this tier on every PR.
 
 ## Known gaps
 
