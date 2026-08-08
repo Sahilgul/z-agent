@@ -14,6 +14,7 @@ import { ThreadChips } from "../../components/ThreadChips";
 import { PipelineBar } from "../../components/PipelineBar";
 import { SessionResume } from "../../components/SessionResume";
 import { SessionTabs } from "../../components/SessionTabs";
+import { uuid } from "../../lib/ids";
 import { agentWorking } from "../../lib/runMachine";
 import { api } from "../../lib/api";
 import { qk } from "../../lib/queryKeys";
@@ -106,7 +107,7 @@ export function SessionsScreen() {
   // W-B4: one idempotency key per composer draft — a double-clicked or
   // retried "route it" mints ONE run server-side. Regenerated after a
   // successful start (the next draft is a new intent).
-  const draftIdemKey = useRef<string>(crypto.randomUUID());
+  const draftIdemKey = useRef<string>(uuid());
 
   useEffect(() => {
     void loadRuns();
@@ -170,7 +171,7 @@ export function SessionsScreen() {
         fanout: fanout === "" || Number.isNaN(fanout) ? undefined : fanout,
         idempotency_key: draftIdemKey.current,
       });
-      draftIdemKey.current = crypto.randomUUID(); // the next draft is a new intent
+      draftIdemKey.current = uuid(); // the next draft is a new intent
       setTask("");
       await openRun(run.id);
     } finally {

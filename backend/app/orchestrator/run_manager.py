@@ -22,6 +22,7 @@ from collegium_contracts import RunStage
 
 from app.core.logging import get_logger
 from app.core.redact import redact
+from app.core.timefmt import aware_utc
 from app.db.base import get_session
 from app.db.models.approval import Approval
 from app.db.models.event import Event
@@ -919,8 +920,10 @@ class RunManager:
                 # E1: a thread with a fresh heartbeat is alive even while the
                 # backend was down — its run is healthy, skip the sweep.
                 def _fresh(t) -> bool:
+                    # heartbeat_at round-trips tz-naive from Postgres; coerce
+                    # before arithmetic against aware now.
                     return (t.heartbeat_at is not None
-                            and (now - t.heartbeat_at).total_seconds() < 180)
+                            and (now - aware_utc(t.heartbeat_at)).total_seconds() < 180)
                 # E1: a run with any sign of life — a fresh thread heartbeat
                 # OR a still-running container — is healthy; the sweep must
                 # not touch it (backend restart mid-work is not a zombie).

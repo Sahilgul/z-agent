@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 from app.core.logging import get_logger
 from app.core.redis_factory import in_memory, make_redis
+from app.core.timefmt import aware_utc
 from app.db.base import get_session
 from app.db.models.thread import Thread
 from app.orchestrator.semaphores import ACTIVE_STATUSES
@@ -80,9 +81,12 @@ class HeartbeatPersister:
             rows = (session.query(Thread)
                     .filter(Thread.status.in_(ACTIVE_STATUSES))
                     .all())
+            # heartbeat_at is a naive-timestamp column: Postgres returns it
+            # tz-less even though writers stamp aware UTC — coerce before
+            # subtracting or the reaper dies every pass.
             stale = [t for t in rows
                      if t.heartbeat_at is not None
-                     and (now - t.heartbeat_at).total_seconds() > STALE_AFTER_SECONDS]
+                     and (now - aware_utc(t.heartbeat_at)).total_seconds() > STALE_AFTER_SECONDS]
             candidates = [(t.id, t.container_id) for t in stale if t.container_id]
         finally:
             session.close()

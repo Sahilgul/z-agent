@@ -16,3 +16,10 @@ def iso_z(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
+
+
+def aware_utc(dt: datetime) -> datetime:
+    """Coerce a model-column datetime for arithmetic against aware ``now`` —
+    the columns are tz-naive UTC, so a Postgres round-trip returns tz-less
+    values and ``aware - naive`` raises."""
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
