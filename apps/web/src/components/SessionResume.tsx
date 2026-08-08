@@ -1,58 +1,92 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { DownloadIcon, PlayIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/sonner";
 import { api } from "../lib/api";
 import { qk } from "../lib/queryKeys";
-import type { ResumableThread, Run } from "../types";
+import type { Run } from "../types";
 
-/** Continue a past session. The backend keeps each thread's SDK session volume
- *  for 30 days; after that the run is replay-only, so the button appears only
- *  while `resumable` is true. Resume restores the CONVERSATION — un-pushed
- *  file changes are gone by design (workspaces are shredded). */
+/** "Continue session" — appears when the run is paused/ended AND its session
+ *  volume still exists (30d TTL). The poll only runs while the run is
+ *  resumable-at-a-glance, so a live run costs zero requests.
+ *
+ *  W-B2 gating: the old logic hid the card on completed runs whose volume was
+ *  alive but showed it while working (a no-op resume). The honest gate:
+ *  interrupted/completed/failed AND resumable. Abandoned never offers it —
+ *  abandon shreds the workspace, so there is nothing to continue. */
 export function SessionResume({
   run,
   working,
   onResumed,
+  onEdit,
 }: {
   run: Run;
   working: boolean;
   onResumed: (runId: string) => void;
+  onEdit?: () => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const resumableStage = ["interrupted", "completed", "failed"].includes(run.stage);
   const { data } = useQuery({
     queryKey: qk.resumable(run.id),
-    queryFn: () => api.get<{ threads: ResumableThread[] }>(`/sessions/${run.id}/resumable`),
-    enabled: !working,
-    retry: false,
+    queryFn: () => api.get<{ resumable: boolean }>(`/sessions/${run.id}/resumable`),
+    enabled: resumableStage,
+    staleTime: 30_000,
   });
+  const resumable = data?.resumable ?? false;
 
-  const resumable = (data?.threads ?? []).some((l) => l.resumable);
+  if (!resumableStage) return null;
 
   const resume = async () => {
-    const res = await api.post<{ run_id: string }>(`/sessions/${run.id}/resume`, {});
-    onResumed(res.run_id);
+    if (busy || !resumable) return;
+    setBusy(true);
+    try {
+      // W-B2: the button previously fired the intent and silently swallowed
+      // any error — surface it and leave the card armed for a retry.
+      await api.post(`/sessions/${run.id}/resume`);
+      toast.success("session resumed");
+      onResumed(run.id);
+    } catch (err) {
+      toast.error("couldn't resume", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-s2 border-t border-hairline px-s4 py-2.5">
-      {!working &&
-        (resumable ? (
-          <Button size="sm" className="font-mono" onClick={() => void resume()}>
-            <PlayIcon aria-hidden="true" />
-            continue session
-          </Button>
-        ) : (
-          <span className="font-mono text-[11px] text-ink-faint">
-            replay only — this session can’t be resumed (its workspace expired), but the full transcript is kept
-          </span>
-        ))}
-      <a
-        href={`/sessions/${run.id}/transcript`}
-        download={`${run.id}.jsonl`}
-        className="ml-auto inline-flex items-center gap-s2 rounded-md px-s2 py-1 font-mono text-[11px] text-ink-faint transition-colors duration-fast hover:text-ink-primary"
-      >
-        <DownloadIcon className="size-3.5" aria-hidden="true" />
-        transcript.jsonl
-      </a>
+    <div className="flex items-center gap-s3 border-t border-hairline px-s4 py-s3">
+      {resumable ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void resume()}
+          className="rounded-md border border-green bg-green-soft px-s3 py-s1.5 font-mono text-[12px] text-ok-bright transition-colors duration-fast hover:border-green disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "resuming…" : "continue session"}
+        </button>
+      ) : (
+        <span className="rounded-md border border-hairline bg-bg-module px-s3 py-s1.5 font-mono text-[12px] text-ink-faint">
+          replay only — session expired
+        </span>
+      )}
+      {run.stage === "interrupted" && onEdit && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onEdit}
+          className="rounded-md border border-hairline bg-bg-module px-s3 py-s1.5 font-mono text-[12px] text-ink-secondary transition-colors duration-fast hover:border-blue-bright hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          edit & resend
+        </button>
+      )}
+      <span className="text-[11.5px] text-ink-faint">
+        {resumable
+          ? working
+            ? "picks up where the agent left off"
+            : "the agent wakes up with its full context intact"
+          : "the transcript is complete; the workspace is gone"}
+      </span>
     </div>
   );
 }

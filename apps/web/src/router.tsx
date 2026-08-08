@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
-import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
@@ -13,6 +13,9 @@ import { useSession } from "./stores/session";
 // synchronous input" error the legacy BrowserRouter hit.
 const LoginScreen = lazy(() =>
   import("./features/login/LoginScreen").then((m) => ({ default: m.LoginScreen })),
+);
+const FirstLoginScreen = lazy(() =>
+  import("./features/login/FirstLoginScreen").then((m) => ({ default: m.FirstLoginScreen })),
 );
 const LandingScreen = lazy(() =>
   import("./features/landing/LandingScreen").then((m) => ({ default: m.LandingScreen })),
@@ -113,11 +116,18 @@ function AuthedShell() {
  *  when authed, redirects to /login when not. */
 function RootLayout() {
   const { me, booted, boot } = useSession();
+  const location = useLocation();
   useEffect(() => {
     void boot();
   }, [boot]);
   if (!booted) return <WarmingScreen />;
-  if (!me) return <Navigate to="/login" replace />;
+  if (!me) {
+    // W-B5: carry the deep link through the login redirect — a push
+    // notification tapped while logged out must land on its run/card AFTER
+    // sign-in, not on the bare console.
+    const next = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?next=${next}`} replace />;
+  }
   return <AuthedShell />;
 }
 
@@ -126,11 +136,18 @@ function RootLayout() {
  *  otherwise a refresh on /login hangs on the warming screen forever). */
 function LoginRoute() {
   const { me, booted, boot } = useSession();
+  const [params] = useSearchParams();
   useEffect(() => {
     void boot();
   }, [boot]);
   if (!booted) return <WarmingScreen />;
-  if (me) return <Navigate to={CONSOLE_HOME} replace />;
+  if (me) {
+    // ?next= deep-link return. Same-origin paths only — "//host" would be a
+    // protocol-relative open redirect.
+    const next = params.get("next");
+    const target = next && next.startsWith("/") && !next.startsWith("//") ? next : CONSOLE_HOME;
+    return <Navigate to={target} replace />;
+  }
   return (
     <ErrorBoundary>
       <Suspense fallback={<WarmingScreen />}>
@@ -181,5 +198,17 @@ export const router = createBrowserRouter([
     ],
   },
   { path: "/login", element: <LoginRoute /> },
+  {
+    // W-H15: public invite-code redemption — no session gate (the user has
+    // none yet). Same boot pattern as LoginRoute so a refresh doesn't hang.
+    path: "/first-login",
+    element: (
+      <ErrorBoundary>
+        <Suspense fallback={<WarmingScreen />}>
+          <FirstLoginScreen />
+        </Suspense>
+      </ErrorBoundary>
+    ),
+  },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);

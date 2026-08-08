@@ -1,5 +1,16 @@
 /** Per-run WebSocket with capped backoff reconnect.
- *  Cookie-authenticated — same-origin, no token handling here. */
+ *  Cookie-authenticated — same-origin, no token handling here.
+ *
+ *  Reconnect contract (W-H2): fanout is ephemeral — the backend relay keeps
+ *  no replay buffer and its slow-consumer eviction design states "the client
+ *  resyncs on reconnect" (backend/app/events/relay.py, app/ws/events.py).
+ *  So after any drop, `onReconnect` fires before the connected flag flips —
+ *  the store uses it to refetch the run, its threads, and any missed events
+ *  (`?after_seq=`), plus invalidate approvals.
+ *
+ *  Terminal close codes: 4401 = session expired/revoked (treat like a REST
+ *  401 — notify the unauthorized handler, never retry); 4404 = foreign run
+ *  (no retry). Anything else retries with jittered exponential backoff. */
 
 import type { WsMessage } from "../types";
 
@@ -18,6 +29,8 @@ export class RunSocket {
     private runId: string,
     private onMessage: Handler,
     private onState?: StateHandler,
+    private onReconnect?: () => void,
+    private onUnauthorized?: () => void,
   ) {}
 
   connect(): void {
@@ -27,7 +40,9 @@ export class RunSocket {
     this.ws = ws;
 
     ws.onopen = () => {
+      const isReconnect = this.attempts > 0;
       this.attempts = 0;
+      if (isReconnect) this.onReconnect?.();
       this.onState?.(true);
     };
     ws.onmessage = (e) => {
@@ -37,8 +52,15 @@ export class RunSocket {
         /* a malformed frame must not kill the stream */
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       this.onState?.(false);
+      if (e?.code === 4401) {
+        // Session is dead — retrying forever just churns reconnects against
+        // a logged-out cookie. Surface it exactly like a REST 401.
+        this.onUnauthorized?.();
+        return;
+      }
+      if (e?.code === 4404) return; // foreign/gone run — nothing to retry
       if (!this.closedByUs) this.scheduleReconnect();
     };
     // L-40: close the instance's canonical socket reference, not the
@@ -50,7 +72,10 @@ export class RunSocket {
   }
 
   private scheduleReconnect(): void {
-    const backoff = Math.min(MAX_BACKOFF_MS, 500 * 2 ** this.attempts);
+    // Jittered backoff: after a backend restart every client used to
+    // reconnect in lockstep at identical delays.
+    const base = Math.min(MAX_BACKOFF_MS, 500 * 2 ** this.attempts);
+    const backoff = Math.round(base * (0.5 + Math.random() * 0.5));
     this.attempts += 1;
     this.reconnectTimer = setTimeout(() => this.connect(), backoff);
   }

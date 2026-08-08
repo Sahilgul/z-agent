@@ -1,90 +1,138 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { agentWorking } from "../lib/runMachine";
+import { useEffect, useRef, useState } from "react";
 import type { RunStage } from "../types";
+import { visibleActions } from "../lib/runMachine";
+import { cn } from "@/lib/utils";
 
-/** Action card: the run's legal moves as buttons. Irreversible intents are
- *  two-tap (tap once -> confirm state, tap again -> fire). While the agent
- *  works, only Stop + the typed nudge box stay live. */
-const IRREVERSIBLE = new Set(["merge_pr", "abandon_run", "kill_replace"]);
-
-/** Tool-permission decisions carry an approval_id and are answered on the card
- *  itself (ApprovalQueue). Rendering them here too would fire an intent with no
- *  idea which pending ask it answers. */
-const TOOL_PERMISSION = new Set(["allow_once", "always_allow", "deny_tool"]);
+/** The run's action strip: what `visibleActions` computes — the backend's
+ *  `available_actions` PLUS Stop, which is hardcoded (W-B1). The backend's
+ *  intent gate keeps stop_run legal on every stage
+ *  (backend/app/services/intents.py), i.e. the contract is "the UI always
+ *  offers it on non-terminal runs" — the old code rendered server-sent
+ *  actions verbatim, so the primary kill switch was unreachable.
+ *
+ *  Abandon is a two-tap destructive action: the first click arms the button
+ *  ("confirm abandon"), the second fires confirmed=true — irreversible
+ *  (workspace shred), never confused with the safe, resumable Stop.
+ *
+ *  Every button disables while an intent is in flight (W3-M6): stop now
+ *  blocks on up to 10s of per-thread acks, and a double-fire used to send
+ *  duplicate intents. */
 
 const LABELS: Record<string, string> = {
-  review_plan: "Review plan",
-  approve_plan: "Approve plan",
-  reject_plan: "Reject plan",
-  create_pr: "Open PR",
-  review_diff: "Review diff",
-  merge_pr: "Merge PR",
-  stop_run: "Stop",
-  abandon_run: "Abandon",
-  resume_run: "Resume",
-  edit_and_resend: "Edit & resend",
-  start_plan: "Turn into a plan",
-  start_planning: "Start planning",
-  move_to_development: "Move to development",
-  switch_to_agent_mode: "Switch to agent mode",
-  review_evidence: "Review evidence",
-  stop_thread: "Stop thread",
-  kill_replace: "Kill & replace",
-  let_it_run: "Let it run",
-  nudge: "Nudge",
-  pin_finding: "Pin finding",
-  ask_counsel: "Ask counsel",
-  summarize_thread: "Summarize thread",
-  promote_to_plan: "Promote to plan",
-  approve_knowledge: "Approve knowledge",
-  dismiss_proposal: "Dismiss",
-  accept_proposal: "Accept",
+  start_plan: "start plan",
+  approve_plan: "approve plan",
+  reject_plan: "reject plan",
+  create_pr: "create PR",
+  merge_pr: "merge",
+  review_plan: "review plan",
+  review_evidence: "evidence",
+  review_diff: "diff",
+  resume_run: "resume",
+  edit_and_resend: "edit & resend",
+  kill_replace: "kill & replace",
+  summarize_thread: "summarize",
+  ask_counsel: "ask counsel",
+  nudge: "nudge",
+  let_it_run: "let it run",
+  stop_run: "stop",
 };
+
+const DISARM_MS = 4_000;
 
 export function ActionCard({
   stage,
   actions,
-  working,
   onFire,
 }: {
   stage: RunStage;
   actions: string[];
+  /** @deprecated kept for call-site compatibility; gating is stage-derived. */
   working?: boolean;
-  onFire: (intent: string, confirmed: boolean) => void;
+  onFire: (intent: string, confirmed?: boolean) => void;
 }) {
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const busy = working ?? agentWorking(stage);
+  const [pending, setPending] = useState<string | null>(null);
+  const [armingAbandon, setArmingAbandon] = useState(false);
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fire = (intent: string) => {
-    if (IRREVERSIBLE.has(intent) && confirming !== intent) {
-      setConfirming(intent);
-      return;
+  useEffect(() => () => {
+    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+  }, []);
+
+  const shown = visibleActions(stage, actions ?? []);
+  const busy = pending !== null;
+
+  const fire = (intent: string, confirmed = false) => {
+    if (busy) return;
+    setPending(intent);
+    try {
+      onFire(intent, confirmed);
+    } finally {
+      // The store's sendIntent is async fire-and-forget here; the in-flight
+      // window only needs to span the optimistic beat — the backend's
+      // idempotency and the store's error toast cover the rest.
+      setTimeout(() => setPending(null), 1_500);
     }
-    setConfirming(null);
-    onFire(intent, IRREVERSIBLE.has(intent));
   };
 
+  const onAbandon = () => {
+    if (busy) return;
+    if (!armingAbandon) {
+      setArmingAbandon(true);
+      if (disarmTimer.current) clearTimeout(disarmTimer.current);
+      disarmTimer.current = setTimeout(() => setArmingAbandon(false), DISARM_MS);
+      return;
+    }
+    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    setArmingAbandon(false);
+    fire("abandon_run", true);
+  };
+
+  // The strip hides entirely on terminal stages (visibleActions = []).
+  // W4-L3's premise — awaiting_user offers only tool-permission actions —
+  // is stale: the backend advertises review/approve/reject plan there
+  // (services/runs.py), real decisions that must render.
+  if (shown.length === 0) return null;
+
+  const cls =
+    "rounded-md border px-s3 py-s1.5 font-mono text-[12px] transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-40";
+
   return (
-    <div data-testid="action-card" className="flex flex-wrap gap-s2 border-t border-hairline px-s4 py-2.5">
-      {actions.filter((a) => !TOOL_PERMISSION.has(a)).map((a) => {
-        const isStop = a === "stop_run";
-        const hiddenWhileWorking = busy && !isStop;
-        if (hiddenWhileWorking) return null;
-        const danger = IRREVERSIBLE.has(a) || a === "abandon_run";
-        return (
-          <Button
-            key={a}
-            variant={danger ? "destructive" : isStop ? "outline" : "default"}
-            size="sm"
-            onClick={() => fire(a)}
-            data-intent={a}
-            className="font-mono"
-          >
-            {confirming === a ? `${LABELS[a] ?? a} — confirm?` : LABELS[a] ?? a}
-          </Button>
-        );
-      })}
+    <div className="flex flex-wrap items-center gap-s2 border-t border-hairline px-s4 py-s3" data-testid="action-strip">
+      {shown.map((a) => (
+        <button
+          key={a}
+          type="button"
+          disabled={busy}
+          onClick={() => fire(a)}
+          className={cn(
+            cls,
+            a === "approve_plan" || a === "create_pr"
+              ? "border-green bg-green-soft text-ok-bright hover:border-green"
+              : a === "stop_run"
+                ? "border-hairline bg-bg-module text-ink-secondary hover:border-warn hover:text-warn-bright"
+                : "border-hairline bg-bg-module text-ink-secondary hover:border-blue-bright hover:text-ink-primary",
+          )}
+          title={a === "stop_run" ? "stop the run — all work preserved, resumable" : undefined}
+        >
+          {LABELS[a] ?? a.replaceAll("_", " ")}
+        </button>
+      ))}
+
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onAbandon}
+        className={cn(
+          cls,
+          "ml-auto",
+          armingAbandon
+            ? "border-red bg-danger-soft text-danger-bright"
+            : "border-hairline bg-bg-module text-ink-faint hover:border-red hover:text-danger-bright",
+        )}
+        title="abandon — kills the run and shreds the workspace; cannot be undone"
+      >
+        {armingAbandon ? "confirm abandon?" : "abandon"}
+      </button>
     </div>
   );
 }

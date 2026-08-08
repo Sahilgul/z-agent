@@ -3,6 +3,7 @@
  *  detection, and the swarm critical path. No React imports. */
 
 import type { Thread, RunStage } from "../types";
+import { parseIso } from "./time";
 
 export interface StageMeta {
   label: string;
@@ -37,15 +38,32 @@ export const RAIL_STAGES = RAIL;
 /** Live-state rules: while the agent WORKS, decision buttons hide; the
  *  Stop button and typed Lead-nudges stay available. The backend's
  *  available_actions is the source of truth for WHAT may be offered; this
- *  decides WHEN the UI may show them. */
+ *  decides WHEN the UI may show them.
+ *  W-H3: "verifying" is NOT agent-working — it is the human's review turn
+ *  (review_evidence / create_pr are advertised there). Including it wedged
+ *  the UI: the spinner kept playing and the review actions never rendered. */
 const AGENT_WORKING: RunStage[] = [
-  "provisioning", "investigating", "planning", "developing", "verifying",
+  "provisioning", "investigating", "planning", "developing",
 ];
-const ALWAYS_SHOW = new Set(["stop_run"]);
+
+/** Run stages where no work is in flight — the lifecycle strip unmounts, and
+ *  the watchdog suppresses itself (a finished run must never nag the user to
+ *  nudge a thread, even if a beat was lost and the row is stranded at
+ *  "running"). */
+export const TERMINAL_STAGES: ReadonlySet<string> = new Set([
+  "completed", "failed", "abandoned", "interrupted",
+]);
+
+// W-B1: the backend's intent gate keeps stop_run legal on EVERY stage
+// (app/services/intents.py) — the contract is that the UI hardcodes it, so
+// it renders on any non-terminal stage regardless of what the server
+// advertises. available_actions supplies the rest of the strip.
+const ALWAYS_SHOW = ["stop_run"] as const;
 
 export function visibleActions(stage: RunStage, available: string[]): string[] {
-  if (!AGENT_WORKING.includes(stage)) return available;
-  return available.filter((a) => ALWAYS_SHOW.has(a));
+  if (TERMINAL_STAGES.has(stage)) return [];
+  const server = (available ?? []).filter((a) => a !== "stop_run" && a !== "abandon_run");
+  return [...ALWAYS_SHOW, ...server];
 }
 
 export function agentWorking(stage: RunStage): boolean {
@@ -55,20 +73,12 @@ export function agentWorking(stage: RunStage): boolean {
 // ------------------------------------------------------------------ watchdog
 export const WATCHDOG_STALE_MS = 3 * 60 * 1000;
 
-/** Run stages where no thread is doing anything — a finished run must never
- *  nag the user to nudge a thread, even if a beat was lost and the row is
- *  stranded at "running". The backend's heartbeat fix keeps the row honest,
- *  but the UI must be correct even when a beat slips through. */
-const TERMINAL_STAGES = new Set([
-  "completed", "failed", "abandoned", "interrupted",
-]);
-
 /** A thread is a watchdog candidate when it claims to be active but its
  *  heartbeat has gone stale — the UI shows "nudge / let it run". */
 export function isStaleThread(thread: Thread, now: number): boolean {
   if (thread.status !== "running" && thread.status !== "queued") return false;
   if (!thread.heartbeat_at) return thread.status === "running";
-  return now - Date.parse(thread.heartbeat_at) > WATCHDOG_STALE_MS;
+  return now - parseIso(thread.heartbeat_at) > WATCHDOG_STALE_MS;
 }
 
 /** Stale threads for a run, suppressing the watchdog once the run is terminal.
@@ -134,6 +144,10 @@ const DETAIL_KIND_MAP: Record<string, string> = {
   recap: "recap",
   approval_card: "approval",
   approval_decision: "approval",
+  // Engine lifecycle signals emitted specifically to be seen: a critic
+  // blocked the run; a nudge is queued behind a pending approval.
+  blocked: "warning",
+  nudge_deferred: "status",
 };
 
 /** Display kind for an event: the typed detail sub-kind wins over the raw
@@ -188,7 +202,7 @@ export function foldStream(
   const lastUserTs = new Map<string, number>();
   for (const item of items) {
     if (item.kind !== "message") continue;
-    const t = item.ts ? Date.parse(item.ts) : NaN;
+    const t = parseIso(item.ts);
     if (item.role === "user") {
       if (!Number.isNaN(t)) lastUserTs.set(item.threadId, t);
       continue;

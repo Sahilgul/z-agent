@@ -15,6 +15,8 @@ export interface Run {
   repo: string | null;
   work_item_id: number | null;
   available_actions: string[];
+  /** WHY the run failed — persisted backend-side so the banner survives a reload. */
+  failure_reason: string | null;
   cost_usd: number;
   tokens: number;
   last_active_at: string | null;
@@ -23,7 +25,9 @@ export interface Run {
 
 export type LaneStatus =
   | "queued" | "running" | "idle" | "interrupted" | "completed"
-  | "failed" | "stopped" | "replaced" | "pinned";
+  // W5-L2: "pinned" removed — it was a cosmetic WS flash, never a row state;
+  // pins land as durable run events with a run note now.
+  | "failed" | "stopped" | "replaced" | "input_required";
 
 export interface Thread {
   id: string;
@@ -70,7 +74,10 @@ export type WsMessage =
   | { type: "approval_resolved"; approval_id: string; decision: string }
   // L-22: a run-scoped informational note (e.g. swarm capped a fanout
   // request). Surfaced as a transient toast.
-  | { type: "note"; text: string };
+  | { type: "note"; text: string }
+  // W1-L1 / W9-L10: a repo finished onboarding (publish_global fans it out
+  // over every open run socket) — the rack invalidates its query.
+  | { type: "repo_added"; repo: string };
 
 export interface PlanStep {
   id: number;
@@ -116,7 +123,8 @@ export interface Me {
   username: string;
   display_name: string;
   role: string;
-  must_change_pin: boolean;
+  // W-H15: `must_change_pin` deleted — the backend never returned it, so any
+  // guard on it was dead. First-login onboarding is its own route now.
 }
 
 /** Logical destinations — the rail's IA. Routed via react-router; see

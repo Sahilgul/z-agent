@@ -43,7 +43,7 @@ export const useSession = create<SessionState>((set, get) => ({
         throw err;
       }
       set({
-        me: { id: 0, username, display_name: username, role: "admin", must_change_pin: false },
+        me: { id: 0, username, display_name: username, role: "admin" },
       });
     }
   },

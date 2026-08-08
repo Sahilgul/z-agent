@@ -14,7 +14,9 @@ const LED: Record<LaneStatus, string> = {
   stopped: "led led--red",
   failed: "led led--red",
   replaced: "led led--off",
-  pinned: "led led--blue",
+  // Parked on an approval card: alive and holding capacity, waiting on a
+  // human — warn tone, never the dead-grey "off" fallback.
+  input_required: "led led--warn",
 };
 
 export function ThreadChips({

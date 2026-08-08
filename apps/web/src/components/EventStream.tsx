@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { CodeView, langFromPath } from "./CodeView";
@@ -60,11 +60,15 @@ const CODE_KINDS = new Set(["file_read", "file_edit"]);
  *  and the pane must not yank them down on new content. */
 const NEAR_BOTTOM_PX = 120;
 
-/** Language for a code trace row: an edit carrying a unified diff highlights
- *  as diff (green/red lines); everything else resolves from the file path —
- *  detail.path when the worker sends it, else the title ("read src/app.py"). */
+/** W7-M3: how many folded items the pane renders before windowing kicks in. */
+const RENDER_WINDOW = 300;
+
+/** Language for a code trace row, resolved from the file path — detail.path
+ *  when the worker sends it, else the title ("read src/app.py"). W7-L2: the
+ *  unified-diff special case was dropped — file_edit emits SUMMARIES by
+ *  design, so the diff grammar was a dead branch pinning a fixture the
+ *  worker never produces. */
 function codeLang(item: StreamItem): string | undefined {
-  if (item.kind === "file_edit" && /^(--- |\+\+\+ |@@ )/m.test(item.text)) return "diff";
   const ref = item.detail.path ?? item.detail.file_path ?? item.title;
   return langFromPath(String(ref));
 }
@@ -228,6 +232,16 @@ export function EventStream({
     [events, deltas, laneFilter],
   );
 
+  // W7-M3: window the rendered tail. The fold itself is memoized on stable
+  // store slices, but the DOM cost is NOT bounded by the memo — every item
+  // mounts a Markdown parse / Prism highlight, and a 2000-step run grew the
+  // pane without limit (scroll jank, multi-hundred-MB DOM). Render the last
+  // RENDER_WINDOW items; the full history is one tap away (and always in
+  // the transcript export).
+  const [showAll, setShowAll] = useState(false);
+  const hiddenCount = !showAll && items.length > RENDER_WINDOW ? items.length - RENDER_WINDOW : 0;
+  const visible = hiddenCount > 0 ? items.slice(hiddenCount) : items;
+
   // scrollIntoView walks up and scrolls every ancestor — including the
   // overflow:hidden shell and the document — which drags the whole app
   // sideways and up. Drive this pane's own scrollTop instead.
@@ -286,12 +300,21 @@ export function EventStream({
       aria-label="agent event stream"
     >
       {prompt && <Bubble role="user" body={prompt} ts={promptTs} />}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          className="mb-s3 w-full rounded-md border border-hairline bg-bg-raised px-s3 py-s2 font-mono text-[11.5px] text-ink-faint transition-colors hover:border-hairline-bright hover:text-ink-secondary"
+        >
+          show {hiddenCount} earlier step{hiddenCount === 1 ? "" : "s"}
+        </button>
+      )}
       {items.length === 0 && (
         <div className="px-s2 py-s4 font-mono text-[12px] text-ink-faint">
           no trace yet — the agent's first step lands here
         </div>
       )}
-      {items.map((i, idx) => (
+      {visible.map((i, idx) => (
         <Fragment key={i.key}>
           {/* A fresh user message closes the previous turn — mark the seam.
               The opening turn (first item, no prompt above) stays unmarked. */}

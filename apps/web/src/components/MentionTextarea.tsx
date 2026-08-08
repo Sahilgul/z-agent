@@ -10,6 +10,7 @@ interface Repo {
   id: number;
   name: string;
   integration_branch: string;
+  status?: string;
 }
 
 const DROPDOWN_CAP = 8;
@@ -77,6 +78,9 @@ export function MentionTextarea({
     if (!token) return [];
     const q = token.query.slice(1).toLowerCase(); // drop the leading `@`
     const filtered = repos
+      // W6-L11: only mention repos a run can actually MOUNT — picking a
+      // pending/error repo silently black-holed the scope directive.
+      .filter((r) => r.status === undefined || r.status === "ready" || r.status === "ready-no-map")
       .filter((r) => r.name.toLowerCase().includes(q))
       .slice(0, DROPDOWN_CAP);
     return filtered;

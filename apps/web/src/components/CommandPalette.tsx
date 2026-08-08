@@ -22,6 +22,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { useSession } from "../stores/session";
+import { useRuns } from "../stores/run";
 import { SCREEN_PATHS } from "../lib/routes";
 import { useAppTranslation } from "@/i18n";
 
@@ -55,6 +56,7 @@ export function CommandPalette() {
       // dead). ⌘N now triggers the same action as the "new run" palette item.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
+        useRuns.getState().closeRun();
         navigate(SCREEN_PATHS.sessions);
         setOpen(false);
       }
@@ -86,7 +88,11 @@ export function CommandPalette() {
         <CommandGroup heading={t("cmdk.actions")}>
           <CommandItem
             onSelect={() => {
-              go("/");
+              // W-H17: "new run" went to "/" — the PUBLIC landing page —
+              // instead of the console's new-session state. Close the open
+              // run (blank composer) and land on the sessions screen.
+              useRuns.getState().closeRun();
+              go(SCREEN_PATHS.sessions);
             }}
             value={`${t("cmdk.newRun")} inbox`}
           >

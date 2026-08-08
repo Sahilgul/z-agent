@@ -131,7 +131,13 @@ export function SessionTabs({
         <DialogContent className="max-h-[80vh] w-[720px] overflow-y-auto sm:max-w-[720px]">
           <DialogHeader>
             <DialogTitle>session history</DialogTitle>
-            <DialogDescription>every run you have started, newest first</DialogDescription>
+            {/* W10-#12: the server caps the list at 100 — don't promise
+                "every run" when older ones are only reachable by id. */}
+            <DialogDescription>
+              {runs.length >= 100
+                ? "your 100 most recent runs, newest first — older sessions remain in the record"
+                : "your recent runs, newest first"}
+            </DialogDescription>
           </DialogHeader>
           {runs.length === 0 ? (
             <EmptyState hint="no sessions yet" />
