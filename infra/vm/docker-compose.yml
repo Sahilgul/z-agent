@@ -93,6 +93,9 @@ services:
     command: ["sh", "-c", "alembic upgrade head && python -m app.auth.seed_users"]
     environment:
       COLLEGIUM_DB_URL: postgresql+psycopg://collegium:${POSTGRES_PASSWORD}@db:5432/collegium
+      # Strict settings validation fires at import (app.db.base), so migrate
+      # needs a real Redis URL even though alembic never touches Redis.
+      COLLEGIUM_REDIS_URL: redis://redis:6379/0
       COLLEGIUM_ADMIN_USERNAMES: ${COLLEGIUM_ADMIN_USERNAMES:-sahil}
       COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME: ${COLLEGIUM_BOOTSTRAP_ADMIN_USERNAME:-sahil}
       COLLEGIUM_BOOTSTRAP_ADMIN_PIN: ${COLLEGIUM_BOOTSTRAP_ADMIN_PIN:?set in .env}
