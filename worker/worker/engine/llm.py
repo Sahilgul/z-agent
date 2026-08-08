@@ -28,7 +28,8 @@ class ModelCapabilities:
                  max_tokens: int = 8192, supports_tools: bool = True,
                  supports_streaming: bool = True,
                  supports_temperature: bool = True,
-                 reasoning_efforts: tuple[str, ...] = ()) -> None:
+                 reasoning_efforts: tuple[str, ...] = (),
+                 supports_thinking_off: bool = True) -> None:
         self.vision = vision
         self.reasoning = reasoning
         self.max_tokens = max_tokens
@@ -39,6 +40,8 @@ class ModelCapabilities:
         # takes the thinking toggle only). Mirrors the backend registry —
         # make_llm validates against it and refuses unknown efforts.
         self.reasoning_efforts = reasoning_efforts
+        # False = thinking is ALWAYS on (Kimi K3): "off" would 400 the call.
+        self.supports_thinking_off = supports_thinking_off
 
 
 # Registry keyed by gateway model alias. Add entries as models are validated.
@@ -52,6 +55,14 @@ _CAPABILITY_REGISTRY: dict[str, ModelCapabilities] = {
         # Live-probed through the gateway (2026-08-08): Foundry's K2.6 accepts
         # low/high/max and emits reasoning_content at every level.
         reasoning_efforts=("low", "high", "max"),
+    ),
+    "kimi3-foundry": ModelCapabilities(
+        vision=False, reasoning=True, max_tokens=8192, supports_temperature=False,
+        reasoning_efforts=("low", "high", "max"),
+        # K3 always thinks (Moonshot docs, 2026-08): no disabled state exists,
+        # and sending thinking.type=disabled 400s. Same fixed-param family as
+        # K2.6, so temperature stays omitted until probed otherwise.
+        supports_thinking_off=False,
     ),
     "qwen-foundry": ModelCapabilities(vision=False, reasoning=False, max_tokens=8192),
     # Compare fleet (Azure AI Foundry, same /openai/v1 surface as Kimi).
@@ -289,6 +300,9 @@ def _retry_after(exc: Exception) -> float | None:
 # backend/app/core/models.py (Azure AI Foundry listings, 2026-08).
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "kimi-foundry": (0.95, 4.00),
+    # K3 seeded at the Fireworks/Moonshot first-party rate — NOT yet confirmed
+    # against the Foundry listing; fix here + registry + config.yaml together.
+    "kimi3-foundry": (3.00, 15.00),
     "glm-foundry": (1.54, 4.84),
     "deepseek-pro-foundry": (1.74, 3.48),
     "deepseek-flash-foundry": (0.19, 0.51),
@@ -387,6 +401,10 @@ def make_llm(
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
     if reasoning == "off":
+        if not caps.supports_thinking_off:
+            raise RuntimeError(
+                f"model '{model}' always thinks — 'off' would 400 "
+                "(fail-closed, no silent clamp)")
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     elif reasoning:
         if reasoning not in caps.reasoning_efforts:

@@ -112,7 +112,13 @@ export function ModelPicker({
           {data.models.map((m) => {
             const active = effective.includes(m.alias);
             const effort = reasoning[m.alias] ?? "auto";
-            const efforts = ["auto", "off", ...m.reasoning_efforts];
+            // "off" only exists for models with a disabled-thinking state —
+            // always-thinking models (Kimi K3) would 400 on it.
+            const efforts = [
+              "auto",
+              ...(m.supports_thinking_off ? ["off"] : []),
+              ...m.reasoning_efforts,
+            ];
             return (
               <div key={m.alias} role="option" aria-selected={active}>
                 <button

@@ -436,6 +436,24 @@ def test_make_llm_reasoning_rejects_effort_the_model_lacks():
             make_llm("glm-foundry", streaming=False, reasoning="low")
 
 
+def test_make_llm_reasoning_off_rejected_for_always_thinking_models():
+    """Kimi K3 has no disabled-thinking state — sending it would 400 the call.
+    Fail-closed at the model edge; efforts still work."""
+    import os
+    from unittest.mock import patch
+
+    import pytest
+
+    from worker.engine.llm import make_llm
+
+    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+        with pytest.raises(RuntimeError, match="always thinks"):
+            make_llm("kimi3-foundry", streaming=False, reasoning="off")
+        k3 = make_llm("kimi3-foundry", streaming=False, reasoning="low")
+    assert k3.extra_body == {
+        "thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+
+
 def test_tool_arg_aliases_normalized_at_model_edge():
     """Models habitually call terminal_exec with cmd= (other harnesses' schema)
     instead of the bound schema's command=. Without normalization the approval

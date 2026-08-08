@@ -120,9 +120,20 @@ async def test_spawn_rejects_reasoning_the_model_lacks(session, make_user, monke
     run = _make_run(session, make_user)
     lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
 
-    with pytest.raises(ThreadSpawnError, match="not 'max'"):
+    with pytest.raises(ThreadSpawnError, match="not 'xhigh'"):
         await lm.spawn(run, "researcher", "task", "persona", None, [],
-                       model="kimi-foundry", reasoning="max")
+                       model="kimi-foundry", reasoning="xhigh")
+    assert session.query(Thread).count() == 0
+
+
+async def test_spawn_rejects_off_for_always_thinking_models(session, make_user):
+    """Kimi K3 has no disabled-thinking state — 'off' would 400 the lane."""
+    run = _make_run(session, make_user)
+    lm = ThreadManager(_FakeIngest(), _FakeRelay(), _FakeGateway())
+
+    with pytest.raises(ThreadSpawnError, match="always thinks"):
+        await lm.spawn(run, "researcher", "task", "persona", None, [],
+                       model="kimi3-foundry", reasoning="off")
     assert session.query(Thread).count() == 0
 
 

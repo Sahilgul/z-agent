@@ -40,6 +40,22 @@ model_list:
       # worker's ChatOpenAIReasoning subclass can surface it as StepKind.THINKING.
       supports_reasoning: true
 
+  - model_name: kimi3-foundry
+    litellm_params:
+      model: os.environ/FOUNDRY_MODEL_K3      # e.g. openai/Kimi-K3
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/AZURE_AI_FOUNDRY_API_KEY
+    model_info:
+      # NOT confirmed against the Foundry listing — seeded at the
+      # Fireworks/Moonshot first-party rate ($3 in / $15 out per 1M). Fix
+      # here + backend/app/core/models.py + the worker fallback together.
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+      max_tokens: 8192
+      mode: chat
+      # K3 always thinks; reasoning_content must flow like K2.6 (see above).
+      supports_reasoning: true
+
   # The compare-fleet routes: same Foundry resource, same /openai/v1 surface
   # and key as kimi-foundry — only the deployment name differs. The compose
   # file ships defaults for FOUNDRY_MODEL_* (an unset os.environ/ ref resolves

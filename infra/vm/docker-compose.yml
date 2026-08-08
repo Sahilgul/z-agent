@@ -79,6 +79,7 @@ services:
       # names; override in .env if yours differ. Every var must resolve —
       # config.yaml references crash LiteLLM at boot when unset.
       FOUNDRY_MODEL_GLM: ${FOUNDRY_MODEL_GLM:-openai/FW-GLM-5.2}
+      FOUNDRY_MODEL_K3: ${FOUNDRY_MODEL_K3:-openai/Kimi-K3}
       FOUNDRY_MODEL_DS_PRO: ${FOUNDRY_MODEL_DS_PRO:-openai/DeepSeek-V4-Pro}
       FOUNDRY_MODEL_DS_FLASH: ${FOUNDRY_MODEL_DS_FLASH:-openai/DeepSeek-V4-Flash}
       STORE_MODEL_IN_DB: "True"

@@ -55,6 +55,8 @@ export interface ModelOption {
   cache_read_per_mtok: number | null;
   /** reasoning_effort values the model accepts; empty = on/off toggle only. */
   reasoning_efforts: string[];
+  /** false = thinking is always on (Kimi K3) — the picker hides "off". */
+  supports_thinking_off: boolean;
 }
 
 export type StepKind =

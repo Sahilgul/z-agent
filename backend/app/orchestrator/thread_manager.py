@@ -93,6 +93,9 @@ class ThreadManager:
         # Reasoning choice ("off" or an effort the model takes) — validated
         # at create_run; re-checked here because spawn is reachable from
         # kill/replace replays and worker spawn requests too.
+        if reasoning == "off" and not option.supports_thinking_off:
+            raise ThreadSpawnError(
+                f"model '{model}' always thinks — 'off' is not offered")
         if reasoning and reasoning != "off" and reasoning not in option.reasoning_efforts:
             raise ThreadSpawnError(
                 f"model '{model}' takes reasoning {sorted(option.reasoning_efforts)} "

@@ -15,10 +15,11 @@ vi.mock("../lib/api", async (importOriginal) => {
 const FLEET = {
   default: "kimi-foundry",
   models: [
-    { alias: "kimi-foundry", label: "kimi k2.6", price_in_per_mtok: 0.95, price_out_per_mtok: 4.0, cache_read_per_mtok: 0.16, reasoning_efforts: ["low", "high", "max"] },
-    { alias: "legacy-foundry", label: "legacy no-effort", price_in_per_mtok: 1.0, price_out_per_mtok: 2.0, cache_read_per_mtok: null, reasoning_efforts: [] },
-    { alias: "glm-foundry", label: "glm 5.2", price_in_per_mtok: 1.54, price_out_per_mtok: 4.84, cache_read_per_mtok: 0.15, reasoning_efforts: ["high", "max"] },
-    { alias: "deepseek-flash-foundry", label: "deepseek v4 flash", price_in_per_mtok: 0.19, price_out_per_mtok: 0.51, cache_read_per_mtok: 0.028, reasoning_efforts: ["low", "high", "max"] },
+    { alias: "kimi-foundry", label: "kimi k2.6", price_in_per_mtok: 0.95, price_out_per_mtok: 4.0, cache_read_per_mtok: 0.16, reasoning_efforts: ["low", "high", "max"], supports_thinking_off: true },
+    { alias: "kimi3-foundry", label: "kimi k3", price_in_per_mtok: 3.0, price_out_per_mtok: 15.0, cache_read_per_mtok: null, reasoning_efforts: ["low", "high", "max"], supports_thinking_off: false },
+    { alias: "legacy-foundry", label: "legacy no-effort", price_in_per_mtok: 1.0, price_out_per_mtok: 2.0, cache_read_per_mtok: null, reasoning_efforts: [], supports_thinking_off: true },
+    { alias: "glm-foundry", label: "glm 5.2", price_in_per_mtok: 1.54, price_out_per_mtok: 4.84, cache_read_per_mtok: 0.15, reasoning_efforts: ["high", "max"], supports_thinking_off: true },
+    { alias: "deepseek-flash-foundry", label: "deepseek v4 flash", price_in_per_mtok: 0.19, price_out_per_mtok: 0.51, cache_read_per_mtok: 0.028, reasoning_efforts: ["low", "high", "max"], supports_thinking_off: true },
   ],
 };
 
@@ -132,6 +133,18 @@ describe("ModelPicker", () => {
     expect(row.textContent).toContain("low");
     expect(row.textContent).toContain("high");
     expect(row.textContent).toContain("max");
+  });
+
+  it("kimi k3 always thinks — no 'off' pill", async () => {
+    apiMock.get.mockResolvedValue(FLEET);
+    renderPicker(["kimi3-foundry"]);
+    await waitFor(() => expect(screen.getByText("model: kimi k3")).toBeTruthy());
+    fireEvent.click(screen.getByText("model: kimi k3"));
+    const row = screen.getByTestId("reasoning-row-kimi3-foundry");
+    expect(row.textContent).toContain("auto");
+    expect(row.textContent).toContain("low");
+    expect(row.textContent).toContain("max");
+    expect(screen.queryByTestId("reasoning-kimi3-foundry-off")).toBeNull();
   });
 
   it("picking an effort reports it; auto clears back to the default", async () => {

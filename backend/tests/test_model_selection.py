@@ -85,6 +85,15 @@ def test_validate_reasoning_rejects_effort_the_model_lacks():
         _rm()._validate_reasoning({"glm-foundry": "low"}, ["glm-foundry"])
 
 
+def test_validate_reasoning_rejects_off_for_always_thinking_models():
+    # Kimi K3 has no disabled-thinking state — offering "off" would 400 the lane.
+    with pytest.raises(ValueError, match="always thinks"):
+        _rm()._validate_reasoning({"kimi3-foundry": "off"}, ["kimi3-foundry"])
+    # ...but its efforts are fine.
+    assert _rm()._validate_reasoning(
+        {"kimi3-foundry": "low"}, ["kimi3-foundry"]) == {"kimi3-foundry": "low"}
+
+
 # ------------------------------------------------------------- lane_override
 
 def test_lane_override_reads_artifacts():
@@ -117,15 +126,19 @@ def test_list_models_returns_registry(auth_client):
     body = r.json()
     aliases = [m["alias"] for m in body["models"]]
     assert body["default"] == "kimi-foundry"
-    assert aliases == ["kimi-foundry", "glm-foundry",
+    assert aliases == ["kimi-foundry", "kimi3-foundry", "glm-foundry",
                        "deepseek-pro-foundry", "deepseek-flash-foundry"]
     kimi = body["models"][0]
     assert kimi["price_in_per_mtok"] == 0.95
     assert kimi["cache_read_per_mtok"] == 0.16
     # Reasoning options ride the registry so the picker renders per-model rows.
     assert kimi["reasoning_efforts"] == ["low", "high", "max"]
-    assert body["models"][1]["reasoning_efforts"] == ["high", "max"]
-    assert body["models"][3]["reasoning_efforts"] == ["low", "high", "max"]
+    assert kimi["supports_thinking_off"] is True
+    k3 = body["models"][1]
+    assert k3["reasoning_efforts"] == ["low", "high", "max"]
+    assert k3["supports_thinking_off"] is False  # K3 always thinks
+    assert body["models"][2]["reasoning_efforts"] == ["high", "max"]
+    assert body["models"][4]["reasoning_efforts"] == ["low", "high", "max"]
 
 
 def test_create_run_passes_models_through(auth_client):

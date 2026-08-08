@@ -233,7 +233,11 @@ class RunManager:
             option = settings.model_option(alias)
             if option is None:
                 raise ValueError(f"unknown model '{alias}'")
-            if effort != "off" and effort not in option.reasoning_efforts:
+            if effort == "off":
+                if not option.supports_thinking_off:
+                    raise ValueError(
+                        f"model '{alias}' always thinks — 'off' is not offered")
+            elif effort not in option.reasoning_efforts:
                 raise ValueError(
                     f"model '{alias}' takes reasoning {sorted(option.reasoning_efforts)} "
                     f"or 'off' — not '{effort}'")
