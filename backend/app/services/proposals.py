@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.proposal import Proposal
 from app.db.models.run import Run
@@ -37,7 +38,7 @@ def _serialize(p: Proposal) -> dict:
         "body": p.body, "evidence": p.evidence, "impact": p.impact,
         "confidence": p.confidence, "rank_score": score, "status": p.status,
         "promoted_run_id": p.promoted_run_id, "created_by": p.created_by,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "created_at": iso_z(p.created_at),
     }
 
 

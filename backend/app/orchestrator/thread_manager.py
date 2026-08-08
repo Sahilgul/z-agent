@@ -274,8 +274,14 @@ class ThreadManager:
                         return None
                     if not announced:
                         announced = True
-                        await self.relay.publish_thread_status(
-                            run.id, spec.get("thread_hint", spec["persona"]), "queued")
+                        # W-H7: a queued notice must NOT be a thread_status for
+                        # the fake thread_hint id — no thread row exists yet,
+                        # so every UI client dropped it silently and the user
+                        # never learned their swarm was queued. A run-scoped
+                        # note renders as a toast instead.
+                        await self.relay.publish_note(
+                            run.id,
+                            f"thread '{spec['persona']}' queued — waiting for a capacity slot")
                     await asyncio.sleep(queue_poll_seconds)
 
         threads = await asyncio.gather(*(_spawn_one(s) for s in specs))
@@ -384,6 +390,11 @@ class ThreadManager:
                 session.commit()
         finally:
             session.close()
+        # W8-L2: node-end is a real status transition — fan it out so the
+        # console's tile goes dark immediately instead of on the next poll.
+        run_id = await self._run_id_of(thread_id)
+        if run_id is not None:
+            await self.relay.publish_thread_status(run_id, thread_id, final_status)
         # F1: node-end is a terminal transition — unified cleanup (settle,
         # release, clear), not a bare key release.
         await self._cleanup_terminal(thread_id)

@@ -44,6 +44,10 @@ class Run(Base):
     mode: Mapped[str] = mapped_column(sa.String(32))
     autonomy: Mapped[str] = mapped_column(sa.String(16), default="supervised")
     stage: Mapped[str] = mapped_column(sa.String(24), default="queued", index=True)
+    # WHY the run failed (spawn rejection, blueprint error…) — persisted so a
+    # session opened AFTER the failure still shows the reason (the relay note
+    # is ephemeral). Cleared when the run re-enters flight (resume/replan).
+    failure_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     title: Mapped[str] = mapped_column(sa.String(256), default="")
     auto_summary: Mapped[str] = mapped_column(sa.Text, default="")
     repo: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)  # primary target

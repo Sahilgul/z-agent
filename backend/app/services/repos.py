@@ -71,6 +71,19 @@ def _pat_auth_env(pat: str) -> dict[str, str]:
     }
 
 
+# W9-M7 / W10-#11: ls-remote returns branches in remote order (usually
+# alphabetic), so the default pick landed on `abc-feature` instead of the
+# integration line. Rank the canonical HEAD names first, then the rest.
+_HEAD_FIRST = ("main", "master", "develop", "development")
+
+
+def _head_first(branches: list[str]) -> list[str]:
+    def rank(b: str) -> tuple[int, str]:
+        return (_HEAD_FIRST.index(b) if b in _HEAD_FIRST else len(_HEAD_FIRST), b)
+
+    return sorted(branches, key=rank)
+
+
 def validate_remote(remote_url: str, pat: str) -> list[str]:
     """ls-remote validation — the branch list is FETCHED, never free-typed."""
     result = subprocess.run(
@@ -80,7 +93,7 @@ def validate_remote(remote_url: str, pat: str) -> list[str]:
     )
     if result.returncode != 0:
         raise OnboardingError(f"remote unreachable or PAT lacks Code:Read — {result.stderr[:200]}")
-    return [line.rsplit("/", 1)[-1] for line in result.stdout.splitlines()]
+    return _head_first([line.rsplit("/", 1)[-1] for line in result.stdout.splitlines()])
 
 
 def register_repo(name: str, remote_url: str, integration_branch: str,

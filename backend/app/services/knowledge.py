@@ -26,6 +26,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.approval import Approval
 from app.db.models.knowledge import KnowledgeItem
@@ -63,7 +64,10 @@ def _serialize(item: KnowledgeItem) -> dict:
         "trigger_description": item.trigger_description,
         "scope": item.scope, "repo": item.repo, "status": item.status,
         "created_by": item.created_by, "source_run_id": item.source_run_id,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
+        # W9-M5: surface what the distiller/proposer SUGGESTED so the inbox
+        # selector can default to it instead of a flat "global".
+        "proposed_scope": (item.payload or {}).get("proposed_scope"),
+        "created_at": iso_z(item.created_at),
     }
 
 
@@ -91,10 +95,14 @@ def draft(content: str, trigger_description: str, created_by: int,
             # No-silent-skip record (distiller bench regression): persisted
             # WITH its reason for audit but never surfaces a card — nothing
             # to decide.
-            item.payload = dict(extra_payload or {})
+            item.payload = {"proposed_scope": proposed_scope, **(extra_payload or {})}
             session.commit()
             session.refresh(item)
             return item
+        # W9-M5: persist the proposed scope on the row too (it used to live
+        # ONLY in the Approval payload, so the inbox couldn't default its
+        # selector to what the distiller suggested).
+        item.payload = {"proposed_scope": proposed_scope}
         # M-36: a draft WITHOUT a source_run_id (a user-authored draft from
         # the knowledge UI) used to get NO approval card — orphaned from the
         # card flow (stuck in "draft", never surfaced for review). Create the
@@ -217,6 +225,18 @@ def approve(item_id: int, scope: str, decided_by: int,
             raise KnowledgeError("knowledge item not found or already decided")
         if scope == "repo" and not (repo or item.repo):
             raise KnowledgeError("repo scope requires a repo")
+        if scope == "repo":
+            # W9-M6: validate against the registry — a free-typed repo name
+            # used to black-hole the lesson (it retrieved only for a repo
+            # string that never matches a real run).
+            from app.db.models.repo import Repo, RepoStatus
+
+            name = repo or item.repo
+            known = (session.query(Repo.id)
+                     .filter(Repo.name == name, Repo.status != RepoStatus.ARCHIVED)
+                     .first())
+            if known is None:
+                raise KnowledgeError(f"repo {name!r} is not in the registry")
         item.status = "approved"
         item.scope = scope
         if repo:

@@ -6,6 +6,7 @@ is the fleet-wide rollup."""
 
 from __future__ import annotations
 
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.delivery import Delivery, PrLink
 from app.db.models.repo import Repo, RepoStatus
@@ -115,7 +116,7 @@ def list_deliveries() -> list[dict]:
                 stages[r.stage] = stages.get(r.stage, 0) + 1
             out.append({
                 "id": d.id, "title": d.title,
-                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "created_at": iso_z(d.created_at),
                 "runs": len(runs), "stages": stages,
                 "cost_usd": round(sum(r.cost_usd for r in runs), 4),
                 "prs": [{"repo": p.repo, "ado_pr_id": p.ado_pr_id, "status": p.status}

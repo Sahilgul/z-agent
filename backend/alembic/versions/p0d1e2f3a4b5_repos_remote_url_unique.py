@@ -10,6 +10,7 @@ before adding the unique constraint.
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "p0d1e2f3a4b5"

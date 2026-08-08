@@ -21,7 +21,9 @@ import sqlalchemy as sa
 from collegium_contracts import RunStage
 
 from app.core.logging import get_logger
+from app.core.redact import redact
 from app.db.base import get_session
+from app.db.models.approval import Approval
 from app.db.models.event import Event
 from app.db.models.mode import Mode
 from app.db.models.run import Run
@@ -213,6 +215,7 @@ class RunManager:
                                                            "input_required"))
             transition(run, RunStage.QUEUED, allow_terminal_exit=True)  # H-41
             run.finished_at = None
+            run.failure_reason = None  # back in flight — the old reason is stale
             if last_thread is not None and last_thread_live:
                 last_thread.status = "stopped"
                 last_thread.finished_at = datetime.now(UTC)
@@ -306,11 +309,18 @@ class RunManager:
                 if row.stage not in TERMINAL_STAGES:
                     transition(row, RunStage.FAILED)
                     row.finished_at = datetime.now(UTC)
+                    # W-H13: persist WHY so a session opened after the failure
+                    # renders the reason inline — the relay note above only
+                    # reaches clients connected at failure time.
+                    row.failure_reason = redact(str(exc))[:500]
                     session.commit()
             finally:
                 session.close()
             if row.stage == RunStage.FAILED.value:
                 await self.relay.publish_run_stage(run_id, RunStage.FAILED.value, [])
+                # W-H5: a failed run's pending cards are zombies — the
+                # worker is gone. Stamp + fan out so consoles drop them.
+                await self._resolve_pending_approvals(run_id, "denied")
             # F1/F3: a failed run used to leave its threads "running" (capacity
             # held until the reaper), keys live, spend unsettled. Terminate
             # every live thread for real, then run the unified cleanup.
@@ -348,6 +358,35 @@ class RunManager:
             except Exception:
                 log.warning("run-end cost settle failed", run_id=run_id,
                             thread_id=tid, exc_info=True)
+
+    async def _resolve_pending_approvals(
+        self, run_id: str, decision: str, thread_id: str | None = None,
+    ) -> None:
+        """W-H5: a terminal transition strands every pending approval card —
+        the worker's BLPOP is gone, so the card would sit "waiting on you"
+        forever (a zombie). Stamp the decision for the audit trail and fan
+        out ``approval_resolved`` so every open console drops the card."""
+        now = datetime.now(UTC)
+        session = get_session()
+        try:
+            q = session.query(Approval).filter(
+                Approval.run_id == run_id, Approval.decision.is_(None))
+            if thread_id is not None:
+                q = q.filter(Approval.thread_id == thread_id)
+            ids = []
+            for a in q.all():
+                a.decision = decision
+                a.decided_at = now
+                ids.append(a.id)
+            session.commit()
+        finally:
+            session.close()
+        for approval_id in ids:
+            try:
+                await self.relay.publish_approval_resolved(run_id, approval_id, decision)
+            except Exception:
+                log.warning("approval_resolved fanout failed",
+                            approval_id=approval_id, run_id=run_id)
 
     async def _cleanup_terminal(self, thread_id: str) -> None:
         """F1: unified terminal cleanup; falls back to a bare key release for
@@ -406,6 +445,7 @@ class RunManager:
         if task and not task.done():
             task.cancel()
         await self.relay.publish_run_stage(run_id, RunStage.INTERRUPTED.value, available)
+        await self._resolve_pending_approvals(run_id, "stopped")
 
     async def abandon_run(self, run_id: str) -> None:
         """Kill run, shred workspace. Separate overflow-menu action WITH
@@ -456,6 +496,7 @@ class RunManager:
         if self.spawn_bridge is not None:
             self.spawn_bridge.unregister_run(run_id)
         await self.relay.publish_run_stage(run_id, RunStage.ABANDONED.value, [])
+        await self._resolve_pending_approvals(run_id, "stopped")
 
     async def nudge_thread(self, run_id: str, thread_id: str, text: str) -> None:
         """Typed Lead-nudge: stays enabled while the agent works (carve-out).
@@ -514,6 +555,7 @@ class RunManager:
         await self.relay.publish_thread_status(run_id, thread_id, "stopped")
         # F1: unified terminal cleanup (settle, release, clear) for the stop.
         await self._cleanup_terminal(thread_id)
+        await self._resolve_pending_approvals(run_id, "stopped", thread_id=thread_id)
 
     async def pin_finding(self, run_id: str, thread_id: str, note: str = "") -> None:
         """Pin a finding from a thread overlay: lands as a run event the
@@ -539,7 +581,13 @@ class RunManager:
             session.commit()
         finally:
             session.close()
-        await self.relay.publish_thread_status(run_id, thread_id, "pinned")
+        # W5-L2: was publish_thread_status("pinned") — a ≤15s cosmetic flash
+        # the next lanes poll reverted, since no row was ever stamped. The
+        # pin ITSELF is durable (the Event row above); the announcement is
+        # informational, so it goes out as a run note, not a fake status.
+        await self.relay.publish_note(
+            run_id, f"pinned finding from {thread.persona}: {note[:160]}",
+        )
 
     async def kill_replace_thread(
         self, run_id: str, thread_id: str,
@@ -583,14 +631,50 @@ class RunManager:
             for name in (extra_context_repo_names or []):
                 if name not in stored_names:
                     stored_names.append(name)
-            thread.status = "replaced"
-            thread.finished_at = datetime.now(UTC)
             run = session.get(Run, run_id)
-            session.commit()
         finally:
             session.close()
+        # H-37 + A2 + W-H8: kill, then WAIT for the old container to actually
+        # die BEFORE stamping "replaced" — the old order stamped first, so a
+        # survived-container abort left the tile reading "replaced" with no
+        # replacement (and its key already settled/released). False from
+        # wait_for_container_exit (force-stop on timeout) aborts BEFORE any
+        # stamp; ValueError surfaces to the intent API as a 422, not a 500.
         await self.control.kill(thread_id, wait_ack=True)
+        if old_container_id:
+            exited = await asyncio.to_thread(
+                sandbox_manager.wait_for_container_exit, old_container_id,
+            )
+            if not exited:
+                # The kill acked but the container won't die — leaving the row
+                # "running" would show a live tile for a thread that can never
+                # heartbeat again. Stamp it failed so the surface is honest.
+                session = get_session()
+                try:
+                    old = session.get(Thread, thread_id)
+                    if old is not None and old.status not in (
+                            "completed", "failed", "stopped", "replaced"):
+                        old.status = "failed"
+                        old.finished_at = datetime.now(UTC)
+                        session.commit()
+                finally:
+                    session.close()
+                await self.relay.publish_thread_status(run_id, thread_id, "failed")
+                raise ValueError(
+                    f"old container {old_container_id[:12]} survived kill+force-stop; "
+                    "aborting replace to avoid a double-mounted session volume")
+        # Verified dead — now the terminal stamp, status fanout, and cleanup.
+        session = get_session()
+        try:
+            old = session.get(Thread, thread_id)
+            if old is not None:
+                old.status = "replaced"
+                old.finished_at = datetime.now(UTC)
+                session.commit()
+        finally:
+            session.close()
         await self.relay.publish_thread_status(run_id, thread_id, "replaced")
+        await self._resolve_pending_approvals(run_id, "stopped", thread_id=thread_id)
         # F1/F5: settle the OLD thread's spend and release/clear its key
         # (previously leaked — "replaced" wasn't in any cleanup list), then
         # carry the REMAINING budget to the replacement so repeated replaces
@@ -604,21 +688,6 @@ class RunManager:
             ) if old else None
         finally:
             session.close()
-        # H-37 + A2: WAIT for the old container to actually die before
-        # spawning the replacement — and FAIL the replace when it won't die.
-        # The old control.kill just published a kill message and returned;
-        # the replacement then mounted the old session volume while the old
-        # container was still writing to it — two containers on one session
-        # volume = corruption. wait_for_container_exit force-stops on
-        # timeout and reports the outcome; False aborts before the spawn.
-        if old_container_id:
-            exited = await asyncio.to_thread(
-                sandbox_manager.wait_for_container_exit, old_container_id,
-            )
-            if not exited:
-                raise RuntimeError(
-                    f"old container {old_container_id[:12]} survived kill+force-stop; "
-                    "aborting replace to avoid a double-mounted session volume")
 
         # Resolve the unioned names to Repo rows for the spawn call. The
         # writable target is repo_scope (the run's primary repo); the rest of

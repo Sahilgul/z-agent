@@ -17,10 +17,11 @@ import json
 import re
 
 import httpx
-from sqlalchemy import func
+from sqlalchemy import func, update
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.idea import IdeaComment, IdeaThread
 from app.db.models.repo import Repo
@@ -51,12 +52,18 @@ class IdeasError(ValueError):
     pass
 
 
+
+class AlreadyPromotedError(IdeasError):
+    """The thread is already promoted (or a promote is in flight) — the API
+    maps this to 409 so the web can say "already promoted" instead of 404."""
+
+
 def _serialize_thread(t: IdeaThread, comment_count: int | None = None) -> dict:
     out = {
         "id": t.id, "title": t.title, "body": t.body, "created_by": t.created_by,
         "source": t.source, "proposal_id": t.proposal_id, "status": t.status,
         "summary": t.summary_json, "promoted_run_id": t.promoted_run_id,
-        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "created_at": iso_z(t.created_at),
     }
     if comment_count is not None:
         out["comment_count"] = comment_count
@@ -67,7 +74,7 @@ def _serialize_comment(c: IdeaComment, author_name: str) -> dict:
     return {
         "id": c.id, "thread_id": c.thread_id, "author_type": c.author_type,
         "author_ref": c.author_ref, "author_name": author_name, "body": c.body,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "created_at": iso_z(c.created_at),
     }
 
 
@@ -255,6 +262,43 @@ def plan_task_for(thread_id: int) -> str:
     if voices:
         parts += ["", "## Thread voices", *voices]
     return "\n".join(parts)
+
+
+def claim_promotion(thread_id: int) -> None:
+    """Atomically claim a thread for promotion BEFORE the run is created
+    (W9-H1). The conditional UPDATE is the guard: two concurrent promotes
+    race it and exactly one flips the row — the loser sees rowcount 0 and
+    the API returns 409 instead of minting a second run. ``mark_promoted``
+    finalizes the claim; ``release_promotion_claim`` unwinds it if the run
+    create fails."""
+    session = get_session()
+    try:
+        res = session.execute(
+            update(IdeaThread)
+            .where(IdeaThread.id == thread_id, IdeaThread.status.not_in(["promoted", "promoting"]))
+            .values(status="promoting")
+        )
+        if res.rowcount == 0:
+            if session.get(IdeaThread, thread_id) is None:
+                raise IdeasError("thread not found")
+            raise AlreadyPromotedError("thread already promoted")
+        session.commit()
+    finally:
+        session.close()
+
+
+def release_promotion_claim(thread_id: int) -> None:
+    """Unwind a claim after a failed run create so the thread isn't stranded
+    in ``promoting``. Restores the pre-claim status (summarized threads go
+    back to summarized, everything else to open)."""
+    session = get_session()
+    try:
+        thread = session.get(IdeaThread, thread_id)
+        if thread is not None and thread.status == "promoting":
+            thread.status = "summarized" if thread.summary_json else "open"
+            session.commit()
+    finally:
+        session.close()
 
 
 def mark_promoted(thread_id: int, run_id: str) -> dict:

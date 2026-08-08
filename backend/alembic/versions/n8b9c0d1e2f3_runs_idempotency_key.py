@@ -10,6 +10,7 @@ unique index: NULL keys (most runs) do not participate.
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "n8b9c0d1e2f3"

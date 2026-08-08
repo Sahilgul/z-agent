@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.event import Event
 from app.db.models.run import Run
@@ -69,7 +70,7 @@ def replay_events(run_id: str, user_id: int, thread_id: str | None = None,
         if not thread_id:
             rows = _chronological_merge(rows)
         return [{
-            "run_id": r.run_id, "thread_id": r.thread_id, "seq": r.seq, "ts": r.ts.isoformat(),
+            "run_id": r.run_id, "thread_id": r.thread_id, "seq": r.seq, "ts": iso_z(r.ts),
             "kind": r.type, "title": r.title, "detail": r.payload,
             "sdk_message_uuid": r.sdk_message_uuid,
         } for r in rows]

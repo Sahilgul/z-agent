@@ -127,6 +127,12 @@ def _engine_autonomy(permission_mode: str) -> str:
 # with no diagnosable backend error (C3).
 WORKER_MODES = frozenset({"ask", "plan", "development", "debug", "goal"})
 
+# W-B3: the web exposes "agent-rnd" (the swarm mode) as a first-class mode,
+# but the worker engine has no such Mode — every UI-started swarm failed at
+# spawn with InvalidModeError. Swarm runs are goal-directed (the swarm
+# blueprint still keys on run.mode), so threads boot as "goal".
+_MODE_TO_WORKER_MODE = {"agent-rnd": "goal"}
+
 
 class InvalidModeError(ValueError):
     pass
@@ -142,6 +148,7 @@ class SandboxManager:
         # engine_default_mode to every thread, so ask/plan/goal runs booted
         # with the development tool surface. Unknown modes fail loudly here.
         mode = (run.mode or self.settings.engine_default_mode).strip().lower()
+        mode = _MODE_TO_WORKER_MODE.get(mode, mode)
         if mode not in WORKER_MODES:
             raise InvalidModeError(
                 f"run mode {run.mode!r} is not in the worker engine vocabulary "
