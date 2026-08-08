@@ -7,7 +7,7 @@ kills sessions instantly (offboarding = deactivate, never delete). Brute-force:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -15,7 +15,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.base import db_session, get_session
+from app.db.base import db_session
 from app.db.models.user import User
 
 MAX_FAILED_ATTEMPTS = 5
@@ -42,7 +42,7 @@ def verify_pin(pin: str, pin_hash: str) -> bool:
 
 def issue_token(user: User) -> str:
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user.id),
         "username": user.username,
@@ -59,14 +59,14 @@ def decode_token(token: str) -> dict:
 
 
 def check_lockout(user: User) -> None:
-    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+    if user.locked_until and user.locked_until > datetime.now(UTC):
         raise HTTPException(status_code=429, detail="locked out — try again later")
 
 
 def record_failed_attempt(session: Session, user: User) -> None:
     user.failed_pin_attempts += 1
     if user.failed_pin_attempts >= MAX_FAILED_ATTEMPTS:
-        user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
+        user.locked_until = datetime.now(UTC) + timedelta(minutes=LOCKOUT_MINUTES)
         # M-55: do NOT reset the counter on lockout. Resetting meant that
         # after each lockout expired the attacker got a FRESH full set of
         # attempts (staying at 4/window, never escalating). Leave the counter

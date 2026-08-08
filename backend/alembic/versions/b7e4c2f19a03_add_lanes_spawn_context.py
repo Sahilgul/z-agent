@@ -7,8 +7,9 @@ Revision ID: b7e4c2f19a03
 Revises: a1b2c3d4e5f6
 Create Date: 2026-08-01
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "b7e4c2f19a03"
 down_revision = "a1b2c3d4e5f6"

@@ -6,16 +6,21 @@ Indexed by created_by+status+repo.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from app.db.models.event import Event
+    from app.db.models.thread import Thread
+
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Run(Base):
@@ -25,6 +30,12 @@ class Run(Base):
         # Session list + tab strip: WHERE created_by = ? ORDER BY last_active_at
         # DESC LIMIT 100. The filter-first index above can't serve the sort.
         sa.Index("ix_runs_owner_active", "created_by", "last_active_at"),
+        # External-write idempotency: at most one run per (owner, key).
+        # Partial — NULL keys (most runs) don't participate.
+        sa.Index("uq_runs_owner_idem", "created_by", "idempotency_key",
+                 unique=True,
+                 sqlite_where=sa.text("idempotency_key IS NOT NULL"),
+                 postgresql_where=sa.text("idempotency_key IS NOT NULL")),
     )
 
     id: Mapped[str] = mapped_column(sa.String(36), primary_key=True)  # uuid
@@ -37,6 +48,9 @@ class Run(Base):
     auto_summary: Mapped[str] = mapped_column(sa.Text, default="")
     repo: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)  # primary target
     work_item_id: Mapped[int | None] = mapped_column(nullable=True)
+    # Client-supplied dedupe key for POST /runs retries (unique per owner
+    # when present — see uq_runs_owner_idem).
+    idempotency_key: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     delivery_id: Mapped[int | None] = mapped_column(sa.ForeignKey("deliveries.id"), nullable=True, index=True)  # campaign group
     available_actions: Mapped[list] = mapped_column(sa.JSON, default=list)
     session_volume_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
@@ -50,8 +64,8 @@ class Run(Base):
 
     # Explicit ORM relationships REQUIRED for UoW insert ordering — table-level
     # FKs alone do not order batched parent+child inserts (verified empirically).
-    threads: Mapped[list["Thread"]] = relationship(back_populates="run")
-    events: Mapped[list["Event"]] = relationship(back_populates="run")
+    threads: Mapped[list[Thread]] = relationship(back_populates="run")
+    events: Mapped[list[Event]] = relationship(back_populates="run")
 
 
 class Plan(Base):
@@ -65,7 +79,7 @@ class Plan(Base):
     decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
-    steps: Mapped[list["PlanStep"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    steps: Mapped[list[PlanStep]] = relationship(back_populates="plan", cascade="all, delete-orphan")
 
 
 class PlanStep(Base):
@@ -81,4 +95,4 @@ class PlanStep(Base):
     success_criterion: Mapped[str] = mapped_column(sa.Text, default="")
     status: Mapped[str] = mapped_column(sa.String(16), default="pending")
 
-    plan: Mapped["Plan"] = relationship(back_populates="steps")
+    plan: Mapped[Plan] = relationship(back_populates="steps")

@@ -42,6 +42,21 @@ packages = ["app"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Families that catch real defects + hygiene; the codebase's compact style
+# (long lines, semicolons, asserts in tests) is deliberate and not gated.
+select = ["F", "I", "UP", "B", "RUF", "BLE"]
+ignore = [
+    "B008",    # FastAPI Depends()/Query() in defaults is the framework idiom
+    "BLE001",  # blind excepts are deliberate at notify/never-fail boundaries (noqa'd inline where load-bearing)
+    "RUF059",
+    "RUF001", "RUF002", "RUF003",  # typographic punctuation in prose is deliberate
+    "UP042",   # str+Enum mixins are deliberate (JSON-serializable enums)  # unused unpacked loop vars document tuple shape
+]
+
 [tool.coverage.report]
 # Testing gate (mock-unit standard): >=90% coverage enforced.
 # pytest-cov picks this up from coverage's own config (cov_config.fail_under).

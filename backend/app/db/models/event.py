@@ -9,16 +9,20 @@ Renamed thread_id → thread_id (thread→thread mechanical rename).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from app.db.models.run import Run
+
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Event(Base):
@@ -29,6 +33,12 @@ class Event(Base):
         # Replay + JSONL transcript fallback: WHERE run_id = ? [AND thread_id = ?]
         # [AND seq > ?] ORDER BY thread_id, seq — filter and sort from one index.
         sa.Index("ix_events_run_thread_seq", "run_id", "thread_id", "seq"),
+        # D1: redelivery (at-least-once streams, container replacement replay)
+        # must never duplicate a row. The unique key makes the insert
+        # idempotent; the consumer treats an IntegrityError as "already
+        # persisted" and just acks.
+        sa.UniqueConstraint("run_id", "thread_id", "seq",
+                            name="uq_events_run_thread_seq"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -41,4 +51,4 @@ class Event(Base):
     payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)
     sdk_message_uuid: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
 
-    run: Mapped["Run"] = relationship(back_populates="events")
+    run: Mapped[Run] = relationship(back_populates="events")

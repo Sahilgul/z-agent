@@ -18,7 +18,7 @@ from collegium_contracts import (
 
 
 def test_step_event_minimal():
-    e = StepEvent(run_id="r1", lane_id="l1", seq=0, kind=StepKind.COMMAND, title="grep dedupe")
+    e = StepEvent(run_id="r1", thread_id="l1", seq=0, kind=StepKind.COMMAND, title="grep dedupe")
     assert e.sdk_message_uuid is None
     assert e.schema_version == 1
     assert e.detail == {}
@@ -26,7 +26,7 @@ def test_step_event_minimal():
 
 def test_step_event_sdk_uuid_roundtrip():
     e = StepEvent(
-        run_id="r1", lane_id="l1", seq=3, kind=StepKind.MESSAGE,
+        run_id="r1", thread_id="l1", seq=3, kind=StepKind.MESSAGE,
         title="Lead reply", sdk_message_uuid="uuid-abc",
     )
     data = e.model_dump(mode="json")
@@ -34,7 +34,7 @@ def test_step_event_sdk_uuid_roundtrip():
 
 
 def test_typing_delta_has_no_seq():
-    d = TypingDelta(run_id="r1", lane_id="l1", kind=StepKind.THINKING, text="frag")
+    d = TypingDelta(run_id="r1", thread_id="l1", kind=StepKind.THINKING, text="frag")
     assert not hasattr(d, "seq")
 
 

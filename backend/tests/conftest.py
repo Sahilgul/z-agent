@@ -7,12 +7,12 @@ app.db.base uses an in-memory URL and never touches the filesystem.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
-import asyncio
 import uuid
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
 
 # ---- env MUST be set before importing app.* (app.db.base builds engine at import)
 os.environ.setdefault("COLLEGIUM_DB_URL", "sqlite:///:memory:")
@@ -39,20 +39,41 @@ os.environ.setdefault("COLLEGIUM_WORKSPACES_DIR", str(_TMP_ROOT / "workspaces"))
 # fleet-config: real read-only local fixtures
 os.environ.setdefault("COLLEGIUM_FLEET_CONFIG_DIR", str(Path(__file__).resolve().parents[2] / "fleet-config"))
 
-import pytest  # noqa: E402
-from sqlalchemy import create_engine, DateTime  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
-from sqlalchemy.pool import StaticPool  # noqa: E402
-from sqlalchemy.types import TypeDecorator  # noqa: E402
-from datetime import timezone  # noqa: E402
+from datetime import UTC
 
-import app.db.base as db_base  # noqa: E402
-from app.core.config import get_settings  # noqa: E402
-from app.db.models import (  # noqa: E402  (registers all models on Base.metadata)
-    Approval, Delivery, PrLink, EvalCase, EvalRun, Event, IdeaComment,
-    IdeaThread, KnowledgeItem, Playbook, Thread, Mode, Notification, Proposal,
-    Repo, RepoProfile, Plan, PlanStep, Run, TrajectorySummary, Trigger,
-    TriggerEventLog, TriggerEventVerdict, SetupCode, User,
+import pytest
+from sqlalchemy import DateTime, create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.types import TypeDecorator
+
+import app.db.base as db_base
+from app.core.config import get_settings
+from app.db.models import (
+    Approval,
+    Delivery,
+    EvalCase,
+    EvalRun,
+    Event,
+    IdeaComment,
+    IdeaThread,
+    KnowledgeItem,
+    Mode,
+    Notification,
+    Plan,
+    PlanStep,
+    Playbook,
+    PrLink,
+    Proposal,
+    Repo,
+    RepoProfile,
+    Run,
+    SetupCode,
+    Thread,
+    TrajectorySummary,
+    Trigger,
+    TriggerEventLog,
+    User,
 )
 
 
@@ -65,7 +86,7 @@ class TZDateTime(TypeDecorator):
 
     def process_result_value(self, value, dialect):
         if value is not None and getattr(value, "tzinfo", None) is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value
 
 
@@ -214,6 +235,7 @@ class FakeRedis:
         self.delivered: dict[str, set[str]] = {}  # stream -> msg_ids ever delivered to group
         self.acked: dict[str, set[str]] = {}  # stream -> acked msg_ids (H-52)
         self.published: list[tuple[str, str]] = []
+        self.kv: dict[str, str] = {}  # plain GET/SET (ack keys, heartbeat keys)
 
     def _next_id(self) -> str:
         self._msg_id += 1
@@ -224,6 +246,19 @@ class FakeRedis:
         mid = self._next_id()
         self.streams.setdefault(stream, []).append((mid, dict(fields)))
         return mid
+
+    async def xlen(self, stream: str) -> int:
+        await asyncio.sleep(0)
+        return len(self.streams.get(stream, []))
+
+    async def xautoclaim(self, stream: str, group: str, consumer: str,
+                         min_idle_time: int = 0, start_id: str = "0-0",
+                         count: int = 100):
+        """D4: return pending (delivered, unacked) entries like XAUTOCLAIM."""
+        await asyncio.sleep(0)
+        pel = self.pel.get(stream, {})
+        entries = [(mid, dict(fields)) for mid, fields in list(pel.items())][:count]
+        return ["0-0", entries, []]
 
     async def xack(self, stream: str, group: str, *msg_ids: str) -> int:
         await asyncio.sleep(0)
@@ -268,6 +303,22 @@ class FakeRedis:
             if picked:
                 out.append((stream, picked))
         return out
+
+    async def get(self, key: str):
+        await asyncio.sleep(0)
+        return self.kv.get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None,
+                  nx: bool = False):
+        await asyncio.sleep(0)
+        if nx and key in self.kv:
+            return None
+        self.kv[key] = value
+        return True
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        await asyncio.sleep(0)
+        return True
 
     async def rpush(self, key: str, *values: str) -> int:
         await asyncio.sleep(0)
@@ -345,7 +396,7 @@ class FakeRelay:
         self.published: list[tuple[str, dict]] = []
         self._delta_started: set[str] = set()
 
-    def subscribe(self, run_id: str):
+    def subscribe(self, run_id: str, user_id=None):
         import asyncio
         q: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self.subscribers.setdefault(run_id, set()).add(q)
@@ -366,7 +417,7 @@ class FakeRelay:
     async def _fanout(self, run_id, message):
         self.published.append((run_id, message))
 
-    async def publish_global(self, message):
+    async def publish_global(self, message, user_id=None):
         self.published.append(("__global__", message))
 
     async def close(self):
@@ -377,8 +428,10 @@ class FakeControl:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
 
-    async def interrupt(self, thread_id):
-        self.calls.append((f"thread:{thread_id}:control", {"type": "interrupt"}))
+    async def interrupt(self, thread_id, *, wait_ack=False, ack_timeout_s=10.0):
+        self.calls.append((f"thread:{thread_id}:control",
+                           {"type": "interrupt", "wait_ack": wait_ack}))
+        return False  # no worker in unit tests — callers fall back to exit checks
 
     async def nudge(self, thread_id, text):
         self.calls.append((f"thread:{thread_id}:control", {"type": "nudge", "text": text}))
@@ -386,10 +439,13 @@ class FakeControl:
     async def set_mode(self, thread_id, permission_mode):
         self.calls.append((f"thread:{thread_id}:control", {"type": "mode", "mode": permission_mode}))
 
-    async def kill(self, thread_id):
-        self.calls.append((f"thread:{thread_id}:control", {"type": "kill"}))
+    async def kill(self, thread_id, *, wait_ack=False, ack_timeout_s=10.0):
+        self.calls.append((f"thread:{thread_id}:control",
+                           {"type": "kill", "wait_ack": wait_ack}))
+        return False
 
-    async def resolve_approval(self, approval_id, decision, reason=""):
+    async def resolve_approval(self, approval_id, decision, reason="",
+                               edited_args=None):
         self.calls.append((f"approval:{approval_id}:decision", {"decision": decision, "reason": reason}))
 
     async def close(self):
@@ -446,10 +502,12 @@ class FakeRunManager:
         self.switched_modes: list[tuple] = []
 
     async def create_run(self, source, initiated_by, mode_name, task, repo=None,
-                         work_item_id=None, autonomy=None, fanout=None, delivery_id=None):
+                         work_item_id=None, autonomy=None, fanout=None, delivery_id=None,
+                         idempotency_key=None):
+        from collegium_contracts import RunStage
+
         from app.db.base import get_session
         from app.services.runs import transition
-        from collegium_contracts import RunStage
         run = Run(id=str(uuid.uuid4()), created_by=initiated_by, source=source,
                   mode=mode_name, autonomy=autonomy or "supervised", title=task[:256],
                   repo=repo, work_item_id=work_item_id, delivery_id=delivery_id)
@@ -487,10 +545,11 @@ class FakeRunManager:
         # resume_run re-executes the existing row and reads its mode/title/
         # repo; the old fake hardcoded mode="ask", title="resumed" and hid
         # whether the forwarding actually happened).
+        from collegium_contracts import RunStage
+
         from app.db.base import get_session
         from app.db.models.run import Run as _Run
         from app.services.runs import transition
-        from collegium_contracts import RunStage
         forwarded = {}
         session = get_session()
         try:
@@ -580,8 +639,10 @@ class FakeApprovalService:
     def __init__(self):
         self.decisions: list[tuple] = []
 
-    async def decide(self, approval_id, decision, decided_by, reason=""):
+    async def decide(self, approval_id, decision, decided_by, reason="",
+                     edited_args=None):
         self.decisions.append((approval_id, decision, decided_by, reason))
+        return SimpleNamespace(decision=decision)
 
     async def start(self):
         pass
@@ -631,8 +692,9 @@ def app_client(monkeypatch, engine):
     `with client` block, and instead wire app.state by hand with fakes so
     no Redis/Docker/scheduler starts. Depends on `engine` so requests run
     inside the test's rolled-back transaction."""
-    import app.main as main_mod
     from fastapi.testclient import TestClient
+
+    import app.main as main_mod
 
     fake_relay = FakeRelay()
     fake_control = FakeControl()
@@ -708,13 +770,43 @@ def admin_client(app_client, admin_user):
 
 # silence unused-import warnings for re-exports used by test modules
 __all__ = [
-    "Approval", "Delivery", "PrLink", "EvalCase", "EvalRun", "Event", "IdeaComment",
-    "IdeaThread", "KnowledgeItem", "Playbook", "Thread", "Mode", "Notification",
-    "Proposal", "Repo", "RepoProfile", "Plan", "PlanStep", "Run",
-    "TrajectorySummary", "Trigger", "TriggerEventLog", "SetupCode", "User",
-    "FakeRedis", "FakeRelay", "FakeControl", "FakeThreadManager", "FakeRunManager",
-    "FakeIngest", "FakeApprovalService", "FakeGateway", "FakeAdoClient", "make_token",
-    "FakeResponse", "FakeAsyncClient", "install_fake_httpx",
+    "Approval",
+    "Delivery",
+    "EvalCase",
+    "EvalRun",
+    "Event",
+    "FakeAdoClient",
+    "FakeApprovalService",
+    "FakeAsyncClient",
+    "FakeControl",
+    "FakeGateway",
+    "FakeIngest",
+    "FakeRedis",
+    "FakeRelay",
+    "FakeResponse",
+    "FakeRunManager",
+    "FakeThreadManager",
+    "IdeaComment",
+    "IdeaThread",
+    "KnowledgeItem",
+    "Mode",
+    "Notification",
+    "Plan",
+    "PlanStep",
+    "Playbook",
+    "PrLink",
+    "Proposal",
+    "Repo",
+    "RepoProfile",
+    "Run",
+    "SetupCode",
+    "Thread",
+    "TrajectorySummary",
+    "Trigger",
+    "TriggerEventLog",
+    "User",
+    "install_fake_httpx",
+    "make_token",
 ]
 
 

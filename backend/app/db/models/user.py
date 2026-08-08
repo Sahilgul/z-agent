@@ -6,7 +6,7 @@ bump; never delete (shared threads keep attribution).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -15,7 +15,7 @@ from app.db.base import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -36,7 +36,7 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
-    setup_codes: Mapped[list["SetupCode"]] = relationship(back_populates="user")
+    setup_codes: Mapped[list[SetupCode]] = relationship(back_populates="user")
 
 
 class SetupCode(Base):
@@ -53,4 +53,4 @@ class SetupCode(Base):
     expires_at: Mapped[datetime] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
-    user: Mapped["User"] = relationship(back_populates="setup_codes")
+    user: Mapped[User] = relationship(back_populates="setup_codes")

@@ -10,10 +10,19 @@ from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # Known-insecure shipped secrets — rejected in any non-dev deployment.
 _INSECURE_JWT_SECRETS = frozenset({"", "dev-only-change-me"})
 _INSECURE_PAT_KEYS = frozenset({"", "dev-only-byo-pat-key"})
+
+
+def _contracts_version() -> str:
+    """Installed collegium-contracts version (importlib metadata — the
+    package does not export __version__)."""
+    try:
+        from importlib.metadata import version
+        return version("collegium-contracts")
+    except Exception:
+        return ""
 
 
 class Settings(BaseSettings):
@@ -54,6 +63,16 @@ class Settings(BaseSettings):
     pip_cache_volume: str = "collegium_pip-cache"
     npm_cache_volume: str = "collegium_npm-cache"
 
+    # ---- Remediation feature flags (all default OFF; flip per rollout wave).
+    # Wave 3: DB-backed capacity reservations / repo write locks.
+    feature_db_concurrency: bool = False
+    # Wave 3: worker spawn tools become backend-orchestrated spawn requests.
+    feature_backend_swarm: bool = False
+    # Wave 1: acked control delivery for interrupt/kill/spawn_done.
+    feature_control_acks: bool = False
+    # Wave 2: enforce durable engine storage before ENGINE=custom serves.
+    feature_durable_resume: bool = False
+
     jwt_secret: str = ""  # no shipped default — set COLLEGIUM_JWT_SECRET (C-13)
     jwt_ttl_seconds: int = 60 * 60 * 24 * 14
     admin_usernames: str = "sahil"
@@ -85,7 +104,10 @@ class Settings(BaseSettings):
     workspaces_dir: Path = Path("./workspaces")
     evidence_dir: Path = Path("./evidence")  # Playwright screenshots + run evidence artifacts
     fleet_config_dir: Path = Path("./fleet-config")
-    playbooks_dir: Path = Path("./playbooks")  # SKILL.md playbooks (mode.playbook_ids resolve here)
+    # Anchored to the backend package root, not the process CWD — the shipped
+    # playbooks live in backend/playbooks and must seed regardless of where
+    # uvicorn/pytest was launched from.
+    playbooks_dir: Path = Path(__file__).resolve().parents[2] / "playbooks"
     scripts_dir: Path = Path("./scripts")  # git-credential-collegium lives here
 
     fetch_interval_seconds: int = 300
@@ -96,9 +118,28 @@ class Settings(BaseSettings):
     # denies deterministically, so the backend has to expire the row
     # on the same clock or the console keeps offering a dead button.
     approval_timeout_seconds: int = 900
+    # The worker engine's idle linger (seconds) before a thread completes.
+    # Passed to the container verbatim so the backend and worker clocks agree (C8).
+    idle_ttl_seconds: int = 900
+    # Container env has a hard ceiling (Docker/ECS ~ most platforms fail or
+    # truncate past a few hundred KB total). Oversize TASK_PROMPT /
+    # PERSONA_PROMPT payloads must fail with a clear error instead of a
+    # mangled container start (C6).
+    max_env_payload_bytes: int = 128 * 1024
 
-    global_thread_cap: int = 12
+    # H3: ONE authoritative capacity number, owned here. The worker's
+    # SWARM_MAX_SLICES is a request-batching hint, not a capacity source.
+    global_thread_cap: int = 100
     default_thread_budget_usd: float = 5.0
+    # LiteLLM virtual-key TTL (LiteLLM duration syntax, e.g. "24h"). Backstop
+    # for orphaned keys — see GatewayClient.mint_key.
+    gateway_key_ttl: str = "24h"
+    # F4: the worker engine's local cost ESTIMATE (reminder thresholds) must
+    # price tokens the way the gateway does, or the 50%/80% reminders drift
+    # from real spend. USD per 1M (input, output) tokens; injected into the
+    # container env and read by worker/engine/llm.py.
+    worker_price_in_per_mtok: float = 2.0
+    worker_price_out_per_mtok: float = 6.0
 
     # PREWARM_POOL (documented-not-implemented): semantics live in
     # orchestrator/thread_manager.py; prewarm_status() reports {"enabled": false}.
@@ -153,7 +194,7 @@ class Settings(BaseSettings):
         return {u.strip() for u in self.admin_usernames.split(",") if u.strip()}
 
     @model_validator(mode="after")
-    def _enforce_secret_defaults(self) -> "Settings":
+    def _enforce_secret_defaults(self) -> Settings:
         # C-13: a shipped/empty jwt_secret lets anyone forge a JWT and bypass
         # PIN auth. Fail fast at startup unless the dev opt-in is set, so a
         # production deploy that forgot COLLEGIUM_JWT_SECRET refuses to boot
@@ -175,6 +216,42 @@ class Settings(BaseSettings):
                 "Set COLLEGIUM_BYO_PAT_ENCRYPTION_KEY in the environment/.env, or set "
                 "COLLEGIUM_DEV_INSECURE_DEFAULTS=1 only for local dev."
             )
+        # M1: a real deploy that forgot COLLEGIUM_REDIS_URL would silently run
+        # the in-process fakeredis — streams, control channels, and heartbeats
+        # all evaporate on restart. Fail fast outside dev.
+        if not self.dev_insecure_defaults and self.redis_url.startswith("memory://"):
+            raise ValueError(
+                "COLLEGIUM_REDIS_URL is unset (memory://0 in-process fake). "
+                "Real deployments must point at a Redis instance; set "
+                "COLLEGIUM_REDIS_URL, or COLLEGIUM_DEV_INSECURE_DEFAULTS=1 "
+                "for local dev."
+            )
+        # Wave 2 gate: durable resume requires durable engine storage — an
+        # empty engine_database_url means MemorySaver, so "resume" would be a
+        # DB-only fiction. Only enforced once the rollout flag is on.
+        if (
+            self.feature_durable_resume
+            and self.engine_runtime == "custom"
+            and not self.engine_database_url
+        ):
+            raise ValueError(
+                "COLLEGIUM_FEATURE_DURABLE_RESUME=1 with ENGINE=custom requires "
+                "COLLEGIUM_ENGINE_DATABASE_URL (durable checkpointer DSN). "
+                "Without it the engine falls back to in-memory checkpoints and "
+                "resume cannot survive container replacement."
+            )
+        # Contract/image agreement: a semver-tagged worker image must match the
+        # installed contracts package version, or backend and worker speak
+        # different schemas. Non-semver tags (test/dev images) skip the check.
+        if not self.dev_insecure_defaults and self.engine_runtime == "custom":
+            tag = self.worker_image.rsplit(":", 1)[-1] if ":" in self.worker_image else ""
+            if tag and tag[0].isdigit() and tag != _contracts_version():
+                raise ValueError(
+                    f"Worker image tag '{tag}' does not match installed "
+                    f"collegium-contracts version '{_contracts_version()}'. "
+                    "Rebuild the worker image against the pinned contracts "
+                    "package so backend and worker share one schema."
+                )
         return self
 
 

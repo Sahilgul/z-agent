@@ -6,7 +6,7 @@ unresolved changed_by descriptor = no run.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -30,7 +30,7 @@ class TriggerEvent(BaseModel):
         description="ADO identity descriptor; resolved to users.id FAIL-CLOSED by the identity service",
     )
     payload: dict[str, Any] = Field(default_factory=dict)
-    received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def idempotency_key(self) -> tuple[str, str, int]:

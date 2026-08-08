@@ -5,7 +5,7 @@ human comments forever (author_type=agent, author_ref='counsel').
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,7 +14,7 @@ from app.db.base import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class IdeaThread(Base):
@@ -31,7 +31,7 @@ class IdeaThread(Base):
     promoted_run_id: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
-    comments: Mapped[list["IdeaComment"]] = relationship(back_populates="thread", cascade="all, delete-orphan")
+    comments: Mapped[list[IdeaComment]] = relationship(back_populates="thread", cascade="all, delete-orphan")
 
 
 class IdeaComment(Base):
@@ -44,4 +44,4 @@ class IdeaComment(Base):
     body: Mapped[str] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
-    thread: Mapped["IdeaThread"] = relationship(back_populates="comments")
+    thread: Mapped[IdeaThread] = relationship(back_populates="comments")

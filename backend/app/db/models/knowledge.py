@@ -7,7 +7,7 @@ embeddings needed (the RAG ban is for code, not curated rows).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
@@ -16,7 +16,7 @@ from app.db.base import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class KnowledgeItem(Base):
@@ -30,6 +30,9 @@ class KnowledgeItem(Base):
     created_by: Mapped[int | None] = mapped_column(sa.ForeignKey("users.id"), nullable=True)
     source_run_id: Mapped[str | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(sa.String(16), default="draft")  # draft|approved|rejected
+    # Free-form metadata (e.g. the bench delta + rejection reason on a
+    # no-silent-skip rejected record). Not part of the retrieval path.
+    payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

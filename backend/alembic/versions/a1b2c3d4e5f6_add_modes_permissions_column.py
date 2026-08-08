@@ -9,9 +9,9 @@ data): the writable/repos scope for a lane spawned under the mode. Topology
 stays code; persona/permissions/playbooks are data on the row. Dialect-neutral
 batch ALTER so it applies on SQLite and Postgres.
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = 'a1b2c3d4e5f6'
 down_revision = '0e64fa6df16b'

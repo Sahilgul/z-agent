@@ -11,12 +11,13 @@ from app.core.config import get_settings
 from app.core.redis_factory import in_memory, make_redis
 from app.core.security import verify_pin
 from app.db.models.event import Event
-from app.db.models.thread import Thread
 from app.db.models.run import Run
+from app.db.models.thread import Thread
 
 
 def test_memory_scheme_returns_shared_fakeredis(monkeypatch):
     monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_DEV_INSECURE_DEFAULTS", "1")  # M1: memory:// is dev-only
     get_settings.cache_clear()
     try:
         a = make_redis()
@@ -31,6 +32,7 @@ def test_memory_scheme_returns_shared_fakeredis(monkeypatch):
 
 async def test_memory_clients_share_the_bus(monkeypatch):
     monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_DEV_INSECURE_DEFAULTS", "1")  # M1: memory:// is dev-only
     get_settings.cache_clear()
     try:
         pub = make_redis()
@@ -66,6 +68,7 @@ async def test_memory_ingest_loop_consumes_without_freezing(session, make_user, 
     loop (monitor stuck at 'loading run…'). The in-memory path must poll AND
     still deliver events."""
     monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_DEV_INSECURE_DEFAULTS", "1")  # M1: memory:// is dev-only
     get_settings.cache_clear()
     try:
         assert in_memory() is True
@@ -103,6 +106,7 @@ async def test_memory_ingest_loop_consumes_without_freezing(session, make_user, 
 
 async def test_memory_relay_delta_poll_delivers(monkeypatch):
     monkeypatch.setenv("COLLEGIUM_REDIS_URL", "memory://0")
+    monkeypatch.setenv("COLLEGIUM_DEV_INSECURE_DEFAULTS", "1")  # M1: memory:// is dev-only
     get_settings.cache_clear()
     try:
         from app.events.relay import Relay

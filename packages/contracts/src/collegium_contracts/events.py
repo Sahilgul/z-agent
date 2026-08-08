@@ -25,7 +25,7 @@ Identifier contract (see identifiers.py): run_id → thread_id → context_id �
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -62,7 +62,7 @@ class StepEvent(BaseModel):
         "The resumption/interrupt unit. None = pre-task / not yet assigned.",
     )
     seq: int = Field(ge=0, description="Monotonic per-thread sequence number")
-    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = Field(default_factory=lambda: datetime.now(UTC))
     kind: StepKind
     title: str = Field(description="One-line summary shown collapsed")
     detail: dict[str, Any] = Field(default_factory=dict, description="Expandable payload")
@@ -85,4 +85,4 @@ class TypingDelta(BaseModel):
     context_id: str | None = None
     kind: StepKind
     text: str
-    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = Field(default_factory=lambda: datetime.now(UTC))

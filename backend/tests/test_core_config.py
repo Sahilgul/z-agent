@@ -52,3 +52,58 @@ def test_bootstrap_admin_defaults_empty(monkeypatch: pytest.MonkeyPatch):
     s = _fresh_settings(monkeypatch, COLLEGIUM_JWT_SECRET="a-real-random-secret")
     assert s.bootstrap_admin_username == ""
     assert s.bootstrap_admin_pin == ""
+
+
+# ---------------------------------------------------------------- Wave 0
+
+def test_memory_redis_rejected_outside_dev(monkeypatch: pytest.MonkeyPatch):
+    """M1: a production-like config without COLLEGIUM_REDIS_URL must fail
+    startup instead of silently running the in-process fakeredis."""
+    monkeypatch.delenv("COLLEGIUM_REDIS_URL", raising=False)
+    with pytest.raises(ValueError, match="COLLEGIUM_REDIS_URL"):
+        _fresh_settings(monkeypatch, COLLEGIUM_JWT_SECRET="a-real-random-secret")
+
+
+def test_memory_redis_allowed_in_dev(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("COLLEGIUM_REDIS_URL", raising=False)
+    s = _fresh_settings(monkeypatch, COLLEGIUM_DEV_INSECURE_DEFAULTS="1")
+    assert s.redis_url.startswith("memory://")
+
+
+def test_durable_resume_requires_engine_db(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("COLLEGIUM_ENGINE_DATABASE_URL", raising=False)
+    with pytest.raises(ValueError, match="COLLEGIUM_ENGINE_DATABASE_URL"):
+        _fresh_settings(
+            monkeypatch,
+            COLLEGIUM_JWT_SECRET="a-real-random-secret",
+            COLLEGIUM_FEATURE_DURABLE_RESUME="1",
+        )
+
+
+def test_worker_image_contract_mismatch_rejected(monkeypatch: pytest.MonkeyPatch):
+    with pytest.raises(ValueError, match="Worker image tag"):
+        _fresh_settings(
+            monkeypatch,
+            COLLEGIUM_JWT_SECRET="a-real-random-secret",
+            COLLEGIUM_WORKER_IMAGE="collegium-worker:9.9.9",
+        )
+
+
+def test_worker_image_non_semver_tag_skips_check(monkeypatch: pytest.MonkeyPatch):
+    s = _fresh_settings(
+        monkeypatch,
+        COLLEGIUM_JWT_SECRET="a-real-random-secret",
+        COLLEGIUM_WORKER_IMAGE="collegium-worker:test",
+    )
+    assert s.worker_image == "collegium-worker:test"
+
+
+def test_feature_flags_default_off(monkeypatch: pytest.MonkeyPatch):
+    for flag in ("COLLEGIUM_FEATURE_DB_CONCURRENCY", "COLLEGIUM_FEATURE_BACKEND_SWARM",
+                 "COLLEGIUM_FEATURE_CONTROL_ACKS", "COLLEGIUM_FEATURE_DURABLE_RESUME"):
+        monkeypatch.delenv(flag, raising=False)
+    s = _fresh_settings(monkeypatch, COLLEGIUM_JWT_SECRET="a-real-random-secret")
+    assert s.feature_db_concurrency is False
+    assert s.feature_backend_swarm is False
+    assert s.feature_control_acks is False
+    assert s.feature_durable_resume is False

@@ -200,6 +200,143 @@ wheels = [
 ]
 
 [[package]]
+name = "collegium"
+version = "0.1.0"
+source = { virtual = "." }
+
+[[package]]
+name = "collegium-backend"
+version = "0.1.0"
+source = { editable = "backend" }
+dependencies = [
+    { name = "alembic" },
+    { name = "apscheduler" },
+    { name = "bcrypt" },
+    { name = "collegium-contracts" },
+    { name = "docker" },
+    { name = "fakeredis" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt" },
+    { name = "python-dotenv" },
+    { name = "redis" },
+    { name = "sqlalchemy" },
+    { name = "structlog" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13" },
+    { name = "apscheduler", specifier = ">=3.10,<4" },
+    { name = "bcrypt", specifier = ">=4.2" },
+    { name = "collegium-contracts", editable = "packages/contracts" },
+    { name = "docker", specifier = ">=7" },
+    { name = "fakeredis", specifier = ">=2.26" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "pydantic", specifier = ">=2.9,<3" },
+    { name = "pydantic-settings", specifier = ">=2.5" },
+    { name = "pyjwt", specifier = ">=2.9" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "redis", specifier = ">=5,<7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "collegium-contracts"
+version = "0.1.0"
+source = { editable = "packages/contracts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.9,<3" }]
+
+[[package]]
+name = "collegium-maps"
+version = "0.1.0"
+source = { editable = "packages/maps" }
+
+[[package]]
+name = "collegium-worker"
+version = "0.1.0"
+source = { editable = "worker" }
+dependencies = [
+    { name = "collegium-contracts" },
+    { name = "httpx" },
+    { name = "langchain-core" },
+    { name = "langchain-mcp-adapters" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "langgraph-checkpoint" },
+    { name = "langgraph-checkpoint-postgres" },
+    { name = "langgraph-prebuilt" },
+    { name = "redis" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+cas = [
+    { name = "claude-agent-sdk" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "fakeredis" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "claude-agent-sdk", marker = "extra == 'cas'", specifier = "==0.2.128" },
+    { name = "collegium-contracts", editable = "packages/contracts" },
+    { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "langchain-core", specifier = ">=1.4,<2" },
+    { name = "langchain-mcp-adapters", specifier = ">=0.1,<0.2" },
+    { name = "langchain-openai", specifier = ">=1.4,<2" },
+    { name = "langgraph", specifier = "==1.2.10" },
+    { name = "langgraph-checkpoint", specifier = "==4.1.1" },
+    { name = "langgraph-checkpoint-postgres", specifier = "==3.1.1" },
+    { name = "langgraph-prebuilt", specifier = "==1.1.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
+    { name = "redis", specifier = ">=5,<7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "websockets", specifier = ">=13,<16" },
+]
+provides-extras = ["cas", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "fakeredis", specifier = ">=2.37.0" }]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1428,135 +1565,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/31/3fa0b807d7e21515cd975e7fe5c039d52ac3e9401a96d6ad68dae6305215/xxhash-3.8.1-cp312-cp312-win_amd64.whl", hash = "sha256:2256e80e4960ee282f63428adb349cb7f8bd8efe4db770d88eb815f4b9860724", size = 32741, upload-time = "2026-07-06T10:45:09.42Z" },
     { url = "https://files.pythonhosted.org/packages/b8/05/86feada74e239600e6875aa507afb40482a89b92700aa74a92da83bdcb77/xxhash-3.8.1-cp312-cp312-win_arm64.whl", hash = "sha256:9df56e6df96a60590935e22373041cccc91fd55858763dcffb55bf63b3a2b396", size = 29234, upload-time = "2026-07-06T10:45:10.809Z" },
 ]
-
-[[package]]
-name = "collegium"
-version = "0.1.0"
-source = { virtual = "." }
-
-[[package]]
-name = "collegium-backend"
-version = "0.1.0"
-source = { editable = "backend" }
-dependencies = [
-    { name = "alembic" },
-    { name = "apscheduler" },
-    { name = "bcrypt" },
-    { name = "docker" },
-    { name = "fakeredis" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "redis" },
-    { name = "sqlalchemy" },
-    { name = "structlog" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "collegium-contracts" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "apscheduler", specifier = ">=3.10,<4" },
-    { name = "bcrypt", specifier = ">=4.2" },
-    { name = "docker", specifier = ">=7" },
-    { name = "fakeredis", specifier = ">=2.26" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "pydantic", specifier = ">=2.9,<3" },
-    { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "pyjwt", specifier = ">=2.9" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "redis", specifier = ">=5,<7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "structlog", specifier = ">=24" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-    { name = "collegium-contracts", editable = "packages/contracts" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "collegium-contracts"
-version = "0.1.0"
-source = { editable = "packages/contracts" }
-dependencies = [
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.9,<3" }]
-
-[[package]]
-name = "collegium-maps"
-version = "0.1.0"
-source = { editable = "packages/maps" }
-
-[[package]]
-name = "collegium-worker"
-version = "0.1.0"
-source = { editable = "worker" }
-dependencies = [
-    { name = "httpx" },
-    { name = "langchain-core" },
-    { name = "langchain-mcp-adapters" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "langgraph-checkpoint" },
-    { name = "langgraph-checkpoint-postgres" },
-    { name = "langgraph-prebuilt" },
-    { name = "redis" },
-    { name = "websockets" },
-    { name = "collegium-contracts" },
-]
-
-[package.optional-dependencies]
-cas = [
-    { name = "claude-agent-sdk" },
-]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "claude-agent-sdk", marker = "extra == 'cas'", specifier = "==0.2.128" },
-    { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "langchain-core", specifier = ">=1.4,<2" },
-    { name = "langchain-mcp-adapters", specifier = ">=0.1,<0.2" },
-    { name = "langchain-openai", specifier = ">=1.4,<2" },
-    { name = "langgraph", specifier = "==1.2.10" },
-    { name = "langgraph-checkpoint", specifier = "==4.1.1" },
-    { name = "langgraph-checkpoint-postgres", specifier = "==3.1.1" },
-    { name = "langgraph-prebuilt", specifier = "==1.1.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
-    { name = "redis", specifier = ">=5,<7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
-    { name = "websockets", specifier = ">=13,<16" },
-    { name = "collegium-contracts", editable = "packages/contracts" },
-]
-provides-extras = ["cas", "dev"]
 
 [[package]]
 name = "zstandard"

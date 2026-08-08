@@ -1,6 +1,7 @@
+from datetime import UTC, datetime, timedelta
+
 import jwt
 import pytest
-from datetime import datetime, timedelta, timezone
 
 from app.core import security
 from app.core.config import get_settings
@@ -53,7 +54,7 @@ def test_check_lockout_passes_when_unlocked(session, make_user):
     # check_lockout must read as unlocked) was unexercised. Commit the
     # past time, expire the session, and re-fetch so check_lockout reads
     # the value that round-tripped through the DB.
-    u.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+    u.locked_until = datetime.now(UTC) - timedelta(minutes=1)
     session.commit()
     session.expire_all()
     reloaded = session.get(User, u.id)
@@ -62,7 +63,7 @@ def test_check_lockout_passes_when_unlocked(session, make_user):
 
 def test_check_lockout_raises_when_locked(make_user, session):
     u = make_user("locked", status="active")
-    u.locked_until = datetime.now(timezone.utc) + timedelta(minutes=10)
+    u.locked_until = datetime.now(UTC) + timedelta(minutes=10)
     session.commit()
     with pytest.raises(Exception) as exc:
         security.check_lockout(u)
@@ -83,7 +84,7 @@ def test_record_failed_attempt_lockout_threshold(session, make_user):
     assert u.locked_until is not None
     # M-69: verify the lockout duration is LOCKOUT_MINUTES (15), not just
     # "not None" — a regression that changed the window would otherwise pass.
-    expected = datetime.now(timezone.utc) + timedelta(minutes=security.LOCKOUT_MINUTES)
+    expected = datetime.now(UTC) + timedelta(minutes=security.LOCKOUT_MINUTES)
     delta = abs((u.locked_until - expected).total_seconds())
     assert delta < 5, f"lockout duration off by {delta}s (expected {security.LOCKOUT_MINUTES}m)"
 
@@ -91,7 +92,7 @@ def test_record_failed_attempt_lockout_threshold(session, make_user):
 def test_record_success_resets(session, make_user):
     u = make_user("succ", status="active")
     u.failed_pin_attempts = 3
-    u.locked_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+    u.locked_until = datetime.now(UTC) + timedelta(minutes=5)
     session.commit()
     security.record_success(session, u)
     assert u.failed_pin_attempts == 0

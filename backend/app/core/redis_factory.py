@@ -36,4 +36,16 @@ def make_redis(decode_responses: bool = True):
             _fake_server = fakeredis.FakeServer()
         return fakeredis.aioredis.FakeRedis(server=_fake_server,
                                             decode_responses=decode_responses)
-    return redis.from_url(url, decode_responses=decode_responses)
+    # M4: health + timeouts on the REAL client. Without them a silently
+    # dropped TCP connection (NAT idle timeout, LB recycle) wedged blocking
+    # reads forever — the ingest consumer and approval BLPOPs hung with no
+    # error until a restart. The server closes idle connections via `timeout`,
+    # so health-check pings must beat that window.
+    return redis.from_url(
+        url,
+        decode_responses=decode_responses,
+        socket_connect_timeout=5.0,
+        socket_keepalive=True,
+        health_check_interval=30,
+        retry_on_timeout=True,
+    )

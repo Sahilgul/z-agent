@@ -1,4 +1,3 @@
-import pytest
 
 from app.core.fleet import get_fleet_config
 
@@ -6,7 +5,6 @@ from app.core.fleet import get_fleet_config
 def test_get_fleet_config_returns_repos_and_graph():
     get_fleet_config.cache_clear()
     repos, graph = get_fleet_config()
-    names = {r.name for r in repos}
     assert len(repos) >= 1
     assert hasattr(graph, "services")
     assert hasattr(graph, "call_chain")

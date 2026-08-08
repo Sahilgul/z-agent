@@ -16,9 +16,9 @@ Revision ID: i4d5e6f7a8b9
 Revises: h3c4d5e6f7a8
 Create Date: 2026-08-05 19:00:00.000000
 """
-from alembic import op
 from sqlalchemy import inspect
 
+from alembic import op
 
 revision = 'i4d5e6f7a8b9'
 down_revision = 'h3c4d5e6f7a8'

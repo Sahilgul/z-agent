@@ -13,3 +13,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/collegium_contracts"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "I", "UP", "B", "RUF", "BLE"]
+ignore = ["B008", "BLE001", "RUF059", "RUF001", "RUF002", "RUF003", "UP042"]

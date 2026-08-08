@@ -11,6 +11,7 @@ from app.db.models.mode import Mode
 from app.db.models.notification import Notification
 from app.db.models.proposal import Proposal
 from app.db.models.repo import Repo, RepoProfile
+from app.db.models.reservation import CapacityReservation
 from app.db.models.run import Plan, PlanStep, Run
 from app.db.models.thread import Thread
 from app.db.models.trajectory import TrajectorySummary
@@ -18,9 +19,30 @@ from app.db.models.trigger import Trigger, TriggerEventLog, TriggerEventVerdict
 from app.db.models.user import SetupCode, User
 
 __all__ = [
-    "Approval", "Delivery", "PrLink", "EvalCase", "EvalRun", "Event",
-    "IdeaComment", "IdeaThread", "KnowledgeItem", "Playbook", "Mode",
-    "Notification", "Proposal", "Repo", "RepoProfile", "Plan", "PlanStep",
-    "Run", "Thread", "TrajectorySummary", "Trigger", "TriggerEventLog",
-    "TriggerEventVerdict", "SetupCode", "User",
+    "Approval",
+    "CapacityReservation",
+    "Delivery",
+    "EvalCase",
+    "EvalRun",
+    "Event",
+    "IdeaComment",
+    "IdeaThread",
+    "KnowledgeItem",
+    "Mode",
+    "Notification",
+    "Plan",
+    "PlanStep",
+    "Playbook",
+    "PrLink",
+    "Proposal",
+    "Repo",
+    "RepoProfile",
+    "Run",
+    "SetupCode",
+    "Thread",
+    "TrajectorySummary",
+    "Trigger",
+    "TriggerEventLog",
+    "TriggerEventVerdict",
+    "User",
 ]

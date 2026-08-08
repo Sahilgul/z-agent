@@ -9,9 +9,9 @@ Revision ID: j5e6f7a8b9c0
 Revises: i4d5e6f7a8b9
 Create Date: 2026-08-05 19:30:00.000000
 """
-from alembic import op
 from sqlalchemy import inspect
 
+from alembic import op
 
 revision = 'j5e6f7a8b9c0'
 down_revision = 'i4d5e6f7a8b9'
