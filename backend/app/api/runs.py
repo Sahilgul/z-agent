@@ -28,6 +28,23 @@ from app.services.sessions import replay_events
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
+async def _publish_user_message(request: Request, event: dict) -> None:
+    """Push a persisted user-message event over the run socket. The persisted
+    row bypasses the worker's Redis stream, so it never reaches an open
+    browser on its own — without this the user's bubble only appears after a
+    reload. Best-effort: the row is durable, the fanout is not."""
+    try:
+        from collegium_contracts import StepEvent, StepKind
+        await request.app.state.relay.publish_step(event["run_id"], StepEvent(
+            run_id=event["run_id"], thread_id=event["thread_id"],
+            seq=event["seq"], kind=StepKind.MESSAGE,
+            title=event["title"], detail=event["detail"],
+            sdk_message_uuid=None,
+        ))
+    except Exception:  # WS fanout is best-effort; the row is durable
+        pass
+
+
 def _persist_user_message(run_id: str, thread_id: str, text: str) -> dict | None:
     """Store the user's own message as a message event so the transcript is a
     real conversation — otherwise only the agent's side renders and follow-ups
@@ -427,9 +444,13 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                     session.close()
                 # The user's message is the task for the new blueprint's
                 # first thread; persist it as a user event so the transcript
-                # shows the question before the new lane's answer.
+                # shows the question before the new lane's answer — and push
+                # it live, or the sender's bubble only appears after a reload
+                # (the chained lane's answer streams in without it).
                 if intent.text:
-                    _persist_user_message(run_id, thread_id, intent.text)
+                    user_event = _persist_user_message(run_id, thread_id, intent.text)
+                    if user_event is not None:
+                        await _publish_user_message(request, user_event)
                 extra = {"resume_from_thread_id": thread_id}
                 if intent.text:
                     extra["task"] = intent.text
@@ -447,20 +468,8 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                 await run_manager._run_blueprint(run_id, run_mode, extra_artifacts=extra)
             elif intent.text:
                 user_event = _persist_user_message(run_id, thread_id, intent.text)
-                # The persisted row bypasses the worker's Redis stream, so it
-                # never reaches an open browser on its own — push it over the
-                # run socket or the user's bubble only appears after a reload.
                 if user_event is not None:
-                    try:
-                        from collegium_contracts import StepEvent, StepKind
-                        await request.app.state.relay.publish_step(run_id, StepEvent(
-                            run_id=user_event["run_id"], thread_id=user_event["thread_id"],
-                            seq=user_event["seq"], kind=StepKind.MESSAGE,
-                            title=user_event["title"], detail=user_event["detail"],
-                            sdk_message_uuid=None,
-                        ))
-                    except Exception:  # WS fanout is best-effort; the row is durable
-                        pass
+                    await _publish_user_message(request, user_event)
                 # Turn-X @mention expansion: a mention that names a repo not
                 # already mounted can't be hot-added (Docker mounts are fixed
                 # at container start), so the thread is replaced-with-resume

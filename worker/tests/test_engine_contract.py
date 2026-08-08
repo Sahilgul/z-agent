@@ -423,6 +423,22 @@ def test_make_llm_uses_reasoning_subclass_for_reasoning_models():
     assert not isinstance(plain_llm, ChatOpenAIReasoning)
 
 
+def test_make_llm_requests_streaming_usage():
+    """A custom base_url disables langchain-openai's stream_usage default (it
+    only auto-enables against api.openai.com), so the gateway never got
+    include_usage, usage_metadata arrived empty, and the turn-metrics footer
+    rendered timings with null token counts. make_llm must opt in explicitly
+    (the gateway forwards it; drop_params shields routes that don't)."""
+    import os
+    from unittest.mock import patch
+
+    from worker.engine.llm import make_llm
+
+    with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://gw", "LITELLM_API_KEY": "k"}):
+        llm = make_llm("kimi-k2.6")
+    assert llm.stream_usage is True
+
+
 def test_make_llm_omits_temperature_for_fixed_param_models():
     """A model flagged supports_temperature=False must not get the param
     (fixed-parameter deployments 400 on it). The whole CURRENT fleet accepts

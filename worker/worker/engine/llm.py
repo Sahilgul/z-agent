@@ -419,6 +419,13 @@ def make_llm(
         "streaming": streaming and caps.supports_streaming,
         "timeout": 600,
         "max_retries": 0,  # we handle retries ourselves (with_gateway_retry)
+        # A custom base_url disables langchain-openai's stream_usage default
+        # (it only auto-enables against api.openai.com), so the stream would
+        # carry no usage chunk and usage_metadata would arrive empty — the
+        # turn-metrics footer would show timings with null token counts.
+        # Verified: the gateway forwards include_usage to the provider, and
+        # drop_params shields any route that doesn't support it.
+        "stream_usage": True,
     }
     # Fixed-param deployments (none in the current fleet — probed 2026-08-08)
     # 400 on non-default temperature: omit the param entirely for those

@@ -1,6 +1,8 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+from collegium_contracts import StepKind
+
 from app.db.models.approval import Approval
 from app.db.models.event import Event
 from app.db.models.knowledge import KnowledgeItem
@@ -761,6 +763,15 @@ def test_post_intent_send_message_terminal_thread_revives_with_task(auth_client,
     assert rm.nudged == []
     assert rm.blueprinted == [("r1", "ask", {
         "resume_from_thread_id": "l1", "task": "one more thing"})]
+    # The chained lane's answer streams in over the worker's Redis pipe, but
+    # the persisted user row bypasses it — the API must push the user's own
+    # bubble over the run socket itself or it only renders after a reload.
+    steps = [msg for rid, msg in services["relay"].published
+             if rid == "r1" and msg["type"] == "step"]
+    assert len(steps) == 1
+    event = steps[0]["event"]
+    assert event.thread_id == "l1" and event.kind == StepKind.MESSAGE
+    assert event.detail == {"text": "one more thing", "role": "user"}
 
 
 def test_run_serializer_includes_failure_reason(auth_client, session, make_user):
