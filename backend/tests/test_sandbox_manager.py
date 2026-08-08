@@ -34,9 +34,15 @@ class _FakeContainers:
         return self._container
 
 
+class _FakeImages:
+    def get(self, ref):
+        return object()
+
+
 class _FakeDockerClient:
     def __init__(self, container=None):
         self.containers = _FakeContainers(container)
+        self.images = _FakeImages()
 
 
 def _patch_docker(monkeypatch, client):

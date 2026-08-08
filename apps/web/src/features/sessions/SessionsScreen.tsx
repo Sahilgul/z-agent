@@ -528,6 +528,18 @@ export function SessionsScreen() {
             className="mb-s2 max-h-36 min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-0 py-1.5 shadow-none focus-visible:ring-0"
           />
           <div className="flex flex-wrap items-center gap-s2">
+            {/* The picker leads the row (left of the mode chips): at draft
+                time it chooses the run's model; with a run open it stages a
+                mid-conversation switch — the next message chains a fresh
+                lane on the prior session volume (backend SEND_MESSAGE
+                payload.model path). */}
+            <ModelPicker
+              selected={models}
+              onChange={onModelsChange}
+              reasoning={reasoning}
+              onReasoningChange={onReasoningChange}
+              multi={false}
+            />
             <FilterChips
               options={[...MODE_OPTIONS]}
               value={current ? (pendingMode ?? (current.mode as Mode)) : mode}
@@ -537,17 +549,6 @@ export function SessionsScreen() {
                   ? new Set<Mode>(["development"])
                   : undefined
               }
-            />
-            {/* The picker is ALWAYS available: at draft time it chooses the
-                run's model; with a run open it stages a mid-conversation
-                switch — the next message chains a fresh lane on the prior
-                session volume (backend SEND_MESSAGE payload.model path). */}
-            <ModelPicker
-              selected={models}
-              onChange={onModelsChange}
-              reasoning={reasoning}
-              onReasoningChange={onReasoningChange}
-              multi={false}
             />
             {!current && (
               <>

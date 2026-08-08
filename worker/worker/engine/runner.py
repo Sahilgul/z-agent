@@ -313,7 +313,38 @@ class EngineRunner:
 
     # ---------------------------------------------------------------- turn loop
 
+    async def _startup_selfcheck(self) -> None:
+        """Prove the two lifelines (Redis, gateway) answer BEFORE the turn
+        loop starts — fail loud in seconds instead of hanging mute forever.
+        A wedged connect used to leave the container alive but silent: no
+        heartbeat, no event, no log line past init, and the UI sat at
+        "working on it" until the reaper. Raises on failure; the exception
+        propagates out of run() and the container exits non-zero (the
+        backend reaper then stamps the thread failed)."""
+        try:
+            await asyncio.wait_for(self.forwarder.redis.ping(), timeout=5.0)
+        except Exception as exc:
+            raise RuntimeError(
+                f"startup self-check failed: Redis unreachable at "
+                f"{self.redis_url} ({type(exc).__name__}: {exc})") from exc
+        base = os.environ.get("LITELLM_BASE_URL", "").strip().rstrip("/")
+        if base:
+            # The health route lives at the proxy root, not under /v1.
+            root = base[:-3] if base.endswith("/v1") else base
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(f"{root}/health/liveliness")
+                    resp.raise_for_status()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"startup self-check failed: gateway unreachable at "
+                    f"{root} ({type(exc).__name__}: {exc})") from exc
+        log.info("startup self-check ok (run=%s thread=%s redis+gateway reachable)",
+                 self.run_id, self.thread_id)
+
     async def run(self) -> int:
+        await self._startup_selfcheck()
         if self.canary:
             from collegium_contracts import StepKind
             await self.forwarder.publish_events([self.emitter._next(
@@ -392,8 +423,15 @@ class EngineRunner:
                     await self._inject_and_run(graph, config, nudge, episodic)
         except Exception as exc:
             self.status = "failed"
-            await self.forwarder.heartbeat(self.status)
-            await self._emit_engine_error(str(exc))
+            # Best-effort: when the failure IS the transport (Redis down), the
+            # failure heartbeat/event can't land either — exit non-zero anyway
+            # and let the backend reaper stamp the row from liveness evidence.
+            try:
+                await self.forwarder.heartbeat(self.status)
+                await self._emit_engine_error(str(exc))
+            except Exception:
+                log.error("failure-state publish failed (run=%s thread=%s)",
+                          self.run_id, self.thread_id)
             return 1
         finally:
             tasks = (control_listener, control_pump, heartbeat, watchdog)
@@ -708,6 +746,11 @@ class EngineRunner:
 
 
 def main() -> int:
+    # Post-mortem X-ray for a wedged worker: `docker kill -s USR1 <container>`
+    # dumps every thread's live stack to the container log — no py-spy install
+    # needed (and the thread network has no internet to install it anyway).
+    import faulthandler
+    faulthandler.register(signal.SIGUSR1)
     runner = EngineRunner()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

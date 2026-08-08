@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import docker
-from docker.errors import DockerException
+from docker.errors import DockerException, ImageNotFound
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -263,6 +263,18 @@ class SandboxManager:
         starting a stranger. The new thread's session_id is also set from the
         old one (handled in thread_manager.spawn) so RESUME_SESSION_ID is wired."""
         client = _docker()
+        # Fail fast with a legible reason when the worker image isn't built
+        # on this host: docker-py's containers.run would otherwise try to
+        # PULL collegium-worker:<tag> — it isn't published, so the run died
+        # on a raw registry 404 ("pull access denied") with no hint that the
+        # fix is a local build.
+        try:
+            client.images.get(self.settings.worker_image)
+        except ImageNotFound as exc:
+            raise SandboxUnavailable(
+                f"worker image {self.settings.worker_image!r} is not present on the "
+                "Docker host — build it locally (the image is not published to a "
+                "registry) or point COLLEGIUM_WORKER_IMAGE at a built tag") from exc
         volumes: dict[str, dict] = {}
 
         # Mount the prior thread's session directory when resuming; otherwise the

@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 
 from app.core.logging import get_logger
 from app.core.redis_factory import in_memory, make_redis
 from app.core.timefmt import aware_utc
 from app.db.base import get_session
+from app.db.models.run import Run
 from app.db.models.thread import Thread
 from app.orchestrator.semaphores import ACTIVE_STATUSES
 
@@ -33,17 +35,32 @@ _MIN_WRITE_INTERVAL_SECONDS = 10.0
 # left alone; a dead one can never remain "running" forever.
 STALE_AFTER_SECONDS = 180.0
 REAPER_INTERVAL_SECONDS = 60.0
+# A thread whose CONTAINER IS STILL RUNNING but whose beats stopped is a
+# wedged worker (alive-but-mute: process up, event loop stuck, no events —
+# the run sits at "working" forever and the composer can never deliver).
+# Reap it only past a LONGER staleness and only while the bus is provably
+# alive (a real Redis outage silences every thread at once — that's the
+# mass-reap guard, not an excuse to leave zombies).
+WEDGED_AFTER_SECONDS = 300.0
+_BUS_ALIVE_WINDOW_SECONDS = REAPER_INTERVAL_SECONDS * 2
 
 
 class HeartbeatPersister:
-    def __init__(self, thread_manager=None) -> None:
+    def __init__(self, thread_manager=None, relay=None) -> None:
         self.redis = make_redis()
         # F1: optional — when wired, a reaped (terminal) thread goes through
         # the unified cleanup (settle cost, release + clear key). Without it
         # the reap only stamps the row and leaks the key/spend.
         self.thread_manager = thread_manager
+        # Optional — when wired, a reap that orphans a run mid-work publishes
+        # the INTERRUPTED stage so the UI swaps to resume immediately.
+        self.relay = relay
         self._task: asyncio.Task | None = None
         self._reaper_task: asyncio.Task | None = None
+        # Monotonic ts of the last heartbeat message seen on the bus (any
+        # thread). The wedged-reap discriminator: bus alive + one thread
+        # mute = that thread is dead; bus mute = Redis itself is down.
+        self._last_beat_mono = 0.0
         # thread_id -> monotonic ts of last DB write, to avoid a write per beat.
         self._last_write: dict[str, float] = {}
         # thread_id -> last status we persisted. A status CHANGE must always be
@@ -84,17 +101,33 @@ class HeartbeatPersister:
             # heartbeat_at is a naive-timestamp column: Postgres returns it
             # tz-less even though writers stamp aware UTC — coerce before
             # subtracting or the reaper dies every pass.
-            stale = [t for t in rows
+            stale = [(t.id, t.container_id, t.run_id,
+                      (now - aware_utc(t.heartbeat_at)).total_seconds())
+                     for t in rows
                      if t.heartbeat_at is not None
                      and (now - aware_utc(t.heartbeat_at)).total_seconds() > STALE_AFTER_SECONDS]
-            candidates = [(t.id, t.container_id) for t in stale if t.container_id]
         finally:
             session.close()
-        for thread_id, container_id in candidates:
+        bus_alive = (time.monotonic() - getattr(self, "_last_beat_mono", 0.0)
+                     ) < _BUS_ALIVE_WINDOW_SECONDS
+        for thread_id, container_id, run_id, stale_s in stale:
+            if not container_id:
+                continue
             running = await asyncio.to_thread(
                 sandbox_manager.container_running, container_id)
             if running:
-                continue  # Redis blip, not a death — leave the row alone
+                # Redis blip vs wedged worker: reap only when the bus is
+                # provably alive (other beats landing) and the silence is
+                # long past the 15s heartbeat cadence.
+                if not (bus_alive and stale_s > WEDGED_AFTER_SECONDS):
+                    continue
+                log.warning("wedged worker reaped: container alive, heartbeat mute",
+                            thread_id=thread_id, container_id=container_id[:12],
+                            stale_s=int(stale_s))
+                # Free the session volume and stop the zombie for real — a
+                # DB-only reap would leave the container burning budget.
+                await asyncio.to_thread(
+                    sandbox_manager.wait_for_container_exit, container_id)
             session = get_session()
             try:
                 thread = session.get(Thread, thread_id)
@@ -103,10 +136,15 @@ class HeartbeatPersister:
                 thread.status = "failed"
                 thread.finished_at = now
                 session.commit()
-                log.warning("thread reaped: container gone with stale heartbeat",
-                            thread_id=thread_id, container_id=container_id[:12])
+                if not running:
+                    log.warning("thread reaped: container gone with stale heartbeat",
+                                thread_id=thread_id, container_id=container_id[:12])
             finally:
                 session.close()
+            # A reap can orphan the RUN at a working stage — no live threads,
+            # no future events, composer accepting text into a dead session.
+            # Move the run to INTERRUPTED so the UI offers resume.
+            await self._interrupt_orphaned_run(run_id)
             if getattr(self, "thread_manager", None) is not None:
                 # F1/F3: the reap is a terminal transition — settle spend and
                 # release/clear the key like every other terminal path.
@@ -132,6 +170,48 @@ class HeartbeatPersister:
                 except Exception:
                     log.warning("key-leak sweep cleanup failed",
                                 thread_id=tid, exc_info=True)
+
+    async def _interrupt_orphaned_run(self, run_id: str) -> None:
+        """If the reap took the run's last live thread while the run was
+        mid-work, transition it to INTERRUPTED (resumable) and publish the
+        stage — otherwise the UI never learns the session died. Runs with a
+        surviving live thread, or parked on the human (awaiting_user /
+        verifying / terminal), are untouched."""
+        from collegium_contracts import RunStage
+
+        from app.services.runs import transition
+        session = get_session()
+        available: list[str] = []
+        try:
+            run = session.get(Run, run_id)
+            if run is None or run.stage not in (
+                    RunStage.QUEUED.value, RunStage.PROVISIONING.value,
+                    RunStage.INVESTIGATING.value, RunStage.PLANNING.value,
+                    RunStage.DEVELOPING.value):
+                return
+            siblings = session.query(Thread).filter_by(run_id=run_id).all()
+            if any(t.status in ACTIVE_STATUSES or t.status == "input_required"
+                   for t in siblings):
+                return
+            transition(run, RunStage.INTERRUPTED)
+            available = list(run.available_actions)
+            session.commit()
+            log.warning("run interrupted: last live thread reaped",
+                        run_id=run_id)
+        except Exception as exc:
+            session.rollback()
+            log.warning("orphaned-run interrupt failed", run_id=run_id,
+                        error=str(exc)[:200])
+            return
+        finally:
+            session.close()
+        relay = getattr(self, "relay", None)
+        if relay is not None:
+            try:
+                await relay.publish_run_stage(
+                    run_id, RunStage.INTERRUPTED.value, available)
+            except Exception:
+                log.warning("orphaned-run stage publish failed", run_id=run_id)
 
     async def _loop(self) -> None:
         pubsub = self.redis.pubsub()
@@ -163,6 +243,7 @@ class HeartbeatPersister:
             return
         thread_id = data.get("thread_id")
         if thread_id:
+            self._last_beat_mono = time.monotonic()
             self._persist(thread_id, data.get("status"))
 
     def _persist(self, thread_id: str, status: str | None) -> None:

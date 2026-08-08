@@ -17,7 +17,14 @@ from collegium_contracts import StepEvent, TypingDelta
 
 class Forwarder:
     def __init__(self, redis_url: str, run_id: str, thread_id: str) -> None:
-        self.redis = redis.from_url(redis_url, decode_responses=True)
+        # Bounded sockets on THIS client only: the forwarder issues short ops
+        # (set/publish/xadd), so a wedged connect/read must error out instead
+        # of freezing the worker forever (the alive-but-mute container: no
+        # beats, no events, UI stuck at "working"). Long-blocking clients
+        # (control pubsub, approval BLPOP) keep their own connections.
+        self.redis = redis.from_url(
+            redis_url, decode_responses=True,
+            socket_connect_timeout=5, socket_timeout=30)
         self.run_id = run_id
         self.thread_id = thread_id
         self.stream_key = f"events:{run_id}"

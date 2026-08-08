@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
     run_manager = RunManager(ingest, relay, thread_manager, control,
                              approvals=approval_service, spawn_bridge=spawn_bridge)
     # F1: the reaper's terminal stamps run the unified money/key cleanup.
-    heartbeat_persister = HeartbeatPersister(thread_manager=thread_manager)
+    heartbeat_persister = HeartbeatPersister(thread_manager=thread_manager, relay=relay)
 
     app.state.relay = relay
     app.state.ingest = ingest
