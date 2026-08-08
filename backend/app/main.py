@@ -47,7 +47,12 @@ def _check_migrations() -> None:
     import app.db.base as db_base
 
     # backend/app/main.py -> parents[1] is the backend dir holding alembic.ini.
-    alembic_cfg = Config(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "alembic.ini"))
+    backend_dir = __import__("pathlib").Path(__file__).resolve().parents[1]
+    alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+    # script_location in alembic.ini is relative ("alembic") and resolves
+    # against the process CWD — wrong when WORKDIR isn't the backend dir
+    # (the VM image runs uvicorn from /app). Pin it absolute.
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     head = ScriptDirectory.from_config(alembic_cfg).get_current_head()
     with db_base.engine.connect() as conn:
         try:
