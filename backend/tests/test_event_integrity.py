@@ -40,6 +40,8 @@ async def test_duplicate_event_redelivery_is_acked_not_duplicated(
     await c._process("events:r1", "2-0", payload, "r1")  # redelivery
     rows = session.query(Event).filter_by(run_id="r1", thread_id="l1").all()
     assert len(rows) == 1
+    # Legacy frames (no event_uid) keep the worker's seq as the dedupe key —
+    # the unique constraint is what makes this redelivery idempotent (D1).
     assert rows[0].seq == 7
     assert fake_redis.acked["events:r1"] == {"1-0", "2-0"}  # no pending buildup
 
@@ -97,7 +99,7 @@ async def test_unregister_drains_pending_entries(session, make_user, fake_redis)
     assert res
     await c._drain_run("events:r1")
     rows = session.query(Event).filter_by(run_id="r1", thread_id="l1").all()
-    assert [r.seq for r in rows] == [3]
+    assert [r.seq for r in rows] == [3]  # legacy frame (no uid): worker seq kept
 
 
 async def test_forwarder_caps_stream_length():

@@ -39,6 +39,9 @@ class Event(Base):
         # persisted" and just acks.
         sa.UniqueConstraint("run_id", "thread_id", "seq",
                             name="uq_events_run_thread_seq"),
+        # W-B6: the emission uid is the redelivery dedupe key. NULLs (backend-
+        # originated rows, pre-W-B6 workers) never collide on SQLite/Postgres.
+        sa.Index("uq_events_run_event_uid", "run_id", "event_uid", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -50,5 +53,8 @@ class Event(Base):
     title: Mapped[str] = mapped_column(sa.String(512), default="")
     payload: Mapped[dict] = mapped_column(sa.JSON, default=dict)
     sdk_message_uuid: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    # W-B6: uuid4 stamped once by the producer at emission; the ingest
+    # consumer dedupes on it and assigns the DB-authoritative seq.
+    event_uid: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
 
     run: Mapped[Run] = relationship(back_populates="events")

@@ -25,9 +25,11 @@ def _consumer(fake_redis, relay=None):
     return c
 
 
-def _step(run_id="r1", thread_id="l1", seq=0, kind=StepKind.MESSAGE, uuid_=None):
+def _step(run_id="r1", thread_id="l1", seq=0, kind=StepKind.MESSAGE, uuid_=None,
+          event_uid=None):
     return StepEvent(run_id=run_id, thread_id=thread_id, seq=seq, kind=kind,
-                      title="t", detail={"x": 1}, sdk_message_uuid=uuid_)
+                      title="t", detail={"x": 1}, sdk_message_uuid=uuid_,
+                      event_uid=event_uid)
 
 
 async def test_process_persists_event_and_acks(session, make_user, fake_redis):
@@ -38,36 +40,75 @@ async def test_process_persists_event_and_acks(session, make_user, fake_redis):
     session.commit()
     relay = _consumer(fake_redis).relay
     c = _consumer(fake_redis, relay)
-    ev = _step(seq=5, uuid_="sdk-1")
+    ev = _step(seq=5, uuid_="sdk-1", event_uid="ev-1")
     await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
     row = session.query(Event).one()
-    assert row.seq == 5
+    # W-B6: the DB counter is the authoritative allocator — the worker's
+    # seq=5 was a hint; the stored + relayed seq is 0 (the thread's first).
+    assert row.seq == 0
     assert row.type == "message"
     assert row.sdk_message_uuid == "sdk-1"
+    assert row.event_uid == "ev-1"
     assert row.payload == {"x": 1}
     session.expire_all()
     thread_row = session.get(Thread, "l1")
-    assert thread_row.next_seq == 6
+    assert thread_row.next_seq == 1
     run_row = session.get(Run, "r1")
     assert run_row.last_active_at is not None
-    assert any(m[0] == "r1" and m[1].get("type") == "step" for m in relay.published)
+    steps = [m for m in relay.published if m[0] == "r1" and m[1].get("type") == "step"]
+    assert steps and steps[0][1]["event"].seq == 0  # relay carries the authoritative seq
     # H-52: a processed message must be ACKed (consumer-group durability) —
     # the old test never asserted xack, so a regression that dropped the ack
     # (re-processing every message on restart) still passed.
     assert "1-0" in fake_redis.acked.get("events:r1", set())
 
 
-async def test_process_advances_next_seq_only_when_higher(session, make_user, fake_redis):
+async def test_process_assigns_db_seq_under_contention(session, make_user, fake_redis):
+    """W-B6 regression: a backend-direct write (user message, next_seq 1)
+    followed by a worker event whose file still says seq=0 must BOTH store —
+    the old worker-authoritative path IntegrityError'd the worker event into
+    the void (one event eaten per user message)."""
     u = make_user("a")
     run = Run(id="r1", created_by=u.id, mode="ask")
-    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=10)
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
     session.add_all([run, thread])
     session.commit()
+    # Backend-direct write: the user message takes seq 0 and bumps next_seq.
+    thread.next_seq = 1
+    session.add(Event(run_id="r1", thread_id="l1", seq=0, type="message",
+                      title="user", payload={"text": "hi"}))
+    session.commit()
+    # The worker's concurrent event (stale seq=0 hint, fresh uid) must land
+    # at the DB-authoritative seq=1 — not collide and vanish.
     c = _consumer(fake_redis)
-    ev = _step(seq=3)
+    ev = _step(seq=0, event_uid="ev-worker-1")
     await c._process("events:r1", "1-0", {"payload": ev.model_dump_json()}, "r1")
+    rows = session.query(Event).order_by(Event.seq).all()
+    assert [r.seq for r in rows] == [0, 1]  # BOTH events stored
+    assert rows[1].event_uid == "ev-worker-1"
     session.expire_all()
-    assert session.get(Thread, "l1").next_seq == 10  # 3 < 10, no advance
+    assert session.get(Thread, "l1").next_seq == 2
+
+
+async def test_process_dedupes_on_event_uid_redelivery(session, make_user, fake_redis):
+    """W-B6: a redelivered stream entry (at-least-once) with the SAME uid is
+    stored once; the re-delivery re-relays the authoritative seq (covers the
+    commit-then-crash-before-relay window) and acks."""
+    u = make_user("a")
+    run = Run(id="r1", created_by=u.id, mode="ask")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="running", next_seq=0)
+    session.add_all([run, thread])
+    session.commit()
+    relay = _consumer(fake_redis).relay
+    c = _consumer(fake_redis, relay)
+    ev = _step(seq=0, event_uid="ev-x")
+    payload = {"payload": ev.model_dump_json()}
+    await c._process("events:r1", "1-0", payload, "r1")
+    await c._process("events:r1", "1-0", dict(payload), "r1")  # redelivery
+    assert session.query(Event).count() == 1
+    steps = [m for m in relay.published if m[1].get("type") == "step"]
+    assert len(steps) == 2  # relayed twice (idempotent on the web side)
+    assert all(m[1]["event"].seq == 0 for m in steps)
 
 
 async def test_process_captures_session_id_from_turn_complete(session, make_user, fake_redis):

@@ -211,28 +211,92 @@ class IngestConsumer:
 
         session = get_session()
         duplicate = False
+        assigned_seq = event.seq
         try:
-            session.add(Event(
-                run_id=event.run_id, thread_id=event.thread_id, seq=event.seq,
-                ts=event.ts, type=event.kind.value, title=event.title[:512],
-                payload=event.detail, sdk_message_uuid=event.sdk_message_uuid,
-            ))
-            # D1: flush the insert FIRST so a (run_id, thread_id, seq)
-            # collision is caught before any side-effect columns update —
-            # a redelivered entry is acked and skipped, never double-stored.
-            try:
-                session.flush()
-            except sa.exc.IntegrityError:
-                session.rollback()
-                duplicate = True
-                log.info("duplicate event redelivered — acking without store",
-                         run_id=run_id, thread_id=event.thread_id, seq=event.seq)
+            # W-B6: dedupe on the emission uid FIRST — a redelivered stream
+            # entry is the SAME event, regardless of what seq either side
+            # believed. Backend-direct writes (user message, pin) share the
+            # thread.next_seq counter, so the worker's seq file can no longer
+            # collide one event per turn into the void.
+            if event.event_uid:
+                existing = (session.query(Event)
+                            .filter_by(run_id=event.run_id, event_uid=event.event_uid)
+                            .first())
+                if existing is not None:
+                    duplicate = True
+                    assigned_seq = existing.seq
+                    log.info("duplicate event redelivered — re-relaying without store",
+                             run_id=run_id, thread_id=event.thread_id,
+                             event_uid=event.event_uid)
+            if not duplicate:
+                if event.event_uid:
+                    # W-B6: uid-stamped events get the DB counter as the ONLY
+                    # persisting allocator. Lock the thread row so a
+                    # concurrent backend-direct write (user message) and this
+                    # worker event serialize instead of racing the unique
+                    # constraint.
+                    thread = (session.query(Thread)
+                              .filter_by(id=event.thread_id)
+                              .with_for_update().one_or_none())
+                    if thread is not None:
+                        assigned_seq = thread.next_seq
+                        thread.next_seq = assigned_seq + 1
+                # Legacy frames (no uid): the worker's seq stays the dedupe
+                # key — the (run_id, thread_id, seq) constraint below is what
+                # makes an at-least-once redelivery idempotent there (D1).
+                session.add(Event(
+                    run_id=event.run_id, thread_id=event.thread_id, seq=assigned_seq,
+                    ts=event.ts, type=event.kind.value, title=event.title[:512],
+                    payload=event.detail, sdk_message_uuid=event.sdk_message_uuid,
+                    event_uid=event.event_uid,
+                ))
+                # D1: flush the insert FIRST so a (run_id, thread_id, seq)
+                # collision is caught before any side-effect columns update —
+                # a redelivered entry is acked and skipped, never double-stored.
+                try:
+                    session.flush()
+                except sa.exc.IntegrityError:
+                    session.rollback()
+                    if event.event_uid:
+                        # The uid lost an INSERT race — the winning row is the
+                        # authority. Re-relay ONLY with the winner's seq; if no
+                        # row matches the uid, the collision was on the legacy
+                        # seq constraint and this event was never stored — ack
+                        # it silently rather than re-relaying a phantom.
+                        winner = (session.query(Event)
+                                  .filter_by(run_id=event.run_id, event_uid=event.event_uid)
+                                  .first())
+                        if winner is not None:
+                            duplicate = True
+                            assigned_seq = winner.seq
+                            log.info("duplicate event redelivered — re-relaying winner seq",
+                                     run_id=run_id, thread_id=event.thread_id,
+                                     event_uid=event.event_uid)
+                        else:
+                            log.warning("uid event collided on seq but no uid row — dropping",
+                                        run_id=run_id, thread_id=event.thread_id,
+                                        event_uid=event.event_uid)
+                            await self.redis.xack(stream, GROUP, msg_id)
+                            return
+                    else:
+                        duplicate = True
+                        log.info("duplicate event redelivered — acking without store",
+                                 run_id=run_id, thread_id=event.thread_id, seq=assigned_seq)
             if duplicate:
+                # Re-relay before acking: a crash between the original commit
+                # and the original relay is exactly how this redelivery
+                # happened — the row exists but subscribers never saw it. The
+                # web store dedupes on (thread_id, seq, role), so a healthy
+                # redelivery is a no-op there. The event object carries the
+                # AUTHORITATIVE seq, not the worker's hint.
+                if event.seq != assigned_seq:
+                    event = event.model_copy(update={"seq": assigned_seq})
+                await self.relay.publish_step(run_id, event)
                 await self.redis.xack(stream, GROUP, msg_id)
                 return
             thread = session.get(Thread, event.thread_id)
-            if thread and event.seq >= thread.next_seq:
-                thread.next_seq = event.seq + 1
+            if thread and assigned_seq >= thread.next_seq:
+                thread.next_seq = assigned_seq + 1
             # Resumable identity capture (B1/D8): key on the DETAIL FIELD of a
             # STATUS event, never on the event title — the custom engine emits
             # an "engine identity" event at boot and the SDK's session_id rides
@@ -255,6 +319,11 @@ class IngestConsumer:
             session.commit()
         finally:
             session.close()
+
+        # W-B6: from here on, the event carries the DB-authoritative seq —
+        # the transcript mirror and the relayed frame must agree with the row.
+        if event.seq != assigned_seq:
+            event = event.model_copy(update={"seq": assigned_seq})
 
         # Flat JSONL mirror. Best-effort: the row is already committed, so a
         # transcript failure must not re-deliver or drop the event.

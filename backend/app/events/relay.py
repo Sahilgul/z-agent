@@ -70,6 +70,13 @@ class Relay:
             "type": "run_stage", "stage": stage, "available_actions": available_actions,
         })
 
+    async def publish_approval_resolved(self, run_id: str, approval_id: str, decision: str) -> None:
+        # W-H5: terminal transitions stamp zombie cards server-side; consoles
+        # drop the card on this frame instead of waiting for a poll.
+        await self._fanout(run_id, {
+            "type": "approval_resolved", "approval_id": approval_id, "decision": decision,
+        })
+
     async def _fanout(self, run_id: str, message: dict) -> None:
         for queue in list(self.subscribers.get(run_id, set())):
             try:
