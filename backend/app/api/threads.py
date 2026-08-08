@@ -22,6 +22,7 @@ class NudgeBody(BaseModel):
 
 class LaneActionBody(BaseModel):
     run_id: str
+    note: str = ""
 
 
 @router.post("/{thread_id}/nudge")
@@ -67,6 +68,8 @@ async def pin_finding(thread_id: str, body: LaneActionBody, request: Request,
     # publish a spoofed "pinned" status for an arbitrary thread_id.
     if load_thread_for_run(body.run_id, thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
-    relay = request.app.state.relay
-    await relay.publish_thread_status(body.run_id, thread_id, "pinned")
+    # W5-L2: route through run_manager.pin_finding so the pin is a durable
+    # run event (this route used to publish ONLY the cosmetic "pinned"
+    # status flash, which the next lanes poll reverted).
+    await request.app.state.run_manager.pin_finding(body.run_id, thread_id, note=body.note)
     return {"ok": True}

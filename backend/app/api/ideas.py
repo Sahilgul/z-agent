@@ -95,9 +95,21 @@ async def promote(thread_id: int, request: Request, user: User = Depends(current
     become the task brief; the run id is pinned back on the thread."""
     try:
         task = ideas.plan_task_for(thread_id)
+        # W9-H1: claim BEFORE creating the run — two concurrent promotes must
+        # mint exactly one run; the loser gets a 409.
+        ideas.claim_promotion(thread_id)
+    except ideas.AlreadyPromotedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ideas.IdeasError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     run_manager = request.app.state.run_manager
-    run = await run_manager.create_run(
-        source="button", initiated_by=user.id, mode_name="plan", task=task)
-    return ideas.mark_promoted(thread_id, run.id)
+    try:
+        run = await run_manager.create_run(
+            source="button", initiated_by=user.id, mode_name="plan", task=task)
+        return ideas.mark_promoted(thread_id, run.id)
+    except Exception:
+        # W9-H1: release the claim on ANY failure past the claim — including
+        # a minted run whose mark_promoted blipped (the thread is then
+        # retryable; the orphaned run is cheap and visible in history).
+        ideas.release_promotion_claim(thread_id)
+        raise

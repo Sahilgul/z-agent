@@ -23,12 +23,19 @@ class _FakeRelay:
         self.stages = []
         self.threads = []
         self.notes = []
+        self.fanouts = []
     async def publish_run_stage(self, run_id, stage, actions):
         self.stages.append((run_id, stage, actions))
     async def publish_thread_status(self, run_id, thread_id, status):
         self.threads.append((run_id, thread_id, status))
     async def publish_note(self, run_id, text):
         self.notes.append((run_id, text))
+    async def _fanout(self, run_id, msg):
+        self.fanouts.append((run_id, msg))
+    async def publish_approval_resolved(self, run_id, approval_id, decision):
+        self.fanouts.append((run_id, {
+            "type": "approval_resolved", "approval_id": approval_id, "decision": decision,
+        }))
 
 
 class _FakeControl:
@@ -371,6 +378,9 @@ async def test_execute_failure_path_marks_failed(session, make_user, monkeypatch
     # The failure reason is surfaced in the chat as a run-scoped note —
     # without this the user sees a silently-failed run with no explanation.
     assert relay.notes[-1] == ("r1", "run failed: agent crashed")
+    # W-H13: AND persisted on the row, so a session opened after the failure
+    # renders the banner without having been connected at failure time.
+    assert session.get(Run, "r1").failure_reason == "agent crashed"
 
 
 async def test_guarded_execute_reraises_cancelled_not_marks_failed(session, make_user, monkeypatch):
@@ -581,7 +591,11 @@ async def test_pin_finding_records_event(session, make_user):
     ev = session.query(Event).filter_by(run_id="r1", type="pin").one()
     assert ev.thread_id == "l1"
     assert ev.payload["note"] == "dedupe key is normalize()"
-    assert relay.threads[-1] == ("r1", "l1", "pinned")
+    # W5-L2: no fake "pinned" thread status (the next poll reverted it) —
+    # the announcement is a run note now, the pin itself is the durable row.
+    assert relay.notes and relay.notes[-1][0] == "r1"
+    assert "dedupe key" in relay.notes[-1][1]
+    assert not any(t[2] == "pinned" for t in relay.threads)
 
 
 async def test_pin_finding_wrong_run_raises(session, make_user):

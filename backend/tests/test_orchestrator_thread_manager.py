@@ -14,9 +14,13 @@ class _FakeIngest:
 
 
 class _FakeRelay:
-    def __init__(self): self.published = []
+    def __init__(self):
+        self.published = []
+        self.notes = []
     async def publish_thread_status(self, run_id, thread_id, status):
         self.published.append((run_id, thread_id, status))
+    async def publish_note(self, run_id, text):
+        self.notes.append((run_id, text))
 
 
 class _FakeGateway:
@@ -299,8 +303,12 @@ async def test_spawn_many_queues_past_cap_and_announces_once(session, make_user,
 
     threads = await lm.spawn_many(run, _specs(1), [], queue_poll_seconds=0.001)
     assert len(threads) == 1
-    queued = [p for p in relay.published if p[2] == "queued"]
-    assert len(queued) == 1
+    # W-H7: the queued notice is a run-scoped NOTE now (the old fake-id
+    # thread_status named a thread that didn't exist yet, so every UI client
+    # dropped it silently). One note per waiting thread, mentioning the persona.
+    notes = [n for n in relay.notes if "queued" in n[1]]
+    assert len(notes) == 1
+    assert "explorer" in notes[0][1]
 
 
 async def test_spawn_many_skips_thread_on_non_capacity_failure(session, make_user, monkeypatch):
@@ -325,7 +333,8 @@ async def test_finish_thread_stops_container_stamps_completed_releases_key(
                        container_id="c-1", gateway_key="vk-1"))
     session.commit()
     gw = _FakeGateway()
-    lm = ThreadManager(_FakeIngest(), _FakeRelay(), gw)
+    relay = _FakeRelay()
+    lm = ThreadManager(_FakeIngest(), relay, gw)
     stopped = []
     monkeypatch.setattr(thread_manager.sandbox_manager, "stop_container",
                         lambda cid: stopped.append(cid))
@@ -336,6 +345,9 @@ async def test_finish_thread_stops_container_stamps_completed_releases_key(
     assert row.status == "completed"
     assert row.finished_at is not None
     assert gw.deleted == ["vk-1"]
+    # W8-L2: node-end fans the status out — the console's tile goes dark
+    # immediately instead of waiting on the next threads poll.
+    assert (run.id, "l1", "completed") in relay.published
 
 
 async def test_finish_thread_leaves_terminal_threads_alone(

@@ -118,6 +118,10 @@ def test_approve_repo_scope_requires_repo(session, make_user):
     item = knowledge.draft("lesson", "trig", u.id)
     with pytest.raises(knowledge.KnowledgeError):
         knowledge.approve(item.id, "repo", decided_by=u.id)
+    # W9-M6: repo-scope approvals validate against the registry — register it.
+    from app.db.models.repo import Repo
+    session.add(Repo(name="ServerApp", integration_branch="main", status="ready"))
+    session.commit()
     out = knowledge.approve(item.id, "repo", decided_by=u.id, repo="ServerApp")
     assert out["repo"] == "ServerApp"
 
@@ -243,3 +247,28 @@ async def test_prompt_block_cached_per_run(session, make_user, monkeypatch):
     assert first == second and calls["n"] == 1
     assert "[global] g" in first
     knowledge.clear_run_cache("run-x")
+
+
+# ------------------------------------------------------- W9-M5/M6 (web W5a)
+def test_pending_serializes_proposed_scope(session, make_user):
+    """W9-M5: the inbox selector defaults from proposed_scope, so the row
+    must carry it out of pending() (it used to live only in the Approval
+    payload, invisible to the knowledge screen)."""
+    u = make_user()
+    knowledge.draft("lesson", "trig", u.id, proposed_scope="repo", repo="LivekitScribe")
+    rows = knowledge.pending()
+    assert rows[0]["proposed_scope"] == "repo"
+
+
+def test_approve_repo_scope_validates_against_registry(session, make_user):
+    """W9-M6: free-typed repo names black-holed the lesson — repo scope now
+    422s unless the name is a live registry entry."""
+    from app.db.models.repo import Repo
+    u = make_user()
+    item = knowledge.draft("lesson", "trig", u.id)
+    with pytest.raises(knowledge.KnowledgeError, match="not in the registry"):
+        knowledge.approve(item.id, "repo", u.id, repo="typo-repo")
+    session.add(Repo(name="LivekitScribe", integration_branch="main", status="ready"))
+    session.commit()
+    out = knowledge.approve(item.id, "repo", u.id, repo="LivekitScribe")
+    assert out["scope"] == "repo" and out["repo"] == "LivekitScribe"

@@ -51,7 +51,19 @@ def test_validate_remote_success(monkeypatch):
         stdout = "abc123\trefs/heads/pg-main\ndef456\trefs/heads/main\n"
     monkeypatch.setattr(repos.subprocess, "run", lambda *a, **k: R())
     branches = validate_remote("https://x", "pat")
-    assert branches == ["pg-main", "main"]
+    # W9-M7: canonical HEAD names sort first so the picker's default is the
+    # integration line, not whatever the remote listed alphabetically.
+    assert branches == ["main", "pg-main"]
+
+
+def test_validate_remote_head_first_ordering(monkeypatch):
+    class R:
+        returncode = 0
+        stderr = ""
+        stdout = ("a\trefs/heads/zeta\nb\trefs/heads/develop\nc\trefs/heads/alpha\n"
+                  "d\trefs/heads/master\n")
+    monkeypatch.setattr(repos.subprocess, "run", lambda *a, **k: R())
+    assert validate_remote("https://x", "pat") == ["master", "develop", "alpha", "zeta"]
 
 
 def test_validate_remote_failure(monkeypatch):

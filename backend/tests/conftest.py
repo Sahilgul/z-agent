@@ -417,6 +417,11 @@ class FakeRelay:
     async def _fanout(self, run_id, message):
         self.published.append((run_id, message))
 
+    async def publish_approval_resolved(self, run_id, approval_id, decision):
+        self.published.append((run_id, {
+            "type": "approval_resolved", "approval_id": approval_id, "decision": decision,
+        }))
+
     async def publish_global(self, message, user_id=None):
         self.published.append(("__global__", message))
 

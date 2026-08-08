@@ -168,6 +168,17 @@ def test_thread_env_writable_includes_fleet_pat(session, make_user):
     assert env["PERMISSION_MODE"] == "acceptEdits"
 
 
+def test_thread_env_agent_rnd_maps_to_goal(session, make_user):
+    """W-B3: the web's swarm mode is "agent-rnd" but the worker engine has no
+    such Mode — every UI-started swarm used to die at spawn with
+    InvalidModeError. Threads of a swarm run boot as goal-directed."""
+    run, thread = _make_run_thread(session, make_user)
+    run.mode = "agent-rnd"
+    mgr = sb.SandboxManager()
+    env = mgr.thread_env(run, thread, "task", "persona", "default", writable=False)
+    assert env["MODE"] == "goal"
+
+
 def test_thread_env_resume_session(session, make_user):
     run, thread = _make_run_thread(session, make_user, session_id="sess-9")
     mgr = sb.SandboxManager()

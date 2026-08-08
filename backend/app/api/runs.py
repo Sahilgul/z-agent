@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.deps import current_user
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.run import Plan, Run
 from app.db.models.thread import Thread
@@ -89,9 +90,10 @@ def _serialize(run: Run) -> dict:
         "id": run.id, "mode": run.mode, "autonomy": run.autonomy, "stage": run.stage,
         "title": run.title, "auto_summary": run.auto_summary, "repo": run.repo,
         "work_item_id": run.work_item_id, "available_actions": run.available_actions,
+        "failure_reason": run.failure_reason,
         "cost_usd": run.cost_usd, "tokens": run.tokens,
-        "last_active_at": run.last_active_at.isoformat() if run.last_active_at else None,
-        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "last_active_at": iso_z(run.last_active_at),
+        "created_at": iso_z(run.created_at),
     }
 
 
@@ -181,10 +183,10 @@ def run_threads(run_id: str, user: User = Depends(current_user)):
             "id": l.id, "persona": l.persona, "repo_scope": l.repo_scope,
             "status": l.status, "cost_usd": l.cost_usd, "budget_usd": l.budget_usd,
             "steps": l.next_seq, "forked_from_session_id": l.forked_from_session_id,
-            "heartbeat_at": l.heartbeat_at.isoformat() if l.heartbeat_at else None,
+            "heartbeat_at": iso_z(l.heartbeat_at),
             "has_container": l.container_id is not None,
-            "created_at": l.created_at.isoformat() if l.created_at else None,
-            "finished_at": l.finished_at.isoformat() if l.finished_at else None,
+            "created_at": iso_z(l.created_at),
+            "finished_at": iso_z(l.finished_at),
         } for l in threads]
     finally:
         session.close()
@@ -211,8 +213,8 @@ def run_plan(run_id: str, user: User = Depends(current_user)):
             "id": plan.id, "run_id": plan.run_id, "status": plan.status,
             "structured": plan.structured,
             "decided_by": plan.decided_by,
-            "decided_at": plan.decided_at.isoformat() if plan.decided_at else None,
-            "created_at": plan.created_at.isoformat() if plan.created_at else None,
+            "decided_at": iso_z(plan.decided_at),
+            "created_at": iso_z(plan.created_at),
             "steps": [{
                 "id": s.id, "index": s.index, "title": s.title,
                 "description": s.description, "repo": s.repo, "files": s.files,
@@ -238,7 +240,22 @@ def run_evidence(run_id: str, user: User = Depends(current_user)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if not package["plan_steps"]:
         raise HTTPException(status_code=404, detail="no evidence package yet")
-    package["sha256"] = delivery.evidence_sha256(package)
+    # W5-M1: once a PR is open, serve the hash the PR BODY pinned
+    # (PrLink.evidence), not a fresh rehash — post-open assembly drift
+    # (another thread finishing, a cost tick) would otherwise show a hash
+    # that doesn't match the audited ADO surface.
+    session = get_session()
+    try:
+        from app.db.models.delivery import PrLink
+
+        link = (session.query(PrLink)
+                .filter_by(run_id=run_id)
+                .order_by(PrLink.id.desc())
+                .first())
+        pinned = (link.evidence or {}).get("sha256") if link and link.evidence else None
+    finally:
+        session.close()
+    package["sha256"] = pinned or delivery.evidence_sha256(package)
     return package
 
 
@@ -282,8 +299,25 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
     except IntentNeedsConfirmation as exc:
         return {"status": "confirm", "intent": exc.intent.intent.value,
                 "card": f"{exc.intent.intent.value} — confirm?"}
+    except ValueError as exc:
+        # W3-L9: the gate's stale-stage/illegal-intent ValueError used to
+        # bubble as an unhandled 500. It's a state conflict — say so.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     kind = intent.intent
+    if kind == ActionKind.RESUME_RUN:
+        # W-B2: advertised for INTERRUPTED/FAILED runs but the branch never
+        # existed — the resume button was a no-op 200. Delegate to the same
+        # path POST /sessions/{id}/resume uses (row-locked, idempotent).
+        try:
+            resumed = await run_manager.resume_run(run_id, user.id)
+        except RuntimeError as exc:
+            # Prior container survived kill+force-stop — refusing is safer
+            # than double-mounting the session volume.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if resumed is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        return {"status": "ok", "intent": kind.value}
     if kind == ActionKind.STOP_RUN:
         await run_manager.stop_run(run_id)
     elif kind == ActionKind.ABANDON_RUN:
@@ -317,9 +351,23 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                 thread = session.get(Thread, thread_id)
                 spawned_mode = (thread.spawn_context or {}).get("mode") if thread else None
                 run_mode = session.get(Run, run_id).mode if session.get(Run, run_id) else None
+                thread_status = thread.status if thread else None
             finally:
                 session.close()
 
+            mode_switch = bool(
+                kind == ActionKind.SEND_MESSAGE and spawned_mode and run_mode
+                and spawned_mode != run_mode)
+            # W-H14: nudging a TERMINAL thread used to be log-only — the
+            # composer kept accepting text into a dead session and the
+            # message vanished. A mode switch survives (it chains a fresh
+            # blueprint on the prior session volume); a plain nudge is a 409.
+            if not mode_switch and thread_status in (
+                    "completed", "failed", "stopped", "replaced"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"thread is {thread_status} — the session is over; "
+                            "resume the run or start a new one"))
             if (
                 kind == ActionKind.SEND_MESSAGE
                 and spawned_mode
@@ -476,7 +524,10 @@ async def post_intent(run_id: str, body: IntentBody, request: Request,
                                 detail="no thread available for this run")
         if intent.thread_id and load_thread_for_run(run_id, intent.thread_id) is not None:
             thread_id = intent.thread_id
-        replacement = await run_manager.kill_replace_thread(run_id, thread_id)
+        try:
+            replacement = await run_manager.kill_replace_thread(run_id, thread_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         # The replacement's control subscription isn't up until its first
         # heartbeat — a nudge sent earlier is lost.
         await run_manager._wait_for_heartbeat(replacement.id)

@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.db.models.approval import Approval
 from app.db.models.run import Run
 from app.db.models.thread import Thread
 from app.orchestrator import run_manager as run_manager_mod
@@ -58,9 +59,49 @@ async def test_kill_replace_aborts_when_container_survives(session, make_user, m
     monkeypatch.setattr(run_manager_mod.sandbox_manager,
                         "wait_for_container_exit", lambda cid, timeout_s=15.0: False)
 
-    with pytest.raises(RuntimeError, match="survived kill"):
+    # W-H8: the abort is a ValueError now (the intent API maps it to a 422
+    # instead of a 500), and the thread must NOT be stamped "replaced" — the
+    # stamp only lands after the old container's exit is verified.
+    with pytest.raises(ValueError, match="survived kill"):
         await rm.kill_replace_thread("r1", "l1")
     assert spawned == []  # no replacement on a live old container
+    session.expire_all()
+    # The kill acked but the container won't die — "running" would show a
+    # live tile for a thread that can never heartbeat again. Failed is honest.
+    assert session.get(Thread, "l1").status == "failed"
+
+
+# ------------------------------------------------------------------- W-H5
+
+async def test_stop_run_stamps_pending_approvals_and_fans_out(session, make_user):
+    """W-H5: stopping a run strands its pending approval cards — the worker's
+    BLPOP is dead. The rows must be stamped (audit trail keeps 'stopped')
+    and every open console gets approval_resolved so the zombie card drops."""
+    u = make_user("a")
+    rm, _, relay, _ = _make_manager()
+    run = Run(id="r1", created_by=u.id, mode="ask", stage="investigating",
+              available_actions=[])
+    thread = Thread(id="l1", run_id="r1", persona="lead", status="running")
+    session.add_all([
+        run, thread,
+        Approval(id="ap-1", run_id="r1", thread_id="l1", kind="tool", payload={}),
+        # An already-decided card must NOT be re-stamped.
+        Approval(id="ap-2", run_id="r1", thread_id="l1", kind="tool", payload={},
+                 decision="deny", decided_at=datetime.now(UTC)),
+        # Another run's card is out of scope.
+        Approval(id="ap-3", run_id="r-other", thread_id="l9", kind="tool", payload={}),
+    ])
+    session.commit()
+
+    await rm.stop_run("r1")
+
+    session.expire_all()
+    assert session.get(Approval, "ap-1").decision == "stopped"
+    assert session.get(Approval, "ap-2").decision == "deny"  # untouched
+    assert session.get(Approval, "ap-3").decision is None    # untouched
+    resolved = [m for _, m in relay.fanouts if m.get("type") == "approval_resolved"]
+    assert resolved == [{"type": "approval_resolved", "approval_id": "ap-1",
+                         "decision": "stopped"}]
 
 
 # ------------------------------------------------------------------- A3

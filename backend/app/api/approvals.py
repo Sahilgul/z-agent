@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from app.core.deps import current_user
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.approval import Approval
 from app.db.models.run import Run
@@ -72,8 +73,8 @@ def pending(run_id: str | None = None, user: User = Depends(current_user)):
         now = datetime.now(UTC)
         return [{
             "id": a.id, "run_id": a.run_id, "thread_id": a.thread_id, "kind": a.kind,
-            "payload": a.payload, "created_at": a.created_at.isoformat(),
-            "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+            "payload": a.payload, "created_at": iso_z(a.created_at),
+            "expires_at": iso_z(a.expires_at),
         } for a in rows if not _expired(a, now)]
     finally:
         session.close()

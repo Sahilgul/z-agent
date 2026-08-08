@@ -701,6 +701,53 @@ def test_post_intent_switch_mode_422_without_mode(auth_client, session, make_use
     assert r.status_code == 422
 
 
+def test_post_intent_resume_run_dispatches(auth_client, session, make_user):
+    """W-B2: the advertised resume_run intent was a no-op 200 (the dispatch
+    branch didn't exist). It must delegate to run_manager.resume_run."""
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="interrupted",
+              # The gate checks the STORED legal move set — the interrupted
+              # stage advertises resume_run (services/runs.py).
+              available_actions=["edit_and_resend", "resume_run"])
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="stopped")
+    session.add_all([run, thread]); session.commit()
+    r = client.post("/runs/r1/intent", json={"intent": "resume_run", "source": "button"})
+    assert r.status_code == 200
+    assert r.json()["intent"] == "resume_run"
+    assert services["run_manager"].resumed == ["r1"]
+
+
+def test_post_intent_illegal_intent_is_409_not_500(auth_client, session, make_user):
+    """W3-L9: gate_intent's ValueError (intent not a legal move for the stage)
+    bubbled as an unhandled 500. It is a state conflict — a 409."""
+    client, _, _, user = auth_client
+    session.add(Run(id="r1", created_by=user.id, mode="ask", stage="completed")); session.commit()
+    r = client.post("/runs/r1/intent", json={"intent": "merge_pr", "source": "button", "confirmed": True})
+    assert r.status_code == 409
+
+
+def test_post_intent_nudge_terminal_thread_is_409(auth_client, session, make_user):
+    """W-H14: a nudge into a terminal thread used to be log-only — the
+    composer accepted text into a dead session and the message vanished."""
+    client, _, services, user = auth_client
+    run = Run(id="r1", created_by=user.id, mode="ask", stage="interrupted")
+    thread = Thread(id="l1", run_id="r1", persona="researcher", status="stopped")
+    session.add_all([run, thread]); session.commit()
+    r = client.post("/runs/r1/intent", json={"intent": "nudge", "source": "button", "thread_id": "l1"})
+    assert r.status_code == 409
+    assert services["run_manager"].nudged == []
+
+
+def test_run_serializer_includes_failure_reason(auth_client, session, make_user):
+    """W-H13: the failed run carries WHY so the UI banner survives a reload."""
+    client, _, _, user = auth_client
+    session.add(Run(id="r1", created_by=user.id, mode="ask", stage="failed",
+                    failure_reason="sandbox image pull timed out")); session.commit()
+    r = client.get("/runs/r1")
+    assert r.status_code == 200
+    assert r.json()["failure_reason"] == "sandbox image pull timed out"
+
+
 def test_runs_require_auth(app_client):
     client, _, _ = app_client
     assert client.get("/runs").status_code == 401
@@ -734,9 +781,11 @@ def test_thread_pin(auth_client, session, make_user):
     run = Run(id="r1", created_by=user.id, mode="ask", stage="investigating")
     thread = Thread(id="l1", run_id="r1", persona="researcher", status="running")
     session.add_all([run, thread]); session.commit()
-    r = client.post("/threads/l1/pin", json={"run_id": "r1"})
+    r = client.post("/threads/l1/pin", json={"run_id": "r1", "note": "worth keeping"})
     assert r.status_code == 200
-    assert services["relay"].published
+    # W5-L2: the route goes through run_manager.pin_finding (durable event),
+    # not a bare relay flash.
+    assert services["run_manager"].pinned == [("r1", "l1", "worth keeping")]
 
 
 def test_thread_action_run_not_found(auth_client, session, make_user):
@@ -1221,6 +1270,24 @@ def test_run_evidence_returns_package_with_hash(auth_client, session, make_user)
     assert len(body["sha256"]) == 64
 
 
+def test_run_evidence_serves_the_pr_pinned_hash(auth_client, session, make_user):
+    """W5-M1: once the PR is open the overlay must show the hash the PR BODY
+    pins (PrLink.evidence), not a per-fetch rehash that can drift."""
+    from app.db.models.delivery import PrLink
+    client, _, _, user = auth_client
+    session.add(Run(id="r1", created_by=user.id, mode="development", stage="pr_ready", title="t"))
+    session.add(Thread(id="l1", run_id="r1", persona="developer", status="completed"))
+    session.add(Plan(run_id="r1", status="approved",
+                     structured={"title": "P", "steps": [{"index": 0, "title": "s0", "status": "done"}]}))
+    pinned = "f" * 64
+    session.add(PrLink(run_id="r1", repo="LivekitScribe", branch="feat/x",
+                       ado_pr_id=42, status="open", evidence={"sha256": pinned}))
+    session.commit()
+    r = client.get("/runs/r1/evidence")
+    assert r.status_code == 200
+    assert r.json()["sha256"] == pinned
+
+
 # --------------------------------------------------------------- knowledge api
 def test_knowledge_draft_phi_checkpoint(auth_client):
     client, _, _, _ = auth_client
@@ -1237,6 +1304,14 @@ def test_knowledge_pending_and_approve_flow(auth_client, session):
     pending = client.get("/knowledge/pending").json()
     assert len(pending) == 1
     item_id = pending[0]["id"]
+    # W9-M5: the inbox carries the proposer's suggested scope.
+    assert pending[0]["proposed_scope"] == "global"
+    # W9-M6: repo scope validates against the registry — unregistered 422s.
+    r = client.post(f"/knowledge/{item_id}/approve", json={"scope": "repo", "repo": "ServerApp"})
+    assert r.status_code == 422
+    from app.db.models.repo import Repo
+    session.add(Repo(name="ServerApp", integration_branch="main", status="ready"))
+    session.commit()
     r = client.post(f"/knowledge/{item_id}/approve", json={"scope": "repo", "repo": "ServerApp"})
     assert r.status_code == 200
     assert r.json()["scope"] == "repo" and r.json()["status"] == "approved"

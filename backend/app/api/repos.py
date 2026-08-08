@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.core.deps import current_user
+from app.core.timefmt import iso_z
 from app.db.base import get_session
 from app.db.models.repo import Repo, RepoStatus
 from app.db.models.user import User
@@ -41,7 +42,7 @@ def _serialize(repo: Repo) -> dict:
     return {
         "id": repo.id, "name": repo.name, "integration_branch": repo.integration_branch,
         "status": repo.status, "status_detail": repo.status_detail,
-        "last_fetch_at": repo.last_fetch_at.isoformat() if repo.last_fetch_at else None,
+        "last_fetch_at": iso_z(repo.last_fetch_at),
         "last_fetch_head": repo.last_fetch_head,
     }
 
@@ -78,10 +79,13 @@ async def add_repo(body: AddRepoBody, request: Request, user: User = Depends(cur
     # live one is a duplicate — refuse rather than silently re-clone into golden.
     session = get_session()
     try:
+        # W9-L9: .first(), not .one_or_none() — the OR'd filter can match TWO
+        # rows (name collision on one, url on another) and MultipleResultsFound
+        # escaped as a 500 instead of the intended 409.
         dupe = session.query(Repo).filter(
             ((Repo.remote_url == url) | (Repo.name == body.name))
             & (Repo.status != RepoStatus.ARCHIVED)
-        ).one_or_none()
+        ).first()
         if dupe is not None:
             raise HTTPException(
                 status_code=409,

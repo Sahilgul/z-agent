@@ -131,3 +131,33 @@ def test_mark_promoted_pins_run(session, make_user):
     assert out["status"] == "promoted" and out["promoted_run_id"] == "run-123"
     with pytest.raises(ideas.IdeasError):
         ideas.mark_promoted(999, "run-x")
+
+
+def test_claim_promotion_races_to_exactly_one_winner(session, make_user):
+    """W9-H1: the second claim on an open thread must lose — two concurrent
+    promotes mint exactly one run; the loser sees AlreadyPromotedError (409)."""
+    _, t = _thread(session, make_user)
+    ideas.claim_promotion(t["id"])
+    with pytest.raises(ideas.AlreadyPromotedError):
+        ideas.claim_promotion(t["id"])
+    out = ideas.mark_promoted(t["id"], "run-1")
+    assert out["status"] == "promoted"
+    # A claimed-then-finalized thread stays claimed.
+    with pytest.raises(ideas.AlreadyPromotedError):
+        ideas.claim_promotion(t["id"])
+
+
+def test_release_promotion_claim_unwinds_a_failed_run_create(session, make_user):
+    _, t = _thread(session, make_user)
+    ideas.claim_promotion(t["id"])
+    ideas.release_promotion_claim(t["id"])
+    # After release the thread is claimable again (status restored).
+    ideas.claim_promotion(t["id"])
+    with pytest.raises(ideas.AlreadyPromotedError):
+        ideas.claim_promotion(t["id"])
+
+
+def test_claim_promotion_missing_thread_raises_not_found(session):
+    with pytest.raises(ideas.IdeasError) as exc:
+        ideas.claim_promotion(999)
+    assert not isinstance(exc.value, ideas.AlreadyPromotedError)
