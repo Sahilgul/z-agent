@@ -743,9 +743,13 @@ class RunManager:
 
         Refuses to resurrect a terminal thread (stopped/replaced/timed_out/
         completed/failed): the old code set status="running" unconditionally,
-        which flipped a dead thread back to "running" and stranded the run
+        which flipped a finished thread back to "running" and stranded the run
         while leaking the capacity slot (C-16). Only ACTIVE threads are nudged;
-        a missing thread stays a no-op (the control nudge goes nowhere)."""
+        a missing thread stays a no-op (the control nudge goes nowhere).
+        This is defense-in-depth, NOT a user-facing dead end: the intent layer
+        (api/runs.py) chains a FRESH lane on the prior session volume before
+        a nudge could ever reach a terminal thread — there are no dead
+        sessions (design philosophy §1)."""
         from app.orchestrator.semaphores import ACTIVE_STATUSES
         # input_required is NOT terminal: the worker is alive in its idle
         # nudge loop (blocked-escalation) or queued behind an approval wait —
